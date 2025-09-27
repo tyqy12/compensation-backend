@@ -1,0 +1,102 @@
+spring:
+  # 数据库配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://${DB_HOST}:${DB_PORT}/compensation_prod?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&useSSL=true
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    hikari:
+      maximum-pool-size: 100
+      minimum-idle: 20
+      idle-timeout: 300000
+      max-lifetime: 600000
+      connection-timeout: 30000
+
+  # Redis配置
+  data:
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT}
+      database: 2
+      password: ${REDIS_PASSWORD}
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 50
+          max-wait: -1ms
+          max-idle: 20
+          min-idle: 5
+
+  # RabbitMQ配置
+  rabbitmq:
+    host: ${RABBITMQ_HOST}
+    port: ${RABBITMQ_PORT}
+    username: ${RABBITMQ_USERNAME}
+    password: ${RABBITMQ_PASSWORD}
+    virtual-host: /compensation-prod
+
+# JWT配置
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: 86400000
+  refresh-expiration: 604800000
+
+# Alipay配置（生产环境）
+alipay:
+  app-id: ${ALIPAY_APP_ID}
+  server-url: https://openapi.alipay.com/gateway.do
+  private-key: ${ALIPAY_PRIVATE_KEY}
+  public-key: ${ALIPAY_PUBLIC_KEY}
+  charset: UTF-8
+  sign-type: RSA2
+  format: json
+  notify-url: https://compensation.yiyundao.com/api/alipay/notify
+  return-url: https://compensation.yiyundao.com/api/alipay/return
+
+# 企业微信配置
+wechat:
+  corp-id: ${WECHAT_CORP_ID}
+  corp-secret: ${WECHAT_CORP_SECRET}
+  agent-id: ${WECHAT_AGENT_ID}
+
+# 钉钉配置
+dingtalk:
+  app-key: ${DINGTALK_APP_KEY}
+  app-secret: ${DINGTALK_APP_SECRET}
+
+# 飞书配置
+feishu:
+  app-id: ${FEISHU_APP_ID}
+  app-secret: ${FEISHU_APP_SECRET}
+
+# 短信配置
+sms:
+  access-key-id: ${SMS_ACCESS_KEY_ID}
+  access-key-secret: ${SMS_ACCESS_KEY_SECRET}
+  sign-name: 薪酬助手
+  template-code: ${SMS_TEMPLATE_CODE}
+
+# 加密配置
+encryption:
+  sm4:
+    key: ${SM4_KEY}
+  aes:
+    key: ${AES_KEY}
+
+# 日志配置
+logging:
+  level:
+    root: WARN
+    com.yiyundao.compensation: INFO
+  file:
+    name: /var/log/compensation/compensation-prod.log
+    max-size: 100MB
+    max-history: 90
+
+# 服务器配置
+server:
+  port: 8080
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 10

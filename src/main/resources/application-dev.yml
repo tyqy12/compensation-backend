@@ -1,0 +1,84 @@
+spring:
+  # 数据库配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    url: jdbc:mysql://47.108.70.177:3306/s06?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&useSSL=false&allowPublicKeyRetrieval=true
+    username: s06
+    password: 123456
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 5
+      idle-timeout: 300000
+      max-lifetime: 600000
+      connection-timeout: 30000
+
+  # Redis配置
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      database: 0
+      password:
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 10
+          max-wait: -1ms
+          max-idle: 8
+          min-idle: 0
+
+  # RabbitMQ配置
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
+
+# JWT配置
+jwt:
+  secret: compensation-assistant-dev-secret-key-2024
+  expiration: 86400000
+  refresh-expiration: 604800000
+
+# Alipay配置（开发环境 - 沙箱）
+alipay:
+  app-id: your_sandbox_app_id
+  server-url: https://openapi.alipaydev.com/gateway.do
+  private-key: your_private_key
+  public-key: your_public_key
+  charset: UTF-8
+  sign-type: RSA2
+  format: json
+  notify-url: http://localhost:8080/api/alipay/notify
+  return-url: http://localhost:8080/api/alipay/return
+
+# 企业微信配置
+wechat:
+  corp-id: wwa45e13d8804607c0
+  corp-secret: vGSzMAl6EPPHvxnn7JRH7hXqqpP_jg0jfmP-k6-3nGk
+  agent-id: 1000003
+
+# 钉钉配置
+dingtalk:
+  app-key: your_app_key
+  app-secret: your_app_secret
+
+# 飞书配置
+feishu:
+  app-id: your_app_id
+  app-secret: your_app_secret
+
+# 短信配置
+sms:
+  access-key-id: your_access_key_id
+  access-key-secret: your_access_key_secret
+  sign-name: 薪酬助手
+  template-code: SMS_123456789
+
+# 加密配置
+encryption:
+  sm4:
+    key: your_sm4_key_32_chars_long_here
+  aes:
+    key: your_aes_key_32_chars_long_here
