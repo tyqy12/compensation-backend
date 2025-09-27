@@ -59,3 +59,8 @@ server:
   compression:
     enabled: true
     min-response-size: 1024
+
+# Migrations (disabled by default; enable per profile)
+migration:
+  audit-log:
+    enabled: false

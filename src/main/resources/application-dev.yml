@@ -82,3 +82,7 @@ encryption:
     key: your_sm4_key_32_chars_long_here
   aes:
     key: your_aes_key_32_chars_long_here
+
+migration:
+  audit-log:
+    enabled: true
