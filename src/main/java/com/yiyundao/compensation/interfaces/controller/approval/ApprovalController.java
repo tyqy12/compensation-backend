@@ -31,7 +31,7 @@ public class ApprovalController {
 
     // 发起审批
     @PostMapping
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER') or hasAuthority('approval:start')")
     public ApiResponse<Long> start(@Valid @RequestBody StartWorkflowRequest req) {
         WorkflowType type = WorkflowType.fromCode(req.getWorkflowType());
         Long id = approvalEngine.startWorkflow(type, req.getBusinessKey(), req.getBusinessType(),
@@ -41,7 +41,7 @@ public class ApprovalController {
 
     // 审批通过
     @PostMapping("/{id}/approve")
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:approve')")
     public ApiResponse<Void> approve(@PathVariable Long id, @Valid @RequestBody ApprovalDecisionRequest req) {
         approvalEngine.processApproval(id, req.getApproverId(), ApprovalStatus.APPROVED, req.getComment());
         return ApiResponse.success(null);
@@ -49,7 +49,7 @@ public class ApprovalController {
 
     // 审批拒绝
     @PostMapping("/{id}/reject")
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:reject')")
     public ApiResponse<Void> reject(@PathVariable Long id, @Valid @RequestBody ApprovalDecisionRequest req) {
         approvalEngine.processApproval(id, req.getApproverId(), ApprovalStatus.REJECTED, req.getComment());
         return ApiResponse.success(null);
@@ -57,7 +57,7 @@ public class ApprovalController {
 
     // 撤销流程（仅发起人）
     @PostMapping("/{id}/cancel")
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER') or hasAuthority('approval:cancel')")
     public ApiResponse<Void> cancel(@PathVariable Long id, @Valid @RequestBody CancelWorkflowRequest req) {
         approvalEngine.cancelWorkflow(id, req.getOperatorId(), req.getReason());
         return ApiResponse.success(null);
@@ -65,7 +65,7 @@ public class ApprovalController {
 
     // 我的待办
     @GetMapping("/pending")
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:read')")
     public ApiResponse<List<ApprovalWorkflowVO>> pending(@RequestParam Long approverId) {
         List<ApprovalWorkflow> list = approvalEngine.getPendingWorkflows(approverId);
         return ApiResponse.success(list.stream().map(ApprovalWorkflowVO::from).collect(Collectors.toList()));
@@ -81,7 +81,7 @@ public class ApprovalController {
 
     // 流程详情
     @GetMapping("/{id}")
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:read')")
     public ApiResponse<Map<String, Object>> detail(@PathVariable Long id) {
         ApprovalWorkflow w = approvalEngine.getById(id);
         Map<String, Object> data = approvalEngine.getWorkflowData(id);
@@ -94,10 +94,9 @@ public class ApprovalController {
 
     // 步骤列表
     @GetMapping("/{id}/steps")
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:read')")
     public ApiResponse<List<ApprovalStepVO>> steps(@PathVariable Long id) {
         List<ApprovalStep> steps = approvalStepService.listByWorkflow(id);
         return ApiResponse.success(steps.stream().map(ApprovalStepVO::from).collect(Collectors.toList()));
     }
 }
-

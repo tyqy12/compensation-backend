@@ -161,4 +161,15 @@ jwt.secret: your-secret-key-at-least-32-chars
 - ✅ 安全的密码存储 (BCrypt)
 - ✅ CORS 和 CSRF 防护
 
+### 审批模块权限建议
+- 角色：`ADMIN`、`MANAGER`、`APPROVER`
+- 权限串（authorities）：
+  - `approval:start` 发起审批
+  - `approval:approve` 审批通过
+  - `approval:reject` 审批拒绝
+  - `approval:cancel` 撤销流程
+  - `approval:read` 查看审批与步骤
+
+说明：JWT `authorities` 载荷中可同时包含 `ROLE_xxx` 与自定义权限串，控制器通过 `@PreAuthorize` 校验（`hasRole('...')`/`hasAuthority('...')`）。
+
 项目初始化完成！可以开始下一阶段的开发工作。
