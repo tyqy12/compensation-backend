@@ -64,3 +64,8 @@ server:
 migration:
   audit-log:
     enabled: false
+
+notification:
+  retry:
+    max: 3
+    backoff-ms: 500

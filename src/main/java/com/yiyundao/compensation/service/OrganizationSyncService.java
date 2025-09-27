@@ -3,6 +3,7 @@ package com.yiyundao.compensation.service;
 import com.yiyundao.compensation.interfaces.adapter.OrganizationAdapter;
 import com.yiyundao.compensation.dto.OrganizationSyncResult;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -20,14 +21,22 @@ import java.util.stream.Collectors;
 public class OrganizationSyncService {
 
     private final Map<String, OrganizationAdapter> adapters;
+    private final NotificationService notificationService;
+
+    @Value("${notification.retry.max:3}")
+    private int notifyRetryMax;
+
+    @Value("${notification.retry.backoff-ms:500}")
+    private long notifyBackoffMs;
 
     @Autowired
-    public OrganizationSyncService(List<OrganizationAdapter> adapterList) {
+    public OrganizationSyncService(List<OrganizationAdapter> adapterList, NotificationService notificationService) {
         this.adapters = adapterList.stream()
                 .collect(Collectors.toMap(
                     OrganizationAdapter::getPlatformType,
                     adapter -> adapter
                 ));
+        this.notificationService = notificationService;
         log.info("已注册组织同步适配器: {}", adapters.keySet());
     }
 
@@ -125,12 +134,26 @@ public class OrganizationSyncService {
      */
     public void sendNotification(String platformType, String userId, String message) {
         OrganizationAdapter adapter = adapters.get(platformType);
-        if (adapter != null) {
+        if (adapter == null) {
+            log.warn("未找到平台适配器: {}，使用回退通知", platformType);
+            notificationService.sendFallbackNotification(platformType, userId, message);
+            return;
+        }
+        Exception last = null;
+        for (int i = 1; i <= Math.max(1, notifyRetryMax); i++) {
             try {
                 adapter.sendApprovalNotification(userId, message);
+                if (i > 1) {
+                    log.info("通知重试第{}次成功: platform={}, userId={}", i - 1, platformType, userId);
+                }
+                return;
             } catch (Exception e) {
-                log.error("发送平台通知失败: platform={}, userId={}", platformType, userId, e);
+                last = e;
+                log.warn("发送平台通知失败(第{}次): platform={}, userId={}, err={}", i, platformType, userId, e.getMessage());
+                try { Thread.sleep(Math.max(0, notifyBackoffMs)); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             }
         }
+        log.error("通知重试耗尽，使用回退策略: platform={}, userId={}", platformType, userId, last);
+        notificationService.sendFallbackNotification(platformType, userId, message);
     }
 }

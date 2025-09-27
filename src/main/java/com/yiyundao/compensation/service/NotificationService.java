@@ -31,4 +31,14 @@ public class NotificationService {
                 batch.getBatchNo(), batch.getSuccessCount(), batch.getFailedCount());
         // TODO: 实现批次通知逻辑
     }
+
+    /**
+     * 平台通知失败后的回退通知
+     * 可扩展为：短信、邮件、站内信、多平台广播等
+     */
+    @Async
+    public void sendFallbackNotification(String platformType, String platformUserId, String message) {
+        log.warn("平台通知失败，启用回退通知: platform={}, userId={}, message={}", platformType, platformUserId, message);
+        // TODO: 集成 SMS/Email 提供商
+    }
 }

@@ -30,6 +30,12 @@ feishu:
 - POST `/api/system/org/sync?platform=wechat|dingtalk|feishu|all`
   - Triggers org sync for a specific platform or all
   - Auth: `ROLE_ADMIN|ROLE_MANAGER` or `org:sync`
+- POST `/api/system/org/sync-async?platform=...`
+  - Starts an async sync task; returns task id
+  - Auth: `ROLE_ADMIN|ROLE_MANAGER` or `org:sync`
+- GET `/api/system/org/sync-task/{id}`
+  - Returns task status
+  - Auth: `ROLE_ADMIN|ROLE_MANAGER` or `org:read`
 - GET `/api/system/org/platforms`
   - Returns supported platform list
   - Auth: authenticated
@@ -40,4 +46,3 @@ feishu:
 ## Notes
 - Adapters currently include basic token retrieval and placeholders for user/department sync; extend as needed.
 - ApprovalEngine sends notifications using OrganizationSyncService; adapter implementations should implement message sending for production.
-
