@@ -34,18 +34,16 @@ com.yiyundao.compensation/
 │   ├── exception/ (BusinessException, GlobalExceptionHandler)
 │   └── utils/
 ├── interfaces/
-│   └── controller/ (SystemController 等)
+│   └── controller/ (SystemController、Employee/Payment APIs 等)
 ├── modules/
-│   ├── employee/
-│   │   └── service/ + impl/ (EmployeeService, EmployeeServiceImpl)
-│   ├── payment/
-│   │   └── service/ + impl/ (PaymentRecordService, PaymentBatchService, …)
-│   ├── approval/
-│   │   └── service/ + impl/ (ApprovalStepService, …)
-│   └── user/
-│       └── service/ + impl/ (SysUserService, …)
-├── entity/ (BaseEntity, Employee, PaymentRecord, …)  [后续逐步迁移到各模块]
-├── mapper/ (MyBatis-Plus Mapper)                      [后续迁移至 infrastructure/dao]
+│   ├── employee/ entity/ + service/ + impl/
+│   ├── payment/  entity/ + service/ + impl/
+│   ├── approval/ entity/ + service/ + impl/
+│   ├── audit/    entity/ + service/ + impl/
+│   └── user/     entity/ + service/ + impl/
+├── infrastructure/
+│   └── dao/ (MyBatis‑Plus Mapper 接口)
+├── entity/ (BaseEntity 仅保留基类)
 └── security/ (JwtTokenProvider, JwtAuthenticationFilter)
 ```
 
@@ -98,6 +96,11 @@ com.yiyundao.compensation/
 - [x] 支付宝集成服务 (AlipayService)
 - [x] 组织同步适配器 (OrganizationAdapter)
 - [x] 审批流程引擎 (ApprovalEngine)
+
+### 补充：持久化层迁移（已完成）
+- [x] 实体迁移至 `modules/*/entity`（仅保留 `entity/BaseEntity` 基类）
+- [x] Mapper 迁移至 `infrastructure/dao` 并更新 `@MapperScan`
+- [x] `mybatis-plus.type-aliases-package` 调整为 `com.yiyundao.compensation.modules.**.entity`
 
 ### Phase 3: 平台集成 (第7-9周)
 - [ ] 企业微信集成 (WeChatIntegration)

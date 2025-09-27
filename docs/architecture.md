@@ -14,8 +14,10 @@ This service adopts a feature-first, high-cohesion package structure. Business c
 - modules/
   - <feature>/service + impl/: Business services per module (e.g., employee, payment, approval, user)
   - audit/: audit service is here to keep write concerns together
-- entity/, mapper/
-  - Persisted domain objects (PO) and MyBatis‑Plus mappers (temporary location; see Migration)
+- modules/*/entity
+  - Persisted domain objects (PO) live with feature modules
+- infrastructure/dao
+  - MyBatis‑Plus mapper interfaces (scanned via @MapperScan)
 - adapter/
   - External platform adapters (e.g., WeChat), can be considered an “interfaces/adapter” slice
 
@@ -38,14 +40,15 @@ Guidelines
 - Services expose intent‑oriented methods (create, bindPlatformUser, batchImport, …) and enforce invariants.
 - Reuse common exceptions; let GlobalExceptionHandler shape API errors.
 
-## Migration Plan (incremental)
-1) Move mappers to infrastructure/dao
-   - Package: `com.yiyundao.compensation.infrastructure.dao` (per module subpackages allowed)
-   - Update `@MapperScan` in common/config/MyBatisPlusConfig
-2) Move persisted entities to module PO or `domain` (choose per team preference)
-   - If placed under `modules/<feature>/entity`, set `mybatis-plus.type-aliases-package`
+## Migration Status
+1) Mappers relocated to infrastructure/dao
+   - Package: `com.yiyundao.compensation.infrastructure.dao`
+   - `@MapperScan` updated in `common/config/MyBatisPlusConfig`
+2) Entities colocated under modules as PO
+   - Location: `modules/<feature>/entity`
+   - `mybatis-plus.type-aliases-package` set to `com.yiyundao.compensation.modules.**.entity`
 3) Adapters
-   - Consider relocating adapter/* to interfaces/adapter/*; keep external client code under infrastructure/client
+   - Still under `adapter/`; evaluate move to `interfaces/adapter/` later
 4) Configuration remains in common/config; shared helpers in common/utils
 
 ## Naming & Conventions
