@@ -52,13 +52,17 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
                 workflow.setWorkflowData(objectMapper.writeValueAsString(workflowData));
             }
 
-            save(workflow);
-
+            // Generate steps first so we can persist workflow with non-null total_steps
             List<ApprovalStep> steps = generateApprovalSteps(workflow, workflowType, workflowData);
             workflow.setTotalSteps(steps.size());
-
             if (!steps.isEmpty()) {
                 workflow.setCurrentApproverId(steps.get(0).getApproverId());
+            }
+
+            // Insert workflow now that all non-nullable fields are set
+            save(workflow);
+
+            if (!steps.isEmpty()) {
                 for (ApprovalStep step : steps) {
                     step.setWorkflowId(workflow.getId());
                     approvalStepService.save(step);
@@ -66,7 +70,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
                 sendApprovalNotification(steps.get(0));
             }
 
-            updateById(workflow);
+            // No further updates required here since we inserted with final values
             return workflow.getId();
 
         } catch (Exception e) {
