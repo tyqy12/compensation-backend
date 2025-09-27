@@ -12,6 +12,7 @@ import com.yiyundao.compensation.modules.approval.entity.ApprovalStep;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.service.ApprovalEngine;
 import com.yiyundao.compensation.modules.approval.service.ApprovalStepService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -28,38 +29,99 @@ public class ApprovalController {
 
     private final ApprovalEngine approvalEngine;
     private final ApprovalStepService approvalStepService;
+    private final com.yiyundao.compensation.modules.audit.service.AuditLogService auditLogService;
 
     // 发起审批
     @PostMapping
     @PreAuthorize("hasAnyRole('ADMIN','MANAGER') or hasAuthority('approval:start')")
-    public ApiResponse<Long> start(@Valid @RequestBody StartWorkflowRequest req) {
+    public ApiResponse<Long> start(@Valid @RequestBody StartWorkflowRequest req, HttpServletRequest request) {
+        long begin = System.currentTimeMillis();
         WorkflowType type = WorkflowType.fromCode(req.getWorkflowType());
         Long id = approvalEngine.startWorkflow(type, req.getBusinessKey(), req.getBusinessType(),
                 req.getInitiatorId(), req.getWorkflowData());
+        auditLogService.record(
+                "APPROVAL_START",
+                request.getMethod(),
+                request.getRequestURI(),
+                request.getRemoteAddr(),
+                request.getHeader("User-Agent"),
+                "APPROVAL",
+                req.getBusinessKey(),
+                request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : null,
+                null,
+                id != null ? ("WID=" + id) : "FAILED",
+                null,
+                System.currentTimeMillis() - begin
+        );
         return ApiResponse.success(id);
     }
 
     // 审批通过
     @PostMapping("/{id}/approve")
     @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:approve')")
-    public ApiResponse<Void> approve(@PathVariable Long id, @Valid @RequestBody ApprovalDecisionRequest req) {
+    public ApiResponse<Void> approve(@PathVariable Long id, @Valid @RequestBody ApprovalDecisionRequest req, HttpServletRequest request) {
+        long begin = System.currentTimeMillis();
         approvalEngine.processApproval(id, req.getApproverId(), ApprovalStatus.APPROVED, req.getComment());
+        auditLogService.record(
+                "APPROVAL_APPROVE",
+                request.getMethod(),
+                request.getRequestURI(),
+                request.getRemoteAddr(),
+                request.getHeader("User-Agent"),
+                "APPROVAL",
+                String.valueOf(id),
+                request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : null,
+                null,
+                "OK",
+                null,
+                System.currentTimeMillis() - begin
+        );
         return ApiResponse.success(null);
     }
 
     // 审批拒绝
     @PostMapping("/{id}/reject")
     @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:reject')")
-    public ApiResponse<Void> reject(@PathVariable Long id, @Valid @RequestBody ApprovalDecisionRequest req) {
+    public ApiResponse<Void> reject(@PathVariable Long id, @Valid @RequestBody ApprovalDecisionRequest req, HttpServletRequest request) {
+        long begin = System.currentTimeMillis();
         approvalEngine.processApproval(id, req.getApproverId(), ApprovalStatus.REJECTED, req.getComment());
+        auditLogService.record(
+                "APPROVAL_REJECT",
+                request.getMethod(),
+                request.getRequestURI(),
+                request.getRemoteAddr(),
+                request.getHeader("User-Agent"),
+                "APPROVAL",
+                String.valueOf(id),
+                request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : null,
+                null,
+                "OK",
+                null,
+                System.currentTimeMillis() - begin
+        );
         return ApiResponse.success(null);
     }
 
     // 撤销流程（仅发起人）
     @PostMapping("/{id}/cancel")
     @PreAuthorize("hasAnyRole('ADMIN','MANAGER') or hasAuthority('approval:cancel')")
-    public ApiResponse<Void> cancel(@PathVariable Long id, @Valid @RequestBody CancelWorkflowRequest req) {
+    public ApiResponse<Void> cancel(@PathVariable Long id, @Valid @RequestBody CancelWorkflowRequest req, HttpServletRequest request) {
+        long begin = System.currentTimeMillis();
         approvalEngine.cancelWorkflow(id, req.getOperatorId(), req.getReason());
+        auditLogService.record(
+                "APPROVAL_CANCEL",
+                request.getMethod(),
+                request.getRequestURI(),
+                request.getRemoteAddr(),
+                request.getHeader("User-Agent"),
+                "APPROVAL",
+                String.valueOf(id),
+                request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : null,
+                null,
+                "OK",
+                null,
+                System.currentTimeMillis() - begin
+        );
         return ApiResponse.success(null);
     }
 
