@@ -69,6 +69,9 @@ com.yiyundao.compensation/
 - 系统：
   - `GET /api/system/health` 健康检查
   - `GET /api/system/info` 系统信息
+  - `POST /api/system/org/sync?platform=wechat|dingtalk|feishu|all` 组织同步（需 ADMIN/MANAGER 或 org:sync）
+  - `GET /api/system/org/platforms` 支持平台列表
+  - `GET /api/system/org/check?platform=...` 平台连接检查（需 ADMIN/MANAGER 或 org:read）
 - 员工：
   - `GET /api/employee` 分页（支持 keyword、department、status、platformType、managerId、sortBy、order）
   - `POST /api/employee` 创建；`PUT /api/employee/{id}` 更新
@@ -113,10 +116,10 @@ com.yiyundao.compensation/
 - [x] `mybatis-plus.type-aliases-package` 调整为 `com.yiyundao.compensation.modules.**.entity`
 
 ### Phase 3: 平台集成 (第7-9周)
-- [ ] 企业微信集成 (WeChatIntegration)
-- [ ] 钉钉集成 (DingTalkIntegration)
-- [ ] 飞书集成 (FeishuIntegration)
-- [ ] 通知服务 (NotificationService)
+- [x] 企业微信适配器骨架 + 同步与连接检查接口
+- [x] 钉钉适配器骨架 + 同步与连接检查接口
+- [x] 飞书适配器骨架 + 同步与连接检查接口
+- [ ] 通知服务完善（路由到各平台、重试）
 
 ### Phase 4: 管理功能 (第10-11周)
 - [ ] 离线员工管理界面

@@ -20,6 +20,7 @@ This service adopts a feature-first, high-cohesion package structure. Business c
   - MyBatis‑Plus mapper interfaces (scanned via @MapperScan)
 - interfaces/adapter/
   - External platform adapters (e.g., WeChat), registered as Spring components
+  - Implementations: WeChatOrganizationAdapter, DingTalkOrganizationAdapter, FeishuOrganizationAdapter
 
 ## Layering Model
 - Interfaces (input/output): Web controllers, DTO/VO, and external callbacks
