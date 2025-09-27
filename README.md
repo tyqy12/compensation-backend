@@ -172,4 +172,6 @@ jwt.secret: your-secret-key-at-least-32-chars
 
 说明：JWT `authorities` 载荷中可同时包含 `ROLE_xxx` 与自定义权限串，控制器通过 `@PreAuthorize` 校验（`hasRole('...')`/`hasAuthority('...')`）。
 
+更多见：docs/security.md
+
 项目初始化完成！可以开始下一阶段的开发工作。
