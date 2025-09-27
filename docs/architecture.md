@@ -25,7 +25,7 @@ This service adopts a feature-first, high-cohesion package structure. Business c
 - Interfaces (input/output): Web controllers, DTO/VO, and external callbacks
 - Application (optional): Use cases that orchestrate multiple services; currently merged into module services
 - Domain/Modules: Core business services, policies, aggregates; placed under `modules/<feature>`
-- Infrastructure: DB mappers, clients, integration details; currently `mapper/`, future `infrastructure/dao` and `infrastructure/client`
+- Infrastructure: DB mappers, clients, integration details; located under `infrastructure/dao` and future `infrastructure/client`
 - Common/Cross‑cutting: configuration, exception handling, response, utils
 
 ## Module Anatomy (example: employee)
@@ -47,9 +47,14 @@ Guidelines
 2) Entities colocated under modules as PO
    - Location: `modules/<feature>/entity`
    - `mybatis-plus.type-aliases-package` set to `com.yiyundao.compensation.modules.**.entity`
-3) Adapters
-   - Still under `adapter/`; evaluate move to `interfaces/adapter/` later
+3) Adapters relocated to interfaces/adapter
+   - Package: `com.yiyundao.compensation.interfaces.adapter` (+ impl/)
 4) Configuration remains in common/config; shared helpers in common/utils
+
+## Security Conventions
+- Roles: `ADMIN`, `MANAGER`, `APPROVER`
+- Authorities: `approval:start|approve|reject|cancel|read`
+- Controllers use method security via `@PreAuthorize` with `hasRole`/`hasAuthority`
 
 ## Naming & Conventions
 - Packages: lower case. Classes: UpperCamelCase. Methods/fields: lowerCamelCase.

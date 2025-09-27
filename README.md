@@ -65,7 +65,7 @@ com.yiyundao.compensation/
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-### 常用端点（更多见 docs/payment-api.md 与 docs/architecture.md）
+### 常用端点（更多见 docs/payment-api.md、docs/approval-api.md 与 docs/architecture.md）
 - 系统：
   - `GET /api/system/health` 健康检查
   - `GET /api/system/info` 系统信息
@@ -102,7 +102,7 @@ com.yiyundao.compensation/
 
 ### Phase 2: 核心业务服务 (第3-6周) 进行中
 - [x] 业务服务接口与实现重构（Service 接口 + Impl 实现）
-- [ ] 业务 Controller 编写（员工/支付/审批等）
+- [x] 业务 Controller 编写（员工/支付/审批等）
 - [x] 支付宝集成服务 (AlipayService)
 - [x] 组织同步适配器 (OrganizationAdapter)
 - [x] 审批流程引擎 (ApprovalEngine)
