@@ -56,4 +56,4 @@ Base path: `/api/approval/workflows`
 - Security enforced via `@PreAuthorize`; supply roles or `authorities` in JWT claims.
 - Status enums: workflow/step use `ApprovalStatus` codes: `pending|approved|rejected|cancelled|skipped`.
 - Types: `WorkflowType` codes: `BATCH|ADHOC|OFFLINE`.
-
+- Audit: approval actions write to `audit_log` table. Ensure columns include `create_time, update_time, create_by, update_by, deleted, version`. If not, apply migration: `src/main/resources/sql/migrations/2025-09-27__audit_log_add_columns.sql`.
