@@ -17,11 +17,6 @@ DB_NAME=${DB_NAME:-}
 DB_USER=${DB_USER:-}
 DB_PASSWORD=${DB_PASSWORD:-}
 
-if ! command -v mysql >/dev/null 2>&1; then
-  echo "[!] mysql client not found in PATH" >&2
-  exit 1
-fi
-
 if [[ -z "$DB_NAME" || -z "$DB_USER" || -z "$DB_PASSWORD" ]]; then
   echo "[!] Please set DB_NAME, DB_USER and DB_PASSWORD environment variables." >&2
   echo "    Example: DB_NAME=compensation_dev DB_USER=root DB_PASSWORD=secret ./scripts/migrate_audit_log.sh" >&2
@@ -45,8 +40,30 @@ ALTER TABLE `audit_log`
 EOSQL
 )
 
-MYSQL_OPTS=( -h"${DB_HOST}" -P"${DB_PORT}" -u"${DB_USER}" -p"${DB_PASSWORD}" "${DB_NAME}" )
 echo "[i] Applying migration..."
-echo "$SQL" | mysql "${MYSQL_OPTS[@]}"
-echo "[✓] Migration completed."
 
+if command -v mysql >/dev/null 2>&1; then
+  MYSQL_OPTS=( -h"${DB_HOST}" -P"${DB_PORT}" -u"${DB_USER}" -p"${DB_PASSWORD}" "${DB_NAME}" )
+  echo "$SQL" | mysql "${MYSQL_OPTS[@]}"
+  echo "[✓] Migration completed via mysql client."
+  exit 0
+fi
+
+if command -v mariadb >/dev/null 2>&1; then
+  MARIADB_OPTS=( -h"${DB_HOST}" -P"${DB_PORT}" -u"${DB_USER}" -p"${DB_PASSWORD}" "${DB_NAME}" )
+  echo "$SQL" | mariadb "${MARIADB_OPTS[@]}"
+  echo "[✓] Migration completed via mariadb client."
+  exit 0
+fi
+
+if command -v docker >/dev/null 2>&1; then
+  echo "$SQL" | docker run --rm -i mysql:8.0 \
+    mysql -h"${DB_HOST}" -P"${DB_PORT}" -u"${DB_USER}" --password="${DB_PASSWORD}" "${DB_NAME}"
+  echo "[✓] Migration completed via dockerized mysql client."
+  exit 0
+fi
+
+echo "[!] No mysql/mariadb client found, and docker not available. Please install mysql-client or docker, or run the SQL manually:" >&2
+echo "" >&2
+echo "$SQL" >&2
+exit 1
