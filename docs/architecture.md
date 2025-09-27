@@ -18,8 +18,8 @@ This service adopts a feature-first, high-cohesion package structure. Business c
   - Persisted domain objects (PO) live with feature modules
 - infrastructure/dao
   - MyBatis‑Plus mapper interfaces (scanned via @MapperScan)
-- adapter/
-  - External platform adapters (e.g., WeChat), can be considered an “interfaces/adapter” slice
+- interfaces/adapter/
+  - External platform adapters (e.g., WeChat), registered as Spring components
 
 ## Layering Model
 - Interfaces (input/output): Web controllers, DTO/VO, and external callbacks

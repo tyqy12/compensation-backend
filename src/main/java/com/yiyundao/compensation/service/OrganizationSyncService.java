@@ -1,6 +1,6 @@
 package com.yiyundao.compensation.service;
 
-import com.yiyundao.compensation.adapter.OrganizationAdapter;
+import com.yiyundao.compensation.interfaces.adapter.OrganizationAdapter;
 import com.yiyundao.compensation.dto.OrganizationSyncResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;

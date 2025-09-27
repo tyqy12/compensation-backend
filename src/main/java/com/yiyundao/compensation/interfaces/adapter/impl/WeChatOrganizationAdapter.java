@@ -1,6 +1,6 @@
-package com.yiyundao.compensation.adapter.impl;
+package com.yiyundao.compensation.interfaces.adapter.impl;
 
-import com.yiyundao.compensation.adapter.OrganizationAdapter;
+import com.yiyundao.compensation.interfaces.adapter.OrganizationAdapter;
 import com.yiyundao.compensation.dto.OrganizationSyncResult;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
@@ -15,7 +15,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 企业微信组织同步适配器
+ * 企业微信组织同步适配器（已迁移至 interfaces/adapter/impl）
  */
 @Slf4j
 @Component
@@ -47,16 +47,13 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         log.info("开始企业微信组织架构同步");
 
         try {
-            // 1. 获取访问令牌
             String accessToken = getAccessToken();
             if (accessToken == null) {
                 return OrganizationSyncResult.failure(PLATFORM_TYPE, "获取访问令牌失败", null);
             }
 
-            // 2. 获取部门列表
             List<Department> departments = getDepartmentList(accessToken);
 
-            // 3. 同步员工信息
             int newCount = 0;
             int updateCount = 0;
             int totalCount = 0;
@@ -72,14 +69,11 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                             Employee existingEmployee = employeeService.getByPlatformUserId(user.getUserId(), PLATFORM_TYPE);
 
                             if (existingEmployee == null) {
-                                // 新增员工
                                 Employee newEmployee = convertToEmployee(user, dept);
                                 employeeService.createEmployee(newEmployee);
                                 newCount++;
                                 log.debug("新增企微员工: {}", user.getName());
-
                             } else {
-                                // 更新员工信息
                                 Employee updateInfo = convertToEmployee(user, dept);
                                 employeeService.updateEmployee(existingEmployee.getId(), updateInfo);
                                 updateCount++;
@@ -126,7 +120,6 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                 return null;
             }
 
-            // 调用企微API获取用户详情
             String url = API_BASE_URL + "/user/get?access_token=" + accessToken + "&userid=" + platformUserId;
 
             WeChatUserResponse response = webClient.get()
@@ -149,7 +142,6 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
 
     @Override
     public boolean isManager(String platformUserId) {
-        // TODO: 实现管理员权限检查
         log.info("检查企微用户管理员权限: {}", platformUserId);
         return true;
     }
@@ -191,12 +183,10 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                 return;
             }
 
-            // 构造消息
             String messageBody = String.format(
                     "{\"touser\":\"%s\",\"msgtype\":\"text\",\"agentid\":%s,\"text\":{\"content\":\"%s\"}}",
                     platformUserId, agentId, message);
 
-            // 发送消息
             String url = API_BASE_URL + "/message/send?access_token=" + accessToken;
 
             webClient.post()
@@ -222,9 +212,6 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         }
     }
 
-    /**
-     * 获取访问令牌
-     */
     private String getAccessToken() {
         try {
             String url = API_BASE_URL + "/gettoken?corpid=" + corpId + "&corpsecret=" + corpSecret;
@@ -248,27 +235,16 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         }
     }
 
-    /**
-     * 获取部门列表
-     */
     private List<Department> getDepartmentList(String accessToken) {
-        // TODO: 实现获取部门列表
         List<Department> departments = new ArrayList<>();
         departments.add(new Department("1", "根部门"));
         return departments;
     }
 
-    /**
-     * 获取部门用户
-     */
     private List<WeChatUser> getDepartmentUsers(String accessToken, String departmentId) {
-        // TODO: 实现获取部门用户
         return new ArrayList<>();
     }
 
-    /**
-     * 转换为Employee对象
-     */
     private Employee convertToEmployee(WeChatUser user, Department dept) {
         Employee employee = new Employee();
         employee.setEmployeeId(user.getUserId());
@@ -290,7 +266,6 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         private String errmsg;
         private String accessToken;
 
-        // getters and setters
         public int getErrcode() { return errcode; }
         public void setErrcode(int errcode) { this.errcode = errcode; }
         public String getErrmsg() { return errmsg; }
@@ -304,7 +279,6 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         private String errmsg;
         private WeChatUser user;
 
-        // getters and setters
         public int getErrcode() { return errcode; }
         public void setErrcode(int errcode) { this.errcode = errcode; }
         public String getErrmsg() { return errmsg; }
@@ -320,7 +294,6 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         private String email;
         private String position;
 
-        // getters and setters
         public String getUserId() { return userId; }
         public void setUserId(String userId) { this.userId = userId; }
         public String getName() { return name; }
@@ -348,3 +321,4 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         public void setName(String name) { this.name = name; }
     }
 }
+

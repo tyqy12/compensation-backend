@@ -34,7 +34,8 @@ com.yiyundao.compensation/
 │   ├── exception/ (BusinessException, GlobalExceptionHandler)
 │   └── utils/
 ├── interfaces/
-│   └── controller/ (SystemController、Employee/Payment APIs 等)
+│   ├── controller/ (SystemController、Employee/Payment APIs 等)
+│   └── adapter/ (WeChat 等外部平台适配器)
 ├── modules/
 │   ├── employee/ entity/ + service/ + impl/
 │   ├── payment/  entity/ + service/ + impl/
