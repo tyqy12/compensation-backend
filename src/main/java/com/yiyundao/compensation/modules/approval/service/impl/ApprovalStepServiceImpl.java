@@ -28,4 +28,12 @@ public class ApprovalStepServiceImpl extends ServiceImpl<ApprovalStepMapper, App
                    .eq(ApprovalStep::getStepNo, stepNo);
         return getOne(queryWrapper);
     }
+
+    @Override
+    public java.util.List<ApprovalStep> listByWorkflow(Long workflowId) {
+        LambdaQueryWrapper<ApprovalStep> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(ApprovalStep::getWorkflowId, workflowId)
+                   .orderByAsc(ApprovalStep::getStepNo);
+        return list(queryWrapper);
+    }
 }

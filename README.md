@@ -82,6 +82,15 @@ com.yiyundao.compensation/
   - `GET /api/payment/record/{id}` 支付记录详情；`POST /api/payment/record/{id}/retry` 单笔重试
   - `GET /api/payment/transfer-status?outBizNo=...` 查询转账状态
   - `POST /api/alipay/notify` 支付宝异步通知（回调）
+ - 审批：
+   - `POST /api/approval/workflows` 发起审批
+   - `POST /api/approval/workflows/{id}/approve` 审批通过
+   - `POST /api/approval/workflows/{id}/reject` 审批拒绝
+   - `POST /api/approval/workflows/{id}/cancel` 撤销流程
+   - `GET /api/approval/workflows/pending?approverId=...` 我的待办
+   - `GET /api/approval/workflows/my?initiatorId=...` 我发起的
+   - `GET /api/approval/workflows/{id}` 流程详情
+   - `GET /api/approval/workflows/{id}/steps` 步骤列表
 
 ## 📋 下一步开发计划
 
