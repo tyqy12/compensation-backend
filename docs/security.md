@@ -28,11 +28,12 @@ ROLE_MANAGER,ROLE_APPROVER,approval:start,approval:approve,approval:reject,appro
 ```
 
 ## Security Configuration
-- Public endpoints and path rules: src/main/java/com/yiyundao/compensation/common/config/SecurityConfig.java:35
-  - Public: `/auth/**`, `/system/**`, `/alipay/notify`, `/actuator/health`
-  - Admin only: `/admin/**`
+- Path rules: src/main/java/com/yiyundao/compensation/common/config/SecurityConfig.java:35
+  - Public: `/auth/**` (except `/auth/logout`), `/alipay/notify`, `/actuator/health`
+  - Authenticated: `/auth/logout`
+  - Admin only: `/system/integration/**`, `/admin/**`
   - Manager or Admin: `/manager/**`
-  - Others require authentication
+  - All others: authenticated
 - Important: Server context path is `/api`; matchers are defined on the servlet path (no `/api` prefix). See comment: src/main/java/com/yiyundao/compensation/common/config/SecurityConfig.java:33
 
 ## Method Security on Controllers
@@ -85,4 +86,8 @@ curl -H "Authorization: Bearer $JWT" \
 - Permissions: `approval:start`, `approval:approve`, `approval:reject`, `approval:cancel`, `approval:read`
 
 Keep roles coarse‑grained and permissions fine‑grained to simplify policy management.
-
+## Additional Protections
+- OAuth `state` validation (stored in Redis, TTL 5 min) prevents CSRF/replay during OAuth logins.
+- Login rate limiting & brute force protection (Redis): per‑user and per‑IP counters + temporary locks.
+- Access token blacklist on logout; refresh token whitelist + rotation on refresh.
+- Integration configs are stored encrypted in DB; controller returns masked values and is admin‑only.

@@ -23,6 +23,7 @@ public interface EmployeeService extends IService<Employee> {
                                  String order);
     List<Employee> getOfflineEmployees(Long managerId);
     Employee getByPlatformUserId(String platformUserId, String platformType);
+    Employee getByEmployeeId(String employeeId);
     boolean existsByEmployeeId(String employeeId);
     void updateStatus(Long employeeId, String status);
     void batchImport(List<Employee> employees);

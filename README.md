@@ -65,13 +65,29 @@ com.yiyundao.compensation/
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
-### 常用端点（更多见 docs/payment-api.md、docs/approval-api.md 与 docs/architecture.md）
+### Docker/WSL 运行（推荐）
+```bash
+# 一键启动（MySQL + Redis + 后端）
+docker compose up -d --build
+
+# 查看应用日志
+docker compose logs -f app
+
+# 访问
+curl http://localhost:8080/api/system/health
+```
+详见：docs/docker-wsl.md
+
+### 常用端点（更多见 docs/auth-api.md、docs/integration.md、docs/payment-api.md、docs/approval-api.md）
 - 系统：
   - `GET /api/system/health` 健康检查
   - `GET /api/system/info` 系统信息
   - `POST /api/system/org/sync?platform=wechat|dingtalk|feishu|all` 组织同步（需 ADMIN/MANAGER 或 org:sync）
   - `GET /api/system/org/platforms` 支持平台列表
-  - `GET /api/system/org/check?platform=...` 平台连接检查（需 ADMIN/MANAGER 或 org:read）
+ - `GET /api/system/org/check?platform=...` 平台连接检查（需 ADMIN/MANAGER 或 org:read）
+  - `GET /api/system/integration/{platform}` 读取平台配置（仅 ADMIN，脱敏返回）
+  - `PUT /api/system/integration/{platform}` 保存平台配置（仅 ADMIN，加密入库）
+  - `POST /api/system/integration/{platform}/test-connection` 连通性测试（仅 ADMIN）
 - 员工：
   - `GET /api/employee` 分页（支持 keyword、department、status、platformType、managerId、sortBy、order）
   - `POST /api/employee` 创建；`PUT /api/employee/{id}` 更新
@@ -85,7 +101,7 @@ com.yiyundao.compensation/
   - `GET /api/payment/record/{id}` 支付记录详情；`POST /api/payment/record/{id}/retry` 单笔重试
   - `GET /api/payment/transfer-status?outBizNo=...` 查询转账状态
   - `POST /api/alipay/notify` 支付宝异步通知（回调）
- - 审批：
+- 审批：
    - `POST /api/approval/workflows` 发起审批
    - `POST /api/approval/workflows/{id}/approve` 审批通过
    - `POST /api/approval/workflows/{id}/reject` 审批拒绝
@@ -116,12 +132,16 @@ com.yiyundao.compensation/
 - [x] `mybatis-plus.type-aliases-package` 调整为 `com.yiyundao.compensation.modules.**.entity`
 
 ### Phase 3: 平台集成 (第7-9周)
-- [x] 企业微信适配器骨架 + 同步与连接检查接口
-- [x] 钉钉适配器骨架 + 同步与连接检查接口
-- [x] 飞书适配器骨架 + 同步与连接检查接口
+- [x] 企业微信/钉钉/飞书适配器：部门/成员拉取、字段映射与写入
+- [x] 访问令牌缓存（Redis，自动续期 TTL 缓冲）
+- [x] 组织同步汇总结果与错误记录
 - [ ] 通知服务完善（路由到各平台、重试）
 
 ### Phase 4: 管理功能 (第10-11周)
+- [x] 平台集成配置管理（DB 加密存储、仅管理员、脱敏返回、连通性测试）
+- [x] 聚合登录：账号密码 + 企微/钉钉/飞书扫码（未绑定拒绝登录）
+- [x] 刷新令牌与登出（白/黑名单）
+- [x] 登录限流/爆破防护（用户名/IP 窗口 + 锁定）
 - [ ] 离线员工管理界面
 - [ ] 批量支付管理
 - [ ] 审计日志查看
@@ -163,6 +183,10 @@ jwt.secret: your-secret-key-at-least-32-chars
 - ✅ SM4 + AES-256 双重加密支持
 - ✅ 安全的密码存储 (BCrypt)
 - ✅ CORS 和 CSRF 防护
+ - ✅ 集成配置密文落库 + 管理员可见 + 脱敏返回
+ - ✅ OAuth state 校验（防重放/CSRF）
+ - ✅ 登录限流/爆破防护（用户名/IP）
+ - ✅ Token 黑名单与刷新白名单（登出与刷新）
 
 ### 审批模块权限建议
 - 角色：`ADMIN`、`MANAGER`、`APPROVER`
@@ -178,3 +202,13 @@ jwt.secret: your-secret-key-at-least-32-chars
 更多见：docs/security.md
 
 项目初始化完成！可以开始下一阶段的开发工作。
+ - 认证：
+   - `POST /api/auth/login` 账号密码登录（含限流/爆破防护）
+   - `GET /api/auth/oauth/authorize?platform=wechat|dingtalk|feishu&redirectUri=...` 获取扫码授权地址（含state）
+   - `GET /api/auth/oauth/callback/{platform}?code=...&state=...` 回调换登录（未绑定拒绝登录）
+   - `POST /api/auth/refresh` 刷新令牌（刷新白名单校验 + 轮换）
+  - `POST /api/auth/logout` 登出（黑名单当前access + 失效refresh）
+ - 后台绑定：
+   - `GET /api/admin/users/{id}/platform-binding` 查询绑定（仅 ADMIN）
+   - `PUT /api/admin/users/{id}/platform-binding` 绑定第三方账号（仅 ADMIN）
+   - `DELETE /api/admin/users/{id}/platform-binding` 解绑（仅 ADMIN）

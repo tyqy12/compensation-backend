@@ -9,22 +9,14 @@ This service integrates enterprise communication platforms for org sync and appr
 
 Adapters live under: `interfaces/adapter/impl/*OrganizationAdapter.java` and implement `OrganizationAdapter`.
 
-## Configuration (dev example)
-See: `src/main/resources/application-dev.yml`
-```
-wechat:
-  corp-id: <corp_id>
-  corp-secret: <corp_secret>
-  agent-id: <agent_id>
-
-dingtalk:
-  app-key: <app_key>
-  app-secret: <app_secret>
-
-feishu:
-  app-id: <app_id>
-  app-secret: <app_secret>
-```
+## Configuration Management (DB + Admin only)
+- Admin endpoints (context path `/api` omitted below):
+  - `GET /system/integration/{platform}` Read config (masked response)
+  - `PUT /system/integration/{platform}` Save config (AES encrypted at rest)
+  - `POST /system/integration/{platform}/test-connection` Connectivity test
+- Platforms: `wechat|dingtalk|feishu|alipay`
+- Security: ADMIN role only; config is stored encrypted in table `integration_config` and decrypted at runtime.
+  - DTOs: `WechatConfigDto`, `DingTalkConfigDto`, `FeishuConfigDto`, `AlipayConfigDto`.
 
 ## API Endpoints
 - POST `/api/system/org/sync?platform=wechat|dingtalk|feishu|all`
@@ -43,6 +35,14 @@ feishu:
   - Checks connection status
   - Auth: `ROLE_ADMIN|ROLE_MANAGER` or `org:read`
 
+## Token Caching
+- Access tokens obtained from platforms are cached in Redis with a safety buffer (expires_in − 300s).
+- Keys: `oauth:token:{platform}`
+- Implementations:
+  - WeChat: `WeChatOrganizationAdapter#getAccessToken()`
+  - DingTalk: `DingTalkOrganizationAdapter#getAccessToken()`
+  - Feishu: `FeishuOrganizationAdapter#getTenantAccessToken()`
+
 ## Notes
-- Adapters currently include basic token retrieval and placeholders for user/department sync; extend as needed.
-- ApprovalEngine sends notifications using OrganizationSyncService; adapter implementations should implement message sending for production.
+- Department and user fetching APIs are implemented with proper mapping and pagination (where applicable).
+- Approval notifications should be implemented per‑platform before going live.

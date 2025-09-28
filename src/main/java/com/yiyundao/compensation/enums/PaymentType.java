@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.enums;
 
+import com.baomidou.mybatisplus.annotation.EnumValue;
 import lombok.Getter;
 
 @Getter
@@ -8,6 +9,7 @@ public enum PaymentType {
     BONUS("bonus", "奖金"),
     REIMBURSEMENT("reimbursement", "报销");
 
+    @EnumValue
     private final String code;
     private final String name;
 

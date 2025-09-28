@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.enums;
 
+import com.baomidou.mybatisplus.annotation.EnumValue;
 import lombok.Getter;
 
 @Getter
@@ -10,6 +11,7 @@ public enum PaymentStatus {
     FAILED("failed", "失败"),
     CANCELLED("cancelled", "已取消");
 
+    @EnumValue
     private final String code;
     private final String name;
 

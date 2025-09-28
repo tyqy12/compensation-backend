@@ -29,14 +29,17 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.csrf(csrf -> csrf.disable())
+            .cors(cors -> {})
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             // Important: matchers are evaluated against the servlet path (context-path removed).
             // Since server.servlet.context-path=/api, DO NOT prefix matchers with "/api" here.
             .authorizeHttpRequests(auth -> auth
+                .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
+                .requestMatchers("/auth/logout").authenticated()
                 .requestMatchers("/auth/**").permitAll()
-                .requestMatchers("/system/**").permitAll()
                 .requestMatchers("/alipay/notify").permitAll()
                 .requestMatchers("/actuator/health").permitAll()
+                .requestMatchers("/system/integration/**").hasRole("ADMIN")
                 .requestMatchers("/admin/**").hasRole("ADMIN")
                 .requestMatchers("/manager/**").hasAnyRole("ADMIN", "MANAGER")
                 .anyRequest().authenticated()

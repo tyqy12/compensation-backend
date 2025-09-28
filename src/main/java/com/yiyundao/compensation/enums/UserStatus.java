@@ -1,5 +1,7 @@
 package com.yiyundao.compensation.enums;
 
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import com.fasterxml.jackson.annotation.JsonValue;
 import lombok.Getter;
 
 @Getter
@@ -7,6 +9,8 @@ public enum UserStatus {
     ACTIVE("active", "激活"),
     INACTIVE("inactive", "禁用");
 
+    @EnumValue
+    @JsonValue
     private final String code;
     private final String name;
 

@@ -193,6 +193,14 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     }
 
     @Override
+    public Employee getByEmployeeId(String employeeId) {
+        LambdaQueryWrapper<Employee> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(Employee::getEmployeeId, employeeId)
+                   .eq(Employee::getStatus, "active");
+        return getOne(queryWrapper);
+    }
+
+    @Override
     public boolean existsByEmployeeId(String employeeId) {
         LambdaQueryWrapper<Employee> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(Employee::getEmployeeId, employeeId);

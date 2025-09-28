@@ -2,9 +2,10 @@ spring:
   # 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://${DB_HOST}:${DB_PORT}/compensation_prod?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&useSSL=true
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
+    # 生产环境保持与开发一致（按需求指定同一数据库）
+    url: jdbc:mysql://47.108.70.177:3306/s06?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&useSSL=false&allowPublicKeyRetrieval=true
+    username: s06
+    password: 123456
     hikari:
       maximum-pool-size: 100
       minimum-idle: 20
@@ -15,25 +16,24 @@ spring:
   # Redis配置
   data:
     redis:
-      host: ${REDIS_HOST}
-      port: ${REDIS_PORT}
-      database: 2
-      password: ${REDIS_PASSWORD}
+      host: ${SPRING_DATA_REDIS_HOST:redis}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+      database: 0
       timeout: 5000ms
       lettuce:
         pool:
-          max-active: 50
+          max-active: 10
           max-wait: -1ms
-          max-idle: 20
-          min-idle: 5
+          max-idle: 8
+          min-idle: 0
 
   # RabbitMQ配置
   rabbitmq:
-    host: ${RABBITMQ_HOST}
-    port: ${RABBITMQ_PORT}
-    username: ${RABBITMQ_USERNAME}
-    password: ${RABBITMQ_PASSWORD}
-    virtual-host: /compensation-prod
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+    virtual-host: /
 
 # JWT配置
 jwt:
@@ -55,19 +55,19 @@ alipay:
 
 # 企业微信配置
 wechat:
-  corp-id: ${WECHAT_CORP_ID}
-  corp-secret: ${WECHAT_CORP_SECRET}
-  agent-id: ${WECHAT_AGENT_ID}
+  corp-id: wwa45e13d8804607c0
+  corp-secret: vGSzMAl6EPPHvxnn7JRH7hXqqpP_jg0jfmP-k6-3nGk
+  agent-id: 1000003
 
 # 钉钉配置
 dingtalk:
-  app-key: ${DINGTALK_APP_KEY}
-  app-secret: ${DINGTALK_APP_SECRET}
+  app-key: your_app_key
+  app-secret: your_app_secret
 
 # 飞书配置
 feishu:
-  app-id: ${FEISHU_APP_ID}
-  app-secret: ${FEISHU_APP_SECRET}
+  app-id: your_app_id
+  app-secret: your_app_secret
 
 # 短信配置
 sms:
@@ -79,9 +79,9 @@ sms:
 # 加密配置
 encryption:
   sm4:
-    key: ${SM4_KEY}
+    key: your_sm4_key_32_chars_long_here
   aes:
-    key: ${AES_KEY}
+    key: your_aes_key_32_chars_long_here
 
 # 日志配置
 logging:

@@ -24,6 +24,7 @@ import java.util.stream.Collectors;
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider tokenProvider;
+    private final com.yiyundao.compensation.service.AuthTokenService authTokenService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -32,7 +33,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         String jwt = getJwtFromRequest(request);
 
-        if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt)) {
+        if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt) && !authTokenService.isBlacklisted(jwt)) {
             String username = tokenProvider.getUsernameFromToken(jwt);
             String authorities = tokenProvider.getAuthoritiesFromToken(jwt);
 

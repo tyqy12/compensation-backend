@@ -41,6 +41,7 @@ public class AlipayService {
     private final com.yiyundao.compensation.modules.payment.service.PaymentBatchService paymentBatchService;
     private final RedisTemplate<String, Object> redisTemplate;
     private final NotificationService notificationService;
+    private final com.yiyundao.compensation.modules.system.service.IntegrationConfigService integrationConfigService;
 
     private static final String DEDUP_KEY_PREFIX = "alipay:dedup:";
     private static final int BATCH_SIZE = 1000; // 批量转账最大1000笔
@@ -70,6 +71,14 @@ public class AlipayService {
                 paymentRecordId, outBizNo, record.getAmount());
 
         try {
+            // 读取支付宝集成配置（由管理员在系统中配置）
+            com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto aliCfg = integrationConfigService.getAlipayConfig();
+            if (aliCfg == null) {
+                log.warn("未配置支付宝集成信息，使用默认模拟逻辑");
+            } else {
+                log.debug("使用支付宝配置: appId={}, serverUrl={}", aliCfg.getAppId(), aliCfg.getServerUrl());
+            }
+
             // 设置去重标记
             redisTemplate.opsForValue().set(dedupKey, "processing", DEDUP_EXPIRE_HOURS, TimeUnit.HOURS);
 
@@ -320,7 +329,14 @@ public class AlipayService {
      * 获取支付限额配置
      */
     public BigDecimal getDailyLimit() {
-        // TODO: 从配置表读取
+        try {
+            // 优先从通用系统配置读取
+            // 如果未来有独立配置项，可迁移到 sys_config 中
+            String v = null; // TODO: 接入通用配置读取服务
+            if (v != null) {
+                return new BigDecimal(v);
+            }
+        } catch (Exception ignore) {}
         return new BigDecimal("10000.00");
     }
 

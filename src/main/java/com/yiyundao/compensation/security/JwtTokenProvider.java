@@ -112,4 +112,17 @@ public class JwtTokenProvider {
             return false;
         }
     }
+
+    public java.util.Date getExpiration(String token) {
+        try {
+            Claims claims = Jwts.parser()
+                    .verifyWith(secretKey)
+                    .build()
+                    .parseSignedClaims(token)
+                    .getPayload();
+            return claims.getExpiration();
+        } catch (Exception e) {
+            return null;
+        }
+    }
 }
