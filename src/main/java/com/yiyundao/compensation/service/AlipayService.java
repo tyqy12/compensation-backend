@@ -15,6 +15,8 @@ import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
 import com.yiyundao.compensation.enums.PaymentStatus;
 import com.yiyundao.compensation.enums.BatchStatus;
+import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
@@ -23,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.interceptor.TransactionAspectSupport;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -42,6 +45,7 @@ public class AlipayService {
     private final RedisTemplate<String, Object> redisTemplate;
     private final NotificationService notificationService;
     private final com.yiyundao.compensation.modules.system.service.IntegrationConfigService integrationConfigService;
+    private final PayrollBatchMapper payrollBatchMapper;
 
     private static final String DEDUP_KEY_PREFIX = "alipay:dedup:";
     private static final int BATCH_SIZE = 1000; // 批量转账最大1000笔
@@ -71,13 +75,18 @@ public class AlipayService {
                 paymentRecordId, outBizNo, record.getAmount());
 
         try {
+            // 检查支付宝配置是否存在且启用
+            if (!integrationConfigService.isPlatformEnabled("alipay")) {
+                throw new IllegalStateException("支付宝集成未启用或配置不存在");
+            }
+
             // 读取支付宝集成配置（由管理员在系统中配置）
             com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto aliCfg = integrationConfigService.getAlipayConfig();
-            if (aliCfg == null) {
-                log.warn("未配置支付宝集成信息，使用默认模拟逻辑");
-            } else {
-                log.debug("使用支付宝配置: appId={}, serverUrl={}", aliCfg.getAppId(), aliCfg.getServerUrl());
+            if (aliCfg == null || aliCfg.getAppId() == null || aliCfg.getPrivateKey() == null) {
+                throw new IllegalStateException("支付宝配置不完整：缺少必要的appId或privateKey");
             }
+
+            log.debug("使用支付宝配置: appId={}, serverUrl={}", aliCfg.getAppId(), aliCfg.getServerUrl());
 
             // 设置去重标记
             redisTemplate.opsForValue().set(dedupKey, "processing", DEDUP_EXPIRE_HOURS, TimeUnit.HOURS);
@@ -139,6 +148,7 @@ public class AlipayService {
             paymentBatchService.updateStatus(batch.getId(), BatchStatus.PROCESSING);
             batch.setProcessStartTime(LocalDateTime.now());
             paymentBatchService.updateById(batch);
+            syncPayrollBatchStatus(batch);
 
             // 查询批次下的所有待处理支付记录
             List<PaymentRecord> records = paymentRecordService.getByBatchNo(batchNo, PaymentStatus.PENDING);
@@ -194,6 +204,7 @@ public class AlipayService {
             }
 
             paymentBatchService.updateById(batch);
+            syncPayrollBatchStatus(batch);
 
             log.info("批量转账完成: batchNo={}, 成功{}笔, 失败{}笔",
                     batchNo, successCount, failedCount);
@@ -208,7 +219,9 @@ public class AlipayService {
 
         } catch (Exception e) {
             log.error("批量转账异常: batchNo={}", batchNo, e);
+            batch.setStatus(BatchStatus.FAILED);
             paymentBatchService.updateStatus(batch.getId(), BatchStatus.FAILED);
+            syncPayrollBatchStatus(batch);
 
             // 确保事务回滚
             if (TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -217,6 +230,26 @@ public class AlipayService {
 
             // 重新抛出异常以触发完整回滚
             throw new RuntimeException("批量转账处理异常", e);
+        }
+    }
+
+    private void syncPayrollBatchStatus(PaymentBatch paymentBatch) {
+        if (paymentBatch == null || !StringUtils.hasText(paymentBatch.getBatchNo())) {
+            return;
+        }
+        try {
+            LambdaUpdateWrapper<PayrollBatch> wrapper = new LambdaUpdateWrapper<PayrollBatch>()
+                    .eq(PayrollBatch::getPaymentBatchNo, paymentBatch.getBatchNo());
+            if (paymentBatch.getStatus() == BatchStatus.COMPLETED) {
+                wrapper.set(PayrollBatch::getStatus, "paid");
+            } else if (paymentBatch.getStatus() == BatchStatus.FAILED) {
+                wrapper.set(PayrollBatch::getStatus, "pay_failed");
+            } else {
+                return;
+            }
+            payrollBatchMapper.update(null, wrapper);
+        } catch (Exception e) {
+            log.warn("同步薪资批次状态失败: {}", e.getMessage());
         }
     }
 
@@ -347,5 +380,50 @@ public class AlipayService {
         // TODO: 实现每日支付限额检查
         BigDecimal dailyLimit = getDailyLimit();
         return amount.compareTo(dailyLimit) <= 0;
+    }
+
+    /**
+     * 验证支付宝配置连接
+     */
+    public boolean checkAlipayConnection() {
+        try {
+            // 检查支付宝配置是否启用
+            if (!integrationConfigService.isPlatformEnabled("alipay")) {
+                log.warn("支付宝集成未启用");
+                return false;
+            }
+
+            // 检查配置完整性
+            com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto config = integrationConfigService.getAlipayConfig();
+            if (config == null) {
+                log.warn("支付宝配置不存在");
+                return false;
+            }
+
+            // 检查必需配置项
+            if (config.getAppId() == null || config.getAppId().trim().isEmpty()) {
+                log.warn("支付宝应用ID未配置");
+                return false;
+            }
+
+            if (config.getPrivateKey() == null || config.getPrivateKey().trim().isEmpty()) {
+                log.warn("支付宝应用私钥未配置");
+                return false;
+            }
+
+            if (config.getPublicKey() == null || config.getPublicKey().trim().isEmpty()) {
+                log.warn("支付宝平台公钥未配置");
+                return false;
+            }
+
+            // TODO: 实际环境中可以调用支付宝API验证连接
+            // 例如：查询商户信息或调用测试接口
+            log.info("支付宝配置验证通过: appId={}", config.getAppId());
+            return true;
+
+        } catch (Exception e) {
+            log.error("支付宝连接检查异常", e);
+            return false;
+        }
     }
 }

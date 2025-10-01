@@ -2,163 +2,91 @@ package com.yiyundao.compensation.interfaces.controller.approval;
 
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.enums.ApprovalStatus;
-import com.yiyundao.compensation.enums.WorkflowType;
-import com.yiyundao.compensation.interfaces.dto.approval.ApprovalDecisionRequest;
-import com.yiyundao.compensation.interfaces.dto.approval.CancelWorkflowRequest;
-import com.yiyundao.compensation.interfaces.dto.approval.StartWorkflowRequest;
-import com.yiyundao.compensation.interfaces.vo.approval.ApprovalStepVO;
-import com.yiyundao.compensation.interfaces.vo.approval.ApprovalWorkflowVO;
-import com.yiyundao.compensation.modules.approval.entity.ApprovalStep;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.service.ApprovalEngine;
-import com.yiyundao.compensation.modules.approval.service.ApprovalStepService;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.validation.Valid;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
+import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentService;
+import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.service.SysUserService;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
-
 @RestController
 @RequestMapping("/approval/workflows")
 @RequiredArgsConstructor
+@PreAuthorize("hasAnyRole('ADMIN','FINANCE','MANAGER')")
 public class ApprovalController {
 
     private final ApprovalEngine approvalEngine;
-    private final ApprovalStepService approvalStepService;
-    private final com.yiyundao.compensation.modules.audit.service.AuditLogService auditLogService;
+    private final SysUserService sysUserService;
+    private final PayrollBatchService payrollBatchService;
+    private final PayrollPaymentService payrollPaymentService;
 
-    // 发起审批
-    @PostMapping
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER') or hasAuthority('approval:start')")
-    public ApiResponse<Long> start(@Valid @RequestBody StartWorkflowRequest req, HttpServletRequest request) {
-        long begin = System.currentTimeMillis();
-        WorkflowType type = WorkflowType.fromCode(req.getWorkflowType());
-        Long id = approvalEngine.startWorkflow(type, req.getBusinessKey(), req.getBusinessType(),
-                req.getInitiatorId(), req.getWorkflowData());
-        auditLogService.record(
-                "APPROVAL_START",
-                request.getMethod(),
-                request.getRequestURI(),
-                request.getRemoteAddr(),
-                request.getHeader("User-Agent"),
-                "APPROVAL",
-                req.getBusinessKey(),
-                request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : null,
-                null,
-                id != null ? ("WID=" + id) : "FAILED",
-                null,
-                System.currentTimeMillis() - begin
-        );
-        return ApiResponse.success(id);
-    }
-
-    // 审批通过
     @PostMapping("/{id}/approve")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:approve')")
-    public ApiResponse<Void> approve(@PathVariable Long id, @Valid @RequestBody ApprovalDecisionRequest req, HttpServletRequest request) {
-        long begin = System.currentTimeMillis();
-        approvalEngine.processApproval(id, req.getApproverId(), ApprovalStatus.APPROVED, req.getComment());
-        auditLogService.record(
-                "APPROVAL_APPROVE",
-                request.getMethod(),
-                request.getRequestURI(),
-                request.getRemoteAddr(),
-                request.getHeader("User-Agent"),
-                "APPROVAL",
-                String.valueOf(id),
-                request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : null,
-                null,
-                "OK",
-                null,
-                System.currentTimeMillis() - begin
-        );
-        return ApiResponse.success(null);
+    public ApiResponse<Boolean> approve(@PathVariable Long id, @RequestBody(required = false) DecisionRequest req) {
+        return decide(id, ApprovalStatus.APPROVED, req != null ? req.getComment() : null);
     }
 
-    // 审批拒绝
     @PostMapping("/{id}/reject")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:reject')")
-    public ApiResponse<Void> reject(@PathVariable Long id, @Valid @RequestBody ApprovalDecisionRequest req, HttpServletRequest request) {
-        long begin = System.currentTimeMillis();
-        approvalEngine.processApproval(id, req.getApproverId(), ApprovalStatus.REJECTED, req.getComment());
-        auditLogService.record(
-                "APPROVAL_REJECT",
-                request.getMethod(),
-                request.getRequestURI(),
-                request.getRemoteAddr(),
-                request.getHeader("User-Agent"),
-                "APPROVAL",
-                String.valueOf(id),
-                request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : null,
-                null,
-                "OK",
-                null,
-                System.currentTimeMillis() - begin
-        );
-        return ApiResponse.success(null);
+    public ApiResponse<Boolean> reject(@PathVariable Long id, @RequestBody(required = false) DecisionRequest req) {
+        return decide(id, ApprovalStatus.REJECTED, req != null ? req.getComment() : null);
     }
 
-    // 撤销流程（仅发起人）
-    @PostMapping("/{id}/cancel")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER') or hasAuthority('approval:cancel')")
-    public ApiResponse<Void> cancel(@PathVariable Long id, @Valid @RequestBody CancelWorkflowRequest req, HttpServletRequest request) {
-        long begin = System.currentTimeMillis();
-        approvalEngine.cancelWorkflow(id, req.getOperatorId(), req.getReason());
-        auditLogService.record(
-                "APPROVAL_CANCEL",
-                request.getMethod(),
-                request.getRequestURI(),
-                request.getRemoteAddr(),
-                request.getHeader("User-Agent"),
-                "APPROVAL",
-                String.valueOf(id),
-                request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : null,
-                null,
-                "OK",
-                null,
-                System.currentTimeMillis() - begin
-        );
-        return ApiResponse.success(null);
+    private ApiResponse<Boolean> decide(Long workflowId, ApprovalStatus decision, String comment) {
+        SysUser approver = resolveCurrentUser();
+        if (approver == null) {
+            return ApiResponse.error(401, "未登录");
+        }
+
+        try {
+            approvalEngine.processApproval(workflowId, approver.getId(), decision, comment);
+        } catch (Exception e) {
+            return ApiResponse.error(400, e.getMessage());
+        }
+
+        // Post decision handling for payroll business
+        ApprovalWorkflow wf = approvalEngine.getById(workflowId);
+        if (wf != null && "payroll".equalsIgnoreCase(wf.getBusinessType())) {
+            String key = wf.getBusinessKey(); // e.g., payroll_batch:{id}
+            Long batchId = parseBatchId(key);
+            if (batchId != null) {
+                PayrollBatch b = payrollBatchService.getById(batchId);
+                if (b != null) {
+                    if (wf.getStatus() == ApprovalStatus.APPROVED) {
+                        payrollBatchService.updateStatus(batchId, "approved");
+                        b.setStatus("approved");
+                        payrollPaymentService.createPaymentBatch(b, approver, true);
+                    } else if (wf.getStatus() == ApprovalStatus.REJECTED) {
+                        payrollBatchService.updateStatus(batchId, "rejected");
+                    }
+                }
+            }
+        }
+        return ApiResponse.success(true);
     }
 
-    // 我的待办
-    @GetMapping("/pending")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:read')")
-    public ApiResponse<List<ApprovalWorkflowVO>> pending(@RequestParam Long approverId) {
-        List<ApprovalWorkflow> list = approvalEngine.getPendingWorkflows(approverId);
-        return ApiResponse.success(list.stream().map(ApprovalWorkflowVO::from).collect(Collectors.toList()));
+    private Long parseBatchId(String businessKey) {
+        if (businessKey == null) return null;
+        int idx = businessKey.indexOf(":");
+        if (idx < 0) return null;
+        try { return Long.parseLong(businessKey.substring(idx + 1)); }
+        catch (Exception e) { return null; }
     }
 
-    // 我发起的
-    @GetMapping("/my")
-    @PreAuthorize("isAuthenticated()")
-    public ApiResponse<List<ApprovalWorkflowVO>> my(@RequestParam Long initiatorId) {
-        List<ApprovalWorkflow> list = approvalEngine.getMyWorkflows(initiatorId);
-        return ApiResponse.success(list.stream().map(ApprovalWorkflowVO::from).collect(Collectors.toList()));
+    private SysUser resolveCurrentUser() {
+        try {
+            org.springframework.security.core.Authentication a = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+            String username = a != null ? a.getName() : null;
+            if (username == null || username.isBlank()) return null;
+            return sysUserService.findByUsername(username);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
-    // 流程详情
-    @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:read')")
-    public ApiResponse<Map<String, Object>> detail(@PathVariable Long id) {
-        ApprovalWorkflow w = approvalEngine.getById(id);
-        Map<String, Object> data = approvalEngine.getWorkflowData(id);
-        Map<String, Object> result = Map.of(
-                "workflow", w == null ? null : ApprovalWorkflowVO.from(w),
-                "data", data
-        );
-        return ApiResponse.success(result);
-    }
-
-    // 步骤列表
-    @GetMapping("/{id}/steps")
-    @PreAuthorize("hasAnyRole('ADMIN','MANAGER','APPROVER') or hasAuthority('approval:read')")
-    public ApiResponse<List<ApprovalStepVO>> steps(@PathVariable Long id) {
-        List<ApprovalStep> steps = approvalStepService.listByWorkflow(id);
-        return ApiResponse.success(steps.stream().map(ApprovalStepVO::from).collect(Collectors.toList()));
-    }
+    @Data
+    public static class DecisionRequest { private String comment; }
 }

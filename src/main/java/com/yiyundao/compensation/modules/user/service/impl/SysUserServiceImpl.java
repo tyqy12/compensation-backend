@@ -24,4 +24,17 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
                 .eq(SysUser::getPlatformUserId, platformUserId)
                 .last("limit 1"));
     }
+
+    @Override
+    public SysUser findFirstByRole(String roleCode) {
+        if (roleCode == null || roleCode.isBlank()) {
+            return null;
+        }
+        String normalized = roleCode.trim();
+        return getOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getStatus, "active")
+                .like(SysUser::getRoles, normalized)
+                .orderByAsc(SysUser::getId)
+                .last("limit 1"));
+    }
 }

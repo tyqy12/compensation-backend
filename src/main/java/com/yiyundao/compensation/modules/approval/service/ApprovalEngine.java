@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalStep;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
@@ -18,10 +19,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -33,6 +38,11 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     private final SysUserService sysUserService;
     private final OrganizationSyncService organizationSyncService;
     private final ObjectMapper objectMapper;
+    private final com.yiyundao.compensation.modules.system.service.SysConfigService sysConfigService;
+    private final com.yiyundao.compensation.modules.user.service.PlatformLinkApprovalHandler platformLinkApprovalHandler;
+    private final com.yiyundao.compensation.modules.rbac.service.ResourceApprovalHandler resourceApprovalHandler;
+
+    private static final String PAYROLL_APPROVAL_FLOW_KEY = "payroll.approval.flow";
 
     @Transactional
     public Long startWorkflow(WorkflowType workflowType, String businessKey, String businessType,
@@ -147,35 +157,46 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
         workflow.setCurrentApproverId(null);
         updateById(workflow);
         sendWorkflowCompleteNotification(workflow, finalStatus);
+        // 业务回调（平台绑定等）
+        try {
+            platformLinkApprovalHandler.handle(workflow, finalStatus);
+        } catch (Exception ignored) {}
+        try {
+            resourceApprovalHandler.handle(workflow, finalStatus);
+        } catch (Exception ignored) {}
     }
 
     private List<ApprovalStep> generateApprovalSteps(ApprovalWorkflow workflow, WorkflowType workflowType,
                                                    Map<String, Object> workflowData) {
-        List<ApprovalStep> steps = List.of();
-        switch (workflowType) {
-            case BATCH -> steps = generateBatchPaymentSteps(workflow);
-            case ADHOC -> steps = generateAdhocPaymentSteps(workflow);
-            case OFFLINE -> steps = generateOfflineEmployeeSteps(workflow);
+        return switch (workflowType) {
+            case BATCH -> generateBatchPaymentSteps();
+            case ADHOC -> generateAdhocPaymentSteps();
+            case OFFLINE -> generateOfflineEmployeeSteps();
+        };
+    }
+
+    private List<ApprovalStep> generateBatchPaymentSteps() {
+        List<ApprovalConfigStep> configured = loadPayrollApprovalConfig();
+        if (configured.isEmpty()) {
+            configured = defaultPayrollSteps();
+        }
+        List<ApprovalStep> steps = buildStepsFromConfig(configured, defaultTimeoutHours());
+        if (steps.isEmpty()) {
+            steps = buildStepsFromConfig(defaultPayrollSteps(), defaultTimeoutHours());
         }
         return steps;
     }
 
-    private List<ApprovalStep> generateBatchPaymentSteps(ApprovalWorkflow workflow) {
-        ApprovalStep step1 = createApprovalStep(1, "部门负责人审批", 2L, "张部长", 24);
-        ApprovalStep step2 = createApprovalStep(2, "财务负责人审批", 3L, "李财务", 24);
-        ApprovalStep step3 = createApprovalStep(3, "总经理审批", 1L, "王总", 48);
-        return List.of(step1, step2, step3);
+    private List<ApprovalStep> generateAdhocPaymentSteps() {
+        List<ApprovalConfigStep> config = new ArrayList<>();
+        config.add(ApprovalConfigStep.of(1, "直接上级审批", "ROLE_MANAGER", null, null, 24, false));
+        config.add(ApprovalConfigStep.of(2, "财务审批", "ROLE_FINANCE", null, null, 24, false));
+        return buildStepsFromConfig(config, defaultTimeoutHours());
     }
 
-    private List<ApprovalStep> generateAdhocPaymentSteps(ApprovalWorkflow workflow) {
-        ApprovalStep step1 = createApprovalStep(1, "直接上级审批", 2L, "张主管", 24);
-        ApprovalStep step2 = createApprovalStep(2, "财务审批", 3L, "李财务", 24);
-        return List.of(step1, step2);
-    }
-
-    private List<ApprovalStep> generateOfflineEmployeeSteps(ApprovalWorkflow workflow) {
-        ApprovalStep step1 = createApprovalStep(1, "管理员审批", 1L, "系统管理员", 24);
-        return List.of(step1);
+    private List<ApprovalStep> generateOfflineEmployeeSteps() {
+        List<ApprovalConfigStep> config = List.of(ApprovalConfigStep.of(1, "管理员审批", "ROLE_ADMIN", null, null, 24, false));
+        return buildStepsFromConfig(config, defaultTimeoutHours());
     }
 
     private ApprovalStep createApprovalStep(int stepNo, String stepName, Long approverId,
@@ -188,6 +209,116 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
         step.setStatus(ApprovalStatus.PENDING);
         step.setTimeoutHours(timeoutHours);
         return step;
+    }
+
+    private int defaultTimeoutHours() {
+        return Optional.ofNullable(sysConfigService.getInt("approval.timeout.hours", 24)).orElse(24);
+    }
+
+    private List<ApprovalConfigStep> loadPayrollApprovalConfig() {
+        String raw = sysConfigService.getString(PAYROLL_APPROVAL_FLOW_KEY, null);
+        if (!StringUtils.hasText(raw)) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(raw, new TypeReference<List<ApprovalConfigStep>>() {});
+        } catch (Exception e) {
+            log.warn("解析审批链配置失败({}): {}", PAYROLL_APPROVAL_FLOW_KEY, e.getMessage());
+            return List.of();
+        }
+    }
+
+    private List<ApprovalConfigStep> defaultPayrollSteps() {
+        List<ApprovalConfigStep> defaults = new ArrayList<>();
+        defaults.add(ApprovalConfigStep.of(1, "部门负责人审批", "ROLE_MANAGER", null, null, 24, false));
+        defaults.add(ApprovalConfigStep.of(2, "财务负责人审批", "ROLE_FINANCE", null, null, 24, false));
+        defaults.add(ApprovalConfigStep.of(3, "总监审批", "ROLE_ADMIN", null, null, 48, true));
+        return defaults;
+    }
+
+    private List<ApprovalStep> buildStepsFromConfig(List<ApprovalConfigStep> configSteps, int defaultTimeout) {
+        if (configSteps == null || configSteps.isEmpty()) {
+            return List.of();
+        }
+        List<ApprovalStep> steps = new ArrayList<>();
+        int lastAutoStep = 0;
+        for (ApprovalConfigStep cfg : configSteps.stream()
+                .sorted(Comparator.comparing(step -> Optional.ofNullable(step.stepNo).orElse(Integer.MAX_VALUE)))
+                .toList()) {
+            int stepNo = cfg.stepNo != null ? cfg.stepNo : lastAutoStep + 1;
+            lastAutoStep = stepNo;
+
+            SysUser approver = resolveApprover(cfg);
+            if (approver == null) {
+                if (Boolean.TRUE.equals(cfg.optional)) {
+                    log.info("审批步骤{}({}) 未找到审批人，已跳过(可选)", stepNo, cfg.stepName);
+                    continue;
+                }
+                approver = fallbackAdmin();
+                if (approver == null) {
+                    log.warn("审批步骤{}({}) 未找到审批人且无管理员兜底，跳过该步骤", stepNo, cfg.stepName);
+                    continue;
+                }
+            }
+
+            String approverName = Optional.ofNullable(approver.getRealName()).filter(StringUtils::hasText)
+                    .orElse(approver.getUsername());
+            String stepName = StringUtils.hasText(cfg.stepName)
+                    ? cfg.stepName
+                    : (StringUtils.hasText(cfg.role) ? cfg.role : "审批步骤" + stepNo);
+            int timeout = cfg.timeoutHours != null ? cfg.timeoutHours : defaultTimeout;
+
+            steps.add(createApprovalStep(stepNo, stepName, approver.getId(), approverName, timeout));
+        }
+        return steps;
+    }
+
+    private SysUser resolveApprover(ApprovalConfigStep cfg) {
+        if (cfg == null) {
+            return null;
+        }
+        if (cfg.approverId != null) {
+            return sysUserService.getById(cfg.approverId);
+        }
+        if (StringUtils.hasText(cfg.approverUsername)) {
+            return sysUserService.findByUsername(cfg.approverUsername.trim());
+        }
+        if (StringUtils.hasText(cfg.role)) {
+            return sysUserService.findFirstByRole(cfg.role.trim());
+        }
+        return null;
+    }
+
+    private SysUser fallbackAdmin() {
+        SysUser admin = sysUserService.findFirstByRole("ROLE_ADMIN");
+        if (admin != null) {
+            return admin;
+        }
+        return sysUserService.findByUsername("admin");
+    }
+
+    private static class ApprovalConfigStep {
+        public Integer stepNo;
+        public String stepName;
+        public String role;
+        public Long approverId;
+        public String approverUsername;
+        public Integer timeoutHours;
+        public Boolean optional;
+
+        static ApprovalConfigStep of(Integer stepNo, String stepName, String role,
+                                     Long approverId, String approverUsername,
+                                     Integer timeoutHours, Boolean optional) {
+            ApprovalConfigStep step = new ApprovalConfigStep();
+            step.stepNo = stepNo;
+            step.stepName = stepName;
+            step.role = role;
+            step.approverId = approverId;
+            step.approverUsername = approverUsername;
+            step.timeoutHours = timeoutHours;
+            step.optional = optional;
+            return step;
+        }
     }
 
     private void sendApprovalNotification(ApprovalStep step) {
