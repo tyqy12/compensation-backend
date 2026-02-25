@@ -92,3 +92,11 @@ logging:
     name: logs/compensation-staging.log
     max-size: 100MB
     max-history: 30
+
+external-api:
+  jwt:
+    secret: ${EXTERNAL_API_JWT_SECRET}
+    expiration-seconds: ${EXTERNAL_API_JWT_EXPIRATION:1800}
+  rate-limit:
+    per-minute: ${EXTERNAL_API_RATE_LIMIT_PER_MINUTE:600}
+    alert-cooldown-seconds: ${EXTERNAL_API_RATE_LIMIT_ALERT_COOLDOWN:300}

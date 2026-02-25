@@ -5,12 +5,10 @@ import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
-import java.util.stream.Collectors;
 
 @Slf4j
 @Component
@@ -29,21 +27,35 @@ public class JwtTokenProvider {
         this.refreshExpirationInMs = refreshExpirationInMs;
     }
 
-    public String generateToken(Authentication authentication) {
-        String username = authentication.getName();
-        String authorities = authentication.getAuthorities().stream()
-                .map(GrantedAuthority::getAuthority)
-                .collect(Collectors.joining(","));
-
-        Date expiryDate = new Date(System.currentTimeMillis() + jwtExpirationInMs);
+    /**
+     * 生成访问令牌（仅包含用户身份信息，不包含权限）
+     * <p>
+     * 设计原则：Token 只负责身份认证，权限信息每次从数据库/缓存动态获取
+     * </p>
+     *
+     * @param username 用户名
+     * @return JWT Token
+     */
+    public String generateToken(String username) {
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + jwtExpirationInMs);
 
         return Jwts.builder()
                 .subject(username)
-                .claim("authorities", authorities)
-                .issuedAt(new Date())
+                .issuedAt(now)
                 .expiration(expiryDate)
                 .signWith(secretKey)
                 .compact();
+    }
+
+    /**
+     * 生成访问令牌（兼容旧版 Authentication 参数，内部忽略 authorities）
+     *
+     * @deprecated 请使用 {@link #generateToken(String)}
+     */
+    @Deprecated
+    public String generateToken(Authentication authentication) {
+        return generateToken(authentication.getName());
     }
 
     public String generateRefreshToken(String username) {
@@ -68,14 +80,12 @@ public class JwtTokenProvider {
         return claims.getSubject();
     }
 
+    /**
+     * @deprecated Token 不再包含 authorities，权限应从 UserRoleService 动态获取
+     */
+    @Deprecated
     public String getAuthoritiesFromToken(String token) {
-        Claims claims = Jwts.parser()
-                .verifyWith(secretKey)
-                .build()
-                .parseSignedClaims(token)
-                .getPayload();
-
-        return claims.get("authorities", String.class);
+        return null; // 不再支持，从数据库动态获取
     }
 
     public boolean validateToken(String token) {

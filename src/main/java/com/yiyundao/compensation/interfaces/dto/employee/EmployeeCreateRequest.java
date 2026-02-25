@@ -19,6 +19,8 @@ public class EmployeeCreateRequest {
 
     private String department;
     private String position;
+    // 用工类型: full_time / part_time
+    private String employmentType;
     private String platformUserId;
     private String platformType;
     private Long managerId;
@@ -27,5 +29,6 @@ public class EmployeeCreateRequest {
     private String bankAccount; // 明文，后端加密
     private String bankName;
     private Boolean offline;
+    // 可选：指定要创建的系统用户名（若冲突会自动追加数字）
+    private String username;
 }
-

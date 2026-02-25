@@ -1,0 +1,1000 @@
+    private String department;
+    private Long managerId;
+    private String keyword;
+    private Integer totalEmployees;
+    private BigDecimal earningsTotal;
+    private BigDecimal deductionsTotal;
+    private BigDecimal grossTotal;
+    private BigDecimal taxTotal;
+    private BigDecimal socialTotal;
+    private BigDecimal netTotal;
+    private Integer linesWithWarnings;
+    private Integer totalWarnings;
+    private List<String> warnings;
+    private List<PayrollPreviewDto.PayrollPreviewLineDto> lines;
+}
+package com.yiyundao.compensation.interfaces.dto.payroll;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+import java.time.LocalDate;
+@Data
+public class PayCycleUpsertRequest {
+    @NotBlank
+    private String type; // monthly/custom
+    @NotBlank
+    private String periodLabel; // YYYY-MM
+    private LocalDate startDate;
+    private LocalDate endDate;
+    private LocalDate cutoffDate;
+    private String status; // open/closed/archived
+}
+package com.yiyundao.compensation.interfaces.dto.payroll;
+import lombok.Data;
+@Data
+public class PayrollBatchUpdateRequest {
+    private Long payCycleId;
+    private String periodLabel;
+    private String scopeJson;
+    private String currency;
+    private String remark;
+}
+package com.yiyundao.compensation.interfaces.dto.payroll;
+import lombok.Data;
+import java.math.BigDecimal;
+import java.util.List;
+@Data
+public class PayrollPreviewDto {
+    private Long batchId;
+    private String currency;
+    private Integer totalEmployees;
+    private Integer linesWithWarnings;
+    private Integer totalWarnings;
+    private List<String> warnings;
+    private BigDecimal earningsTotal;
+    private BigDecimal deductionsTotal;
+    private BigDecimal grossTotal;
+    private BigDecimal taxTotal;
+    private BigDecimal socialTotal;
+    private BigDecimal netTotal;
+    private List<PayrollPreviewLineDto> lines;
+    @Data
+    public static class PayrollPreviewLineDto {
+        private Long employeeId;
+        private String employeeNo;
+        private String employeeName;
+        private List<PayrollPreviewItemDto> items;
+        private BigDecimal earningsTotal;
+        private BigDecimal deductionsTotal;
+        private BigDecimal grossAmount;
+        private BigDecimal taxAmount;
+        private BigDecimal socialAmount;
+        private BigDecimal netAmount;
+        private List<String> warnings; // 缺失项/阈值/异常提示
+        private List<String> missingItems; // 模板要求但缺失的项编码
+        private DiffSummaryDto diff; // 与上期对比
+        private String department;
+        private Long managerId;
+        private String managerName;
+        private String employmentType;
+    }
+    @Data
+    public static class PayrollPreviewItemDto {
+        private String code;
+        private String name;
+        private String type; // earning/deduction
+        private Boolean taxable;
+        private BigDecimal amount;
+    }
+    @Data
+    public static class DiffSummaryDto {
+        private BigDecimal lastGrossAmount;
+        private BigDecimal lastNetAmount;
+        private BigDecimal netDeltaAmount;
+        private BigDecimal netDeltaPercent; // -1.00 ~ +1.00
+    }
+}
+package com.yiyundao.compensation.interfaces.dto.payroll;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+@Data
+public class SalaryTemplateUpsertRequest {
+    @NotBlank
+    private String name;
+    @NotBlank
+    private String type; // full_time / part_time
+    private String itemsJson;
+    private String taxRuleJson;
+    private String status; // enabled/disabled
+}
+package com.yiyundao.compensation.interfaces.dto.payroll;
+import lombok.Data;
+import java.math.BigDecimal;
+import java.util.List;
+@Data
+public class PayrollLedgerDto {
+    private Long batchId;
+    private String status;
+    private String periodLabel;
+    private String currency;
+    private Integer totalEmployees;
+    private BigDecimal earningsTotal;
+    private BigDecimal deductionsTotal;
+    private BigDecimal grossTotal;
+    private BigDecimal taxTotal;
+    private BigDecimal socialTotal;
+    private BigDecimal netTotal;
+    private Integer linesWithWarnings;
+    private Integer totalWarnings;
+    private List<String> warnings;
+    private List<PayrollPreviewDto.PayrollPreviewLineDto> lines;
+}
+package com.yiyundao.compensation.interfaces.dto.payroll;
+import lombok.Data;
+import java.math.BigDecimal;
+import java.util.List;
+@Data
+public class PayrollBasicReportDto {
+    private Long batchId;
+    private String periodLabel;
+    private String currency;
+    private BigDecimal earningsTotal;
+    private BigDecimal deductionsTotal;
+    private BigDecimal grossTotal;
+    private BigDecimal taxTotal;
+    private BigDecimal socialTotal;
+    private BigDecimal netTotal;
+    private Integer employeeCount;
+    private List<DepartmentSummary> departments;
+    @Data
+    public static class DepartmentSummary {
+        private String department;
+        private Integer employeeCount;
+        private BigDecimal earningsTotal;
+        private BigDecimal deductionsTotal;
+        private BigDecimal grossTotal;
+        private BigDecimal taxTotal;
+        private BigDecimal socialTotal;
+        private BigDecimal netTotal;
+    }
+}
+package com.yiyundao.compensation.interfaces.dto.payroll;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+@Data
+public class PayrollBatchCreateRequest {
+    private Long payCycleId;
+    private String periodLabel; // 可冗余传入
+    @NotBlank
+    private String type; // full_time / part_time
+    private String scopeJson; // JSON string
+    private String currency; // 默认 CNY
+    private String remark;
+}
+package com.yiyundao.compensation.interfaces.dto.org;
+import lombok.Data;
+import java.util.List;
+@Data
+public class OrgDeptTreeResponse {
+    private String platformType;
+    private List<OrgDeptNodeDto> roots;
+}
+package com.yiyundao.compensation.interfaces.dto.org;
+import lombok.Data;
+@Data
+public class EmployeePreviewDto {
+    private String platformType;
+    private String platformUserId;
+    private String employeeId;
+    private String name;
+    private String phone;
+    private String email;
+    private String department;
+    private java.util.List<String> departments;
+    private String position;
+    private String employmentType; // full_time/part_time，可编辑
+    private String groupKey;
+}
+package com.yiyundao.compensation.interfaces.dto.org;
+import lombok.Data;
+import java.util.List;
+@Data
+public class OrgFetchPreviewResponse {
+    private String platformType;
+    private int totalEmployees;
+    private List<EmployeePreviewDto> employees;
+}
+package com.yiyundao.compensation.interfaces.dto.org;
+import lombok.Data;
+import java.util.List;
+@Data
+public class OrgImportRequest {
+    private String platformType;
+    private List<OrgImportRequest.EmployeeItem> items;
+    @Data
+    public static class EmployeeItem {
+        private String employeeId;
+        private String name;
+        private String phone;
+        private String email;
+        private java.util.List<String> departments;
+        private String position;
+        private String employmentType; // full_time/part_time
+        private String platformUserId;
+        private String platformType;
+        private String status; // optional
+        private Boolean offline; // optional
+        private Long managerId; // optional
+        private String bankAccount; // optional
+        private String bankName; // optional
+        private java.time.LocalDate hireDate; // optional
+        private String username; // preferred username for system account
+    }
+}
+package com.yiyundao.compensation.interfaces.dto.org;
+import lombok.Data;
+@Data
+public class OrgMemberPreviewDto {
+    private String platformUserId;
+    private String name;
+    private String employeeId; // 预览阶段通常为空，供编辑
+    private String phone;
+    private String email;
+    private String position;
+    private String employmentType; // full_time/part_time，可编辑
+}
+package com.yiyundao.compensation.interfaces.dto.org;
+import lombok.Data;
+import java.util.ArrayList;
+import java.util.List;
+@Data
+public class OrgDeptNodeDto {
+    private String platformDeptId;
+    private String name;
+    private String parentPlatformDeptId;
+    private List<OrgDeptNodeDto> children = new ArrayList<>();
+    private List<OrgMemberPreviewDto> members = new ArrayList<>();
+}
+package com.yiyundao.compensation.interfaces.dto.org;
+import lombok.Data;
+@Data
+public class OrgFetchRequest {
+    private String platform; // wechat|dingtalk|feishu
+}
+package com.yiyundao.compensation.interfaces.dto.admin;
+import lombok.Data;
+import java.time.LocalDateTime;
+@Data
+public class RoleListItemDto {
+    private Long id;
+    private String code;
+    private String name;
+    private String description;
+    private String status;
+    private Integer userCount;
+    private Integer resourceCount;
+    private LocalDateTime createTime;
+    private LocalDateTime updateTime;
+}
+package com.yiyundao.compensation.interfaces.dto.admin;
+import lombok.Data;
+import java.util.List;
+@Data
+public class ResourceDetailDto {
+    private Long id;
+    private String type;       // MENU/VIEW/ACTION/API
+    private String code;
+    private String name;
+    private String path;
+    private String component;
+    private String icon;
+    private Long parentId;
+    private Integer orderNum;
+    private String status;     // enabled/disabled
+    private List<String> actions; // 授权动作（可为空）
+}
+package com.yiyundao.compensation.interfaces.dto.admin;
+import lombok.Data;
+@Data
+public class UserAggregateDto {
+    private Long userId;
+    private String username;
+    private String realName;
+    private String email;
+    private String phone;
+    private String roles; // comma separated
+    private Long employeeId;     // employee.id
+    private String employeeNo;   // employee.employee_id
+    private String employeeName; // employee.name
+    private String platformType;
+    private String platformUserId;
+}
+package com.yiyundao.compensation.interfaces.dto.auth;
+import lombok.Data;
+@Data
+public class OAuthAuthorizeResponse {
+    private String url;
+    private String state;
+}
+package com.yiyundao.compensation.interfaces.dto.auth;
+import lombok.Data;
+import java.util.List;
+@Data
+public class DevTokenRequest {
+    private String username;
+    private List<String> roles;       // e.g. ["ADMIN","MANAGER"]
+    private List<String> authorities; // e.g. ["approval:start","approval:read"]
+}
+package com.yiyundao.compensation.interfaces.dto.auth;
+import lombok.Data;
+@Data
+public class LoginRequest {
+    private String username;
+    private String password;
+}
+package com.yiyundao.compensation.interfaces.dto.auth;
+import lombok.Data;
+@Data
+public class LogoutRequest {
+    private String refreshToken; // 可选
+}
+package com.yiyundao.compensation.interfaces.dto.auth;
+import lombok.Data;
+@Data
+public class RefreshRequest {
+    private String refreshToken;
+}
+package com.yiyundao.compensation.interfaces.dto.auth;
+import lombok.Data;
+import java.util.List;
+@Data
+public class LoginResponse {
+    private String token;
+    private String refreshToken;
+    private String username;
+    private List<String> roles;
+}
+package com.yiyundao.compensation.interfaces.dto.approval;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+@Data
+public class CancelWorkflowRequest {
+    @NotNull
+    private Long operatorId;
+    private String reason;
+}
+package com.yiyundao.compensation.interfaces.dto.approval;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+@Data
+public class ApprovalDecisionRequest {
+    @NotNull
+    private Long approverId;
+    private String comment;
+}
+package com.yiyundao.compensation.interfaces.dto.approval;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
+import java.util.Map;
+@Data
+public class StartWorkflowRequest {
+    @NotBlank
+    private String workflowType; // WorkflowType code
+    @NotBlank
+    private String businessKey;
+    @NotBlank
+    private String businessType;
+    @NotNull
+    private Long initiatorId;
+    private Map<String, Object> workflowData;
+}
+package com.yiyundao.compensation.interfaces.dto.role;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+@Data
+public class RoleBaseRequest {
+    @Size(min = 2, max = 100, message = "角色名称长度必须在2-100之间")
+    private String name;
+    @Size(max = 500, message = "角色描述长度不能超过500")
+    private String description;
+    @Size(max = 100, message = "图标标识长度不能超过100")
+    private String icon;
+    @Size(max = 500, message = "备注长度不能超过500")
+    private String remarks;
+}
+package com.yiyundao.compensation.interfaces.dto.role;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+import java.util.List;
+@Data
+public class RoleResourceAssignRequest {
+    @Size(max = 200, message = "单次分配的资源数量不能超过200")
+    private List<ResourceAssignment> resources;
+    private Boolean replaceExisting = true;
+    @Data
+    public static class ResourceAssignment {
+        @NotEmpty(message = "资源ID不能为空")
+        private Long resourceId;
+        @Size(max = 20, message = "操作权限数量不能超过20")
+        private List<String> actions;
+    }
+}
+package com.yiyundao.compensation.interfaces.dto.role;
+import jakarta.validation.constraints.Pattern;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+@Data
+@EqualsAndHashCode(callSuper = true)
+public class UpdateRoleRequest extends RoleBaseRequest {
+    @Pattern(regexp = "^(enabled|disabled)$", message = "状态只能是 enabled 或 disabled")
+    private String status;
+    private Integer sortOrder;
+    private Boolean isEditable;
+}
+package com.yiyundao.compensation.interfaces.dto.role;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+import lombok.Data;
+import java.util.List;
+@Data
+public class CreateRoleRequest {
+    @NotBlank(message = "角色编码不能为空")
+    @Size(min = 2, max = 50, message = "角色编码长度必须在2-50之间")
+    @Pattern(regexp = "^[A-Za-z][A-Za-z0-9_]*$", message = "角色编码必须以字母开头，只能包含字母、数字和下划线")
+    private String code;
+    @NotBlank(message = "角色名称不能为空")
+    @Size(min = 2, max = 100, message = "角色名称长度必须在2-100之间")
+    private String name;
+    @Size(max = 500, message = "角色描述长度不能超过500")
+    private String description;
+    @Pattern(regexp = "^(BUSINESS|CUSTOM)$", message = "角色类型只能是 BUSINESS 或 CUSTOM")
+    private String roleType = "BUSINESS";
+    private Integer sortOrder = 0;
+    @Size(max = 100, message = "图标标识长度不能超过100")
+    private String icon;
+    @Size(max = 500, message = "备注长度不能超过500")
+    private String remarks;
+    private List<Long> resourceIds;
+    private List<String> actions;
+}
+package com.yiyundao.compensation.interfaces.dto.employee;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotEmpty;
+import lombok.Data;
+import java.util.List;
+@Data
+public class BatchImportRequest {
+    @Valid
+    @NotEmpty
+    private List<EmployeeCreateRequest> employees;
+}
+package com.yiyundao.compensation.interfaces.dto.employee;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+@Data
+public class BindPlatformRequest {
+    @NotBlank
+    private String platformUserId;
+    @NotBlank
+    private String platformType; // wechat/dingtalk/feishu
+}
+package com.yiyundao.compensation.interfaces.dto.employee;
+import lombok.Data;
+import java.time.LocalDate;
+@Data
+public class EmployeeUpdateRequest {
+    private String name;
+    private String phone;
+    private String email;
+    private String idCard; // 明文，后端加密
+    private String department;
+    private String position;
+    private LocalDate hireDate;
+    private String bankAccount; // 明文，后端加密
+    private String bankName;
+}
+package com.yiyundao.compensation.interfaces.dto.employee;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+import java.time.LocalDate;
+@Data
+public class EmployeeCreateRequest {
+    @NotBlank
+    private String employeeId;
+    @NotBlank
+    private String name;
+    private String phone;
+    private String email;
+    private String idCard;
+    private String department;
+    private String position;
+    private String employmentType;
+    private String platformUserId;
+    private String platformType;
+    private Long managerId;
+    private LocalDate hireDate;
+    private String status; // 默认 active
+    private String bankAccount; // 明文，后端加密
+    private String bankName;
+    private Boolean offline;
+    private String username;
+}
+package com.yiyundao.compensation.interfaces.dto.employee;
+import jakarta.validation.constraints.NotBlank;
+import lombok.Data;
+@Data
+public class UpdateStatusRequest {
+    @NotBlank
+    private String status; // active/inactive/terminated 等
+}
+package com.yiyundao.compensation.interfaces.dto.openapi;
+import lombok.Builder;
+import lombok.Data;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+@Data
+@Builder
+public class OpenApiPayrollLineDto {
+    private Long id;
+    private Long batchId;
+    private String employeeRef;
+    private String employmentType;
+    private BigDecimal grossAmount;
+    private BigDecimal taxAmount;
+    private BigDecimal socialAmount;
+    private BigDecimal netAmount;
+    private String currency;
+    private List<String> departments;
+    private String employeeNameMasked;
+    private String phoneMasked;
+    private LocalDateTime generatedAt;
+}
+package com.yiyundao.compensation.interfaces.dto.openapi;
+import lombok.Builder;
+import lombok.Data;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+@Data
+@Builder
+public class OpenApiPayslipDto {
+    private Long id;
+    private String employeeRef;
+    private String period;
+    private String employmentType;
+    private BigDecimal grossAmount;
+    private BigDecimal taxAmount;
+    private BigDecimal socialAmount;
+    private BigDecimal netAmount;
+    private String currency;
+    private List<String> departments;
+    private String employeeNameMasked;
+    private String phoneMasked;
+    private LocalDateTime generatedAt;
+    private List<PayslipItemDto> items;
+    @Data
+    @Builder
+    public static class PayslipItemDto {
+        private String code;
+        private String name;
+        private String type;
+        private Boolean taxable;
+        private BigDecimal amount;
+        private Boolean showOnPayslip;
+        private Integer order;
+    }
+}
+package com.yiyundao.compensation.interfaces.dto.openapi;
+import lombok.Builder;
+import lombok.Data;
+import java.time.LocalDateTime;
+@Data
+@Builder
+public class OpenApiPayrollBatchDto {
+    private Long id;
+    private String periodLabel;
+    private String type;
+    private String status;
+    private String currency;
+    private Long lineCount;
+    private LocalDateTime paidAt;
+    private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+}
+package com.yiyundao.compensation.interfaces.dto.app;
+import lombok.Builder;
+import lombok.Data;
+@Data
+@Builder
+public class ExternalAppTokenResponse {
+    private String accessToken;
+    private String tokenType;
+    private long expiresIn;
+    private String scope;
+}
+package com.yiyundao.compensation.interfaces.dto.app;
+import lombok.Builder;
+import lombok.Data;
+import java.time.LocalDateTime;
+import java.util.List;
+@Data
+@Builder
+public class AppRegistryResponse {
+    private Long id;
+    private String appName;
+    private String clientId;
+    private List<String> scopes;
+    private List<String> ipWhitelist;
+    private String webhookUrl;
+    private String status;
+    private LocalDateTime createTime;
+    private LocalDateTime updateTime;
+}
+package com.yiyundao.compensation.interfaces.dto.app;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
+import lombok.Data;
+import java.util.List;
+@Data
+public class AppRegistryCreateRequest {
+    @NotBlank
+    private String appName;
+    @NotEmpty
+    private List<String> scopes;
+    private List<String> ipWhitelist;
+    private String webhookUrl;
+    private String status;
+}
+package com.yiyundao.compensation.interfaces.dto.app;
+import lombok.Builder;
+import lombok.Data;
+import java.time.LocalDateTime;
+import java.util.List;
+@Data
+@Builder
+public class AppRegistrySecretResponse {
+    private Long id;
+    private String appName;
+    private String clientId;
+    private String clientSecret;
+    private List<String> scopes;
+    private List<String> ipWhitelist;
+    private String webhookUrl;
+    private String status;
+    private LocalDateTime createTime;
+    private LocalDateTime updateTime;
+}
+package com.yiyundao.compensation.interfaces.dto.app;
+import lombok.Data;
+import java.util.List;
+@Data
+public class AppRegistryUpdateRequest {
+    private String appName;
+    private List<String> scopes;
+    private List<String> ipWhitelist;
+    private String webhookUrl;
+    private String status;
+}
+package com.yiyundao.compensation.interfaces.dto.config;
+import lombok.Data;
+@Data
+public class SmsConfigDto {
+    private String provider; // 服务商: aliyun/tencent/huawei/mock
+    private String accessKeyId;
+    private String accessKeySecret;
+    private String signName; // 短信签名
+    private String templateCode; // 默认模板
+    private String secretId;
+    private String secretKey;
+    private String appId;
+    private String sdkAppId;
+    private String appKey;
+    private String appSecret;
+    private String sender;
+    private String templateId;
+    private String endpoint; // 服务端点
+    private String region; // 地域
+    private Integer dailyLimit; // 每日发送限制
+    private Integer rateLimitPerMinute; // 每分钟限流
+    private Boolean enabled; // 是否启用
+}package com.yiyundao.compensation.interfaces.dto.config;
+import lombok.Data;
+@Data
+public class EmailConfigDto {
+    private String host; // SMTP服务器
+    private Integer port; // 端口
+    private String username; // 用户名
+    private String password; // 密码
+    private String fromAddress; // 发件人地址
+    private String fromName; // 发件人名称
+    private Boolean ssl; // 是否启用SSL
+    private Boolean tls; // 是否启用TLS
+    private String encoding; // 编码
+    private Boolean enabled; // 是否启用
+}package com.yiyundao.compensation.interfaces.dto.config;
+import lombok.Data;
+import java.time.LocalDateTime;
+@Data
+public class IntegrationConfigListDto {
+    private String platformType; // 平台类型: wechat, dingtalk, feishu, alipay, sms, email, encryption
+    private String platformName; // 平台显示名称
+    private Boolean enabled; // 是否启用
+    private Boolean configured; // 是否已配置
+    private String connectionStatus; // 连接状态: connected, disconnected, unknown
+    private LocalDateTime lastModified; // 最后修改时间
+}package com.yiyundao.compensation.interfaces.dto.config;
+import lombok.Data;
+@Data
+public class FeishuConfigDto {
+    private String appId;
+    private String appSecret;
+    private String appToken; // 应用Token
+    private Boolean enabled;
+}
+package com.yiyundao.compensation.interfaces.dto.config;
+import lombok.Data;
+@Data
+public class WechatConfigDto {
+    private String corpId;
+    private String corpSecret;
+    private String agentId;
+}
+package com.yiyundao.compensation.interfaces.dto.config;
+import lombok.Data;
+@Data
+public class EncryptionConfigDto {
+    private String aesKey; // AES密钥
+    private String sm4Key; // SM4密钥
+    private String algorithm; // 算法: SM4+AES/AES256
+    private String keyDerivation; // 密钥派生方式
+    private Integer keyRotationDays; // 密钥轮换天数
+    private Boolean enabled; // 是否启用
+}package com.yiyundao.compensation.interfaces.dto.config;
+import lombok.Data;
+@Data
+public class AlipayConfigDto {
+    private String appId;
+    private String serverUrl;
+    private String privateKey;
+    private String publicKey;
+    private String charset;
+    private String signType;
+    private String format;
+    private String notifyUrl;
+    private String returnUrl;
+}
+package com.yiyundao.compensation.interfaces.dto.config;
+import lombok.Data;
+import java.time.LocalDateTime;
+@Data
+public class IntegrationConfigDetailDto {
+    private String platformType; // 平台类型
+    private String platformName; // 平台显示名称
+    private Boolean enabled; // 是否启用
+    private Object config; // 具体配置内容（根据平台类型返回对应的DTO）
+    private String connectionStatus; // 连接状态: connected, disconnected, unknown
+    private LocalDateTime lastModified; // 最后修改时间
+}package com.yiyundao.compensation.interfaces.dto.config;
+import lombok.Data;
+@Data
+public class DingTalkConfigDto {
+    private String appKey;
+    private String appSecret;
+    private String webhookUrl; // 机器人Webhook地址
+    private Boolean enabled;
+}
+package com.yiyundao.compensation.interceptor;
+import com.yiyundao.compensation.common.annotation.Idempotent;
+import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.service.IdempotentService;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
+import org.springframework.stereotype.Component;
+import org.springframework.web.method.HandlerMethod;
+import org.springframework.web.servlet.HandlerInterceptor;
+import java.lang.reflect.Method;
+import java.util.HashMap;
+import java.util.Map;
+@Slf4j
+@Component
+@ConditionalOnBean(IdempotentService.class)
+public class IdempotentInterceptor implements HandlerInterceptor {
+    private final IdempotentService idempotentService;
+    @Autowired
+    public IdempotentInterceptor(@Autowired(required = false) IdempotentService idempotentService) {
+        this.idempotentService = idempotentService;
+    }
+    @Override
+    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
+        if (!(handler instanceof HandlerMethod handlerMethod)) {
+            return true;
+        }
+        Method method = handlerMethod.getMethod();
+        Idempotent idempotent = method.getAnnotation(Idempotent.class);
+        if (idempotent == null) {
+            return true;
+        }
+        if (idempotentService == null) {
+            return true;
+        }
+        String idempotentKey = generateKey(request, idempotent, handlerMethod);
+        boolean acquired = idempotentService.tryLock(
+                idempotentKey,
+                idempotent.expireSeconds(),
+                idempotent.tryLock() ? idempotent.waitTime() : 0
+        );
+        if (!acquired) {
+            log.warn("幂等性检查未通过: key={}", idempotentKey);
+            writeResponse(response, ErrorCode.REQUEST_CONFLICT, idempotent.message());
+            return false;
+        }
+        request.setAttribute("idempotentKey", idempotentKey);
+        return true;
+    }
+    @Override
+    public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
+                                Object handler, Exception ex) {
+        String idempotentKey = (String) request.getAttribute("idempotentKey");
+        if (idempotentKey != null) {
+            if (ex == null) {
+                idempotentService.unlock(idempotentKey);
+            }
+        }
+    }
+    private String generateKey(HttpServletRequest request, Idempotent idempotent,
+                               HandlerMethod handlerMethod) {
+        Map<String, Object> variables = new HashMap<>();
+        variables.put("request", request);
+        variables.put("method", handlerMethod.getMethod().getName());
+        variables.put("uri", request.getRequestURI());
+        variables.put("ip", getClientIp(request));
+        request.getParameterMap().forEach((k, v) ->
+                variables.put(k, v.length > 0 ? v[0] : null));
+        return idempotentService.generateKey(idempotent.key(), variables);
+    }
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("X-Forwarded-For");
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getHeader("Proxy-Client-IP");
+        }
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getHeader("WL-Proxy-Client-IP");
+        }
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getRemoteAddr();
+        }
+        return ip;
+    }
+    private void writeResponse(HttpServletResponse response, ErrorCode errorCode, String message) {
+        try {
+            response.setContentType("application/json;charset=UTF-8");
+            response.setStatus(errorCode.getHttpStatusCode());
+            ApiResponse<?> apiResponse = ApiResponse.error(errorCode, message);
+            response.getWriter().write(
+                    new com.fasterxml.jackson.databind.ObjectMapper()
+                            .writeValueAsString(apiResponse)
+            );
+        } catch (Exception e) {
+            log.error("写入幂等响应失败", e);
+        }
+    }
+}
+package com.yiyundao.compensation.entity;
+import com.baomidou.mybatisplus.annotation.*;
+import lombok.Data;
+import java.time.LocalDateTime;
+@Data
+@TableName("scheduled_task")
+public class ScheduledTask {
+    @TableId(type = IdType.AUTO)
+    private Long id;
+    @TableField("task_key")
+    private String taskKey;
+    @TableField("task_name")
+    private String taskName;
+    @TableField("task_group")
+    private String taskGroup;
+    @TableField("cron_expression")
+    private String cronExpression;
+    @TableField("description")
+    private String description;
+    @TableField("status")
+    private TaskStatus status;
+    @TableField("retry_count")
+    private Integer retryCount;
+    @TableField("max_retry_count")
+    private Integer maxRetryCount;
+    @TableField("retry_interval_seconds")
+    private Integer retryIntervalSeconds;
+    @TableField("last_execute_time")
+    private LocalDateTime lastExecuteTime;
+    @TableField("next_execute_time")
+    private LocalDateTime nextExecuteTime;
+    @TableField("last_result")
+    private String lastResult;
+    @TableField("alarm_enabled")
+    private Boolean alarmEnabled;
+    @TableField("alarm_receivers")
+    private String alarmReceivers;
+    @TableField("handler_bean")
+    private String handlerBean;
+    @TableField(value = "create_time", fill = FieldFill.INSERT)
+    private LocalDateTime createTime;
+    @TableField(value = "update_time", fill = FieldFill.INSERT_UPDATE)
+    private LocalDateTime updateTime;
+    @TableLogic
+    @TableField("deleted")
+    private Integer deleted;
+    public enum TaskStatus {
+        PAUSED,
+        RUNNING,
+        FAILED,
+        SUCCESS
+    }
+}
+package com.yiyundao.compensation.entity;
+import com.baomidou.mybatisplus.annotation.*;
+import lombok.Data;
+import lombok.EqualsAndHashCode;
+import java.time.LocalDateTime;
+@Data
+@EqualsAndHashCode(callSuper = false)
+public abstract class BaseEntity {
+    @TableId(type = IdType.AUTO)
+    private Long id;
+    @TableField(fill = FieldFill.INSERT)
+    private LocalDateTime createTime;
+    @TableField(fill = FieldFill.INSERT_UPDATE)
+    private LocalDateTime updateTime;
+    @TableField(fill = FieldFill.INSERT)
+    private String createBy;
+    @TableField(fill = FieldFill.INSERT_UPDATE)
+    private String updateBy;
+    @TableLogic
+    @TableField(fill = FieldFill.INSERT)
+    private Integer deleted;
+    @Version
+    private Integer version;
+}package com.yiyundao.compensation.entity;
+import com.baomidou.mybatisplus.annotation.*;
+import lombok.Data;
+import java.time.LocalDateTime;
+@Data
+@TableName("scheduled_task_execution")
+public class ScheduledTaskExecution {
+    @TableId(type = IdType.AUTO)
+    private Long id;
+    @TableField("task_id")
+    private Long taskId;
+    @TableField("task_key")
+    private String taskKey;
+    @TableField("start_time")
+    private LocalDateTime startTime;
+    @TableField("end_time")
+    private LocalDateTime endTime;
+    @TableField("duration_ms")
+    private Long durationMs;
+    @TableField("status")
+    private ExecutionStatus status;
+    @TableField("result")
+    private String result;
+    @TableField("error_message")
+    private String errorMessage;
+    @TableField("trace_id")
+    private String traceId;
+    @TableField(value = "create_time", fill = FieldFill.INSERT)
+    private LocalDateTime createTime;
+    public enum ExecutionStatus {
+        RUNNING,
+        SUCCESS,
+        FAILED,
+        RETRYING
+    }
+}

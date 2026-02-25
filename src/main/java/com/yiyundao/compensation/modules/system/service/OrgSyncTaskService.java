@@ -66,6 +66,16 @@ public class OrgSyncTaskService {
         return tasks.get(id);
     }
 
+    public boolean isRunningFor(String platform) {
+        for (TaskInfo t : tasks.values()) {
+            if ("RUNNING".equalsIgnoreCase(t.getStatus()) &&
+                (platform.equalsIgnoreCase(t.getPlatform()) || "all".equalsIgnoreCase(t.getPlatform()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     @Data
     public static class TaskInfo {
         private String id;
@@ -77,4 +87,3 @@ public class OrgSyncTaskService {
         private LocalDateTime endTime;
     }
 }
-

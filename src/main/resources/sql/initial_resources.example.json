@@ -1,0 +1,86 @@
+[
+  {
+    "type": "MENU",
+    "code": "dashboard",
+    "name": "Dashboard",
+    "path": "/",
+    "component": "dashboard/Dashboard",
+    "icon": "dashboard",
+    "parentId": null,
+    "orderNum": 1,
+    "propsJson": {"keepAlive": true, "affix": true},
+    "status": "enabled"
+  },
+  {
+    "type": "MENU",
+    "code": "employees",
+    "name": "Employees",
+    "path": "/employees",
+    "component": "employees/List",
+    "icon": "team",
+    "parentId": null,
+    "orderNum": 10,
+    "propsJson": {"keepAlive": true},
+    "status": "enabled"
+  },
+  {
+    "type": "VIEW",
+    "code": "employees.detail",
+    "name": "Employee Detail",
+    "path": "/employees/:id",
+    "component": "employees/Detail",
+    "icon": null,
+    "parentId": null,
+    "orderNum": 11,
+    "propsJson": {"keepAlive": true},
+    "status": "enabled"
+  },
+  {
+    "type": "MENU",
+    "code": "business",
+    "name": "Business",
+    "path": null,
+    "component": null,
+    "icon": "appstore",
+    "parentId": null,
+    "orderNum": 20,
+    "propsJson": {"keepAlive": true},
+    "status": "enabled"
+  },
+  {
+    "type": "MENU",
+    "code": "payments.batches",
+    "name": "Payment Batches",
+    "path": "/payments/batches",
+    "component": "payments/Batches",
+    "icon": "wallet",
+    "parentId": null,
+    "orderNum": 22,
+    "propsJson": {"keepAlive": true},
+    "status": "enabled"
+  },
+  {
+    "type": "API",
+    "code": "api.payment.batch.list",
+    "name": "List Payment Batches",
+    "path": "/api/payment/batch",
+    "component": null,
+    "icon": null,
+    "parentId": null,
+    "orderNum": 120,
+    "propsJson": {"method": "GET"},
+    "status": "enabled"
+  },
+  {
+    "type": "API",
+    "code": "api.employee.create",
+    "name": "Create Employee",
+    "path": "/api/employee",
+    "component": null,
+    "icon": null,
+    "parentId": null,
+    "orderNum": 130,
+    "propsJson": {"method": "POST"},
+    "status": "enabled"
+  }
+]

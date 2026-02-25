@@ -12,7 +12,8 @@ public class SensitiveDataValidator {
     private static final Pattern ID_CARD_PATTERN = Pattern.compile("^[1-9]\\d{5}(18|19|([23]\\d))\\d{2}((0[1-9])|(10|11|12))(([0-2][1-9])|10|20|30|31)\\d{3}[0-9Xx]$");
     private static final Pattern PHONE_PATTERN = Pattern.compile("^1[3-9]\\d{9}$");
     private static final Pattern BANK_CARD_PATTERN = Pattern.compile("^\\d{15,19}$");
-    private static final Pattern NAME_PATTERN = Pattern.compile("^[\\u4e00-\\u9fa5·]{2,20}$");
+    // 允许单字中文姓名，范围中文与中点，长度1-20
+    private static final Pattern NAME_PATTERN = Pattern.compile("^[\\u4e00-\\u9fa5·]{1,20}$");
     private static final Pattern ALIPAY_ACCOUNT_PATTERN = Pattern.compile("^(1[3-9]\\d{9}|[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,})$");
     private static final BigDecimal MIN_AMOUNT = new BigDecimal("0.01");
     private static final BigDecimal MAX_SINGLE_AMOUNT = new BigDecimal("10000.00");
@@ -127,4 +128,3 @@ public class SensitiveDataValidator {
         @Override public String toString() { return valid ? "Valid" : "Invalid: " + message; }
     }
 }
-

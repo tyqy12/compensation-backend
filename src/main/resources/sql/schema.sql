@@ -20,6 +20,7 @@ CREATE TABLE `employee` (
   `encrypted_id_card` text COMMENT '加密后的身份证号(SM4+AES双重加密)',
   `department` varchar(100) DEFAULT NULL COMMENT '部门',
   `position` varchar(100) DEFAULT NULL COMMENT '职位',
+  `employment_type` varchar(20) DEFAULT 'full_time' COMMENT '用工类型(full_time/part_time)',
   `platform_user_id` varchar(100) DEFAULT NULL COMMENT '平台用户ID(企微/钉钉/飞书)',
   `platform_type` varchar(20) DEFAULT NULL COMMENT '平台类型(wechat/dingtalk/feishu)',
   `is_offline` tinyint(1) DEFAULT '0' COMMENT '是否离线员工(0:否,1:是)',
@@ -42,6 +43,202 @@ CREATE TABLE `employee` (
   KEY `idx_offline` (`is_offline`),
   KEY `idx_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工信息表';
+
+-- ============================================
+-- 1.1 员工-部门关联表 (employee_department)
+-- ============================================
+DROP TABLE IF EXISTS `employee_department`;
+CREATE TABLE `employee_department` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `employee_id` bigint NOT NULL COMMENT '员工ID',
+  `platform_type` varchar(20) DEFAULT NULL COMMENT '平台类型',
+  `platform_dept_id` varchar(100) DEFAULT NULL COMMENT '平台部门ID',
+  `local_dept_id` bigint DEFAULT NULL COMMENT '本地部门ID',
+  `dept_name` varchar(200) NOT NULL COMMENT '部门名称',
+  `is_primary` tinyint(1) DEFAULT '0' COMMENT '是否主部门',
+  `order_num` int DEFAULT '0' COMMENT '顺序',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除(0:未删除,1:已删除)',
+  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+  PRIMARY KEY (`id`),
+  KEY `idx_emp` (`employee_id`),
+  KEY `idx_platform_dept` (`platform_type`,`platform_dept_id`),
+  CONSTRAINT `fk_emp_dept_employee` FOREIGN KEY (`employee_id`) REFERENCES `employee` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工-部门多对多关联';
+
+-- ============================================
+-- 1.2 薪酬核心表（M1）
+-- ============================================
+DROP TABLE IF EXISTS `salary_item`;
+CREATE TABLE `salary_item` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `code` varchar(50) NOT NULL COMMENT '项编码',
+  `name` varchar(100) NOT NULL COMMENT '项名称',
+  `type` varchar(20) NOT NULL COMMENT 'earning/deduction',
+  `taxable` tinyint(1) DEFAULT '1' COMMENT '是否计税',
+  `show_on_payslip` tinyint(1) DEFAULT '1' COMMENT '工资条显示',
+  `order_num` int DEFAULT '0' COMMENT '排序',
+  `status` varchar(20) DEFAULT 'enabled' COMMENT '状态',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_item_code` (`code`),
+  KEY `idx_status_order` (`status`,`order_num`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资项字典';
+
+DROP TABLE IF EXISTS `salary_template`;
+CREATE TABLE `salary_template` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `name` varchar(100) NOT NULL COMMENT '模板名称',
+  `type` varchar(20) NOT NULL COMMENT 'full_time/part_time',
+  `items_json` json DEFAULT NULL COMMENT '项配置JSON',
+  `tax_rule_json` json DEFAULT NULL COMMENT '税社保口径JSON',
+  `status` varchar(20) DEFAULT 'enabled' COMMENT '状态',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_type_status` (`type`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资模板';
+
+DROP TABLE IF EXISTS `pay_cycle`;
+CREATE TABLE `pay_cycle` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `type` varchar(20) NOT NULL COMMENT 'monthly/custom',
+  `period_label` varchar(20) NOT NULL COMMENT '周期标签(YYYY-MM)',
+  `start_date` date DEFAULT NULL,
+  `end_date` date DEFAULT NULL,
+  `cutoff_date` date DEFAULT NULL,
+  `status` varchar(20) DEFAULT 'open',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_cycle` (`type`,`period_label`),
+  KEY `idx_status_start` (`status`,`start_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='发薪周期';
+
+DROP TABLE IF EXISTS `payroll_batch`;
+CREATE TABLE `payroll_batch` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `pay_cycle_id` bigint DEFAULT NULL COMMENT '周期ID',
+  `period_label` varchar(20) DEFAULT NULL COMMENT '周期标签',
+  `type` varchar(20) NOT NULL COMMENT 'full_time/part_time',
+  `scope_json` json DEFAULT NULL COMMENT '范围JSON',
+  `currency` varchar(10) DEFAULT 'CNY',
+  `status` varchar(20) DEFAULT 'draft',
+  `approval_workflow_id` bigint DEFAULT NULL,
+  `payment_batch_no` varchar(50) DEFAULT NULL,
+  `remark` varchar(500) DEFAULT NULL,
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_batch_type_period_status` (`type`,`period_label`,`status`),
+  KEY `idx_cycle` (`pay_cycle_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='发薪批次';
+
+DROP TABLE IF EXISTS `payroll_line`;
+CREATE TABLE `payroll_line` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `batch_id` bigint NOT NULL COMMENT '批次ID',
+  `employee_id` bigint NOT NULL COMMENT '员工ID',
+  `employment_type` varchar(20) NOT NULL COMMENT 'full_time/part_time',
+  `template_id` bigint DEFAULT NULL COMMENT '模板ID',
+  `items_snapshot_json` json DEFAULT NULL COMMENT '项快照JSON',
+  `gross_amount` decimal(12,2) DEFAULT '0.00',
+  `tax_amount` decimal(12,2) DEFAULT '0.00',
+  `social_amount` decimal(12,2) DEFAULT '0.00',
+  `net_amount` decimal(12,2) DEFAULT '0.00',
+  `currency` varchar(10) DEFAULT 'CNY',
+  `status` varchar(20) DEFAULT 'draft',
+  `note` varchar(500) DEFAULT NULL,
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_batch_employee` (`batch_id`,`employee_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工资行';
+
+DROP TABLE IF EXISTS `payroll_adjustment`;
+CREATE TABLE `payroll_adjustment` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `line_id` bigint NOT NULL COMMENT '工资行ID',
+  `item_code` varchar(50) NOT NULL COMMENT '项编码',
+  `amount` decimal(12,2) NOT NULL COMMENT '调整金额',
+  `reason` varchar(200) DEFAULT NULL COMMENT '原因',
+  `approver_id` bigint DEFAULT NULL COMMENT '审批人ID',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_line` (`line_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工资调整';
+
+DROP TABLE IF EXISTS `timesheet_entry`;
+CREATE TABLE `timesheet_entry` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `employee_id` bigint NOT NULL COMMENT '员工ID',
+  `work_date` date NOT NULL COMMENT '工作日期',
+  `hours` decimal(6,2) DEFAULT NULL COMMENT '工时(小时)',
+  `units` decimal(10,2) DEFAULT NULL COMMENT '产出数量',
+  `project` varchar(100) DEFAULT NULL COMMENT '项目',
+  `department` varchar(100) DEFAULT NULL COMMENT '部门展示',
+  `source` varchar(20) DEFAULT 'api' COMMENT 'manual/import/api',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_emp_date` (`employee_id`,`work_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工时/产出条目';
+
+-- 导入暂存表
+DROP TABLE IF EXISTS `payroll_import_item`;
+CREATE TABLE `payroll_import_item` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `batch_id` bigint NOT NULL COMMENT '批次ID',
+  `employee_id` bigint NOT NULL COMMENT '员工ID',
+  `item_code` varchar(50) NOT NULL COMMENT '项编码',
+  `amount` decimal(12,2) NOT NULL COMMENT '金额',
+  `note` varchar(200) DEFAULT NULL COMMENT '备注',
+  `source_name` varchar(200) DEFAULT NULL COMMENT '来源文件',
+  `row_no` int DEFAULT NULL COMMENT '行号',
+  `status` varchar(20) DEFAULT 'valid' COMMENT 'valid/invalid',
+  `error_msg` varchar(500) DEFAULT NULL COMMENT '错误信息',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_batch_emp` (`batch_id`,`employee_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪酬导入暂存';
 
 -- ============================================
 -- 2. 支付记录表 (payment_record)
@@ -215,6 +412,47 @@ CREATE TABLE `sys_user` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统用户表';
 
 -- ============================================
+-- 7. 通知记录表 (notification_record)
+-- ============================================
+DROP TABLE IF EXISTS `notification_record`;
+CREATE TABLE `notification_record` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `notification_type` varchar(50) NOT NULL COMMENT '通知类型',
+  `channel` varchar(50) NOT NULL COMMENT '通知渠道',
+  `recipient_id` varchar(100) NOT NULL COMMENT '接收人ID',
+  `recipient_name` varchar(100) DEFAULT NULL COMMENT '接收人姓名',
+  `title` varchar(200) DEFAULT NULL COMMENT '通知标题',
+  `content` text COMMENT '通知内容',
+  `template_id` varchar(100) DEFAULT NULL COMMENT '模板ID',
+  `template_params` text COMMENT '模板参数(JSON)',
+  `business_type` varchar(50) DEFAULT NULL COMMENT '业务类型',
+  `business_key` varchar(100) DEFAULT NULL COMMENT '业务标识',
+  `status` varchar(50) NOT NULL DEFAULT 'pending' COMMENT '通知状态',
+  `retry_count` int DEFAULT '0' COMMENT '重试次数',
+  `max_retry` int DEFAULT '3' COMMENT '最大重试次数',
+  `next_retry_time` datetime DEFAULT NULL COMMENT '下次重试时间',
+  `send_time` datetime DEFAULT NULL COMMENT '实际发送时间',
+  `response_code` varchar(50) DEFAULT NULL COMMENT '响应码',
+  `response_message` varchar(255) DEFAULT NULL COMMENT '响应消息',
+  `error_message` varchar(500) DEFAULT NULL COMMENT '错误信息',
+  `priority` int DEFAULT '0' COMMENT '优先级',
+  `fallback_channels` varchar(255) DEFAULT NULL COMMENT '失败回退渠道(JSON数组)',
+  `is_read` tinyint(1) DEFAULT '0' COMMENT '是否已读',
+  `read_time` datetime DEFAULT NULL COMMENT '读取时间',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+  PRIMARY KEY (`id`),
+  KEY `idx_status_next_retry` (`status`, `next_retry_time`),
+  KEY `idx_business_type_key` (`business_type`, `business_key`),
+  KEY `idx_recipient_channel` (`recipient_id`, `channel`),
+  KEY `idx_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='通知发送记录表';
+
+-- ============================================
 -- 7. 操作日志表 (audit_log)
 -- ============================================
 DROP TABLE IF EXISTS `audit_log`;
@@ -254,6 +492,7 @@ CREATE TABLE `sys_config` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `config_key` varchar(100) NOT NULL COMMENT '配置键',
   `config_value` text COMMENT '配置值',
+  `remark` varchar(500) DEFAULT NULL COMMENT '配置备注',
   `config_type` varchar(20) DEFAULT 'string' COMMENT '配置类型(string,number,boolean,json)',
   `config_desc` varchar(500) DEFAULT NULL COMMENT '配置描述',
   `is_encrypted` tinyint(1) DEFAULT '0' COMMENT '是否加密(0:否,1:是)',
@@ -272,6 +511,27 @@ CREATE TABLE `sys_config` (
 -- 9. 集成配置表 (integration_config)
 -- 用于存储企微/钉钉/飞书/支付宝等第三方平台配置(JSON)
 -- ============================================
+DROP TABLE IF EXISTS `org_department`;
+CREATE TABLE `org_department` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `platform_type` varchar(20) NOT NULL COMMENT '平台类型(wechat/dingtalk/feishu)',
+  `platform_dept_id` varchar(100) NOT NULL COMMENT '平台部门ID',
+  `name` varchar(200) NOT NULL COMMENT '部门名称',
+  `parent_platform_dept_id` varchar(100) DEFAULT NULL COMMENT '平台父部门ID',
+  `parent_id` bigint DEFAULT NULL COMMENT '本地父部门ID',
+  `order_num` int DEFAULT NULL COMMENT '排序',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_platform_dept` (`platform_type`, `platform_dept_id`),
+  KEY `idx_parent` (`parent_platform_dept_id`),
+  KEY `idx_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='组织部门表';
+
 DROP TABLE IF EXISTS `integration_config`;
 CREATE TABLE `integration_config` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',

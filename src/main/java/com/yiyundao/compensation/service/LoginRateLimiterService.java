@@ -31,8 +31,10 @@ public class LoginRateLimiterService {
     }
 
     public void onFail(String username, String ip) {
-        long userFails = redisTemplate.opsForValue().increment(KEY_FAIL_USER + username) == null ? 0 : (Long) redisTemplate.opsForValue().get(KEY_FAIL_USER + username);
-        long ipFails = redisTemplate.opsForValue().increment(KEY_FAIL_IP + ip) == null ? 0 : (Long) redisTemplate.opsForValue().get(KEY_FAIL_IP + ip);
+        Long userIncr = redisTemplate.opsForValue().increment(KEY_FAIL_USER + username, 1L);
+        Long ipIncr = redisTemplate.opsForValue().increment(KEY_FAIL_IP + ip, 1L);
+        long userFails = userIncr == null ? 0L : userIncr;
+        long ipFails = ipIncr == null ? 0L : ipIncr;
         // ensure TTL on counters
         long window = sysConfigService.getLong("auth.login.rate.window.seconds", WINDOW_SECONDS_DEFAULT);
         long lock = sysConfigService.getLong("auth.login.rate.lock.seconds", LOCK_SECONDS_DEFAULT);

@@ -14,6 +14,16 @@ public interface OrganizationAdapter {
 
     OrganizationSyncResult syncOrganization();
 
+    /**
+     * 获取平台当前所有员工的预览数据（不落库，仅用于前端确认与编辑后导入）。
+     */
+    java.util.List<com.yiyundao.compensation.modules.employee.entity.Employee> fetchAllEmployees();
+
+    /**
+     * 获取平台的部门树（包含部门节点与成员列表，不落库）。
+     */
+    java.util.List<com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto> fetchDepartmentTree();
+
     Employee getUserInfo(String platformUserId);
 
     boolean isManager(String platformUserId);
@@ -24,4 +34,3 @@ public interface OrganizationAdapter {
 
     boolean checkConnection();
 }
-

@@ -1,0 +1,4 @@
+[ZoneTransfer]
+ZoneId=3
+ReferrerUrl=http://47.108.70.177:8080/index.php?route=/database/export&db=s06
+HostUrl=http://47.108.70.177:8080/index.php?route=/export

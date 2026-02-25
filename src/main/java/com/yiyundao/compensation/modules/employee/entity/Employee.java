@@ -23,6 +23,8 @@ public class Employee extends BaseEntity {
 
     private String department;
     private String position;
+    @TableField("employment_type")
+    private String employmentType; // full_time / part_time
     private String platformUserId;
     private String platformType;
 
@@ -37,4 +39,3 @@ public class Employee extends BaseEntity {
     private String bankAccount;
     private String bankName;
 }
-

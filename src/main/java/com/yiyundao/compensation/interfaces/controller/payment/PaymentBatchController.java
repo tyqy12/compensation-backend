@@ -7,10 +7,12 @@ import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
 import com.yiyundao.compensation.enums.PaymentStatus;
 import com.yiyundao.compensation.interfaces.vo.payment.PaymentBatchVO;
 import com.yiyundao.compensation.interfaces.vo.payment.PaymentRecordItemVO;
+import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.service.AlipayService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.HashMap;
@@ -18,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Slf4j
 @RestController
 @RequestMapping("/payment/batch")
 @RequiredArgsConstructor
@@ -26,6 +29,7 @@ public class PaymentBatchController {
     private final PaymentBatchService paymentBatchService;
     private final PaymentRecordService paymentRecordService;
     private final AlipayService alipayService;
+    private final AuditLogService auditLogService;
 
     // 分页查询支付批次
     @GetMapping
@@ -71,7 +75,42 @@ public class PaymentBatchController {
     // 启动批量转账（异步）
     @PostMapping("/{batchNo}/start")
     public ApiResponse<String> start(@PathVariable String batchNo) {
-        alipayService.batchTransfer(batchNo);
-        return ApiResponse.success("批量转账已启动");
+        long begin = System.currentTimeMillis();
+        try {
+            PaymentBatch batch = paymentBatchService.getByBatchNo(batchNo);
+            if (batch == null) {
+                audit("启动批量转账", null, batchNo, "PAYMENT", false, "批次不存在", begin);
+                return ApiResponse.error("批次不存在");
+            }
+
+            alipayService.batchTransfer(batchNo);
+            audit("启动批量转账", null, batchNo, "PAYMENT", true,
+                    "amount=" + batch.getTotalAmount() + ",count=" + batch.getTotalCount(), begin);
+            return ApiResponse.success("批量转账已启动");
+        } catch (Exception e) {
+            audit("启动批量转账", null, batchNo, "PAYMENT", false, e.getMessage(), begin);
+            return ApiResponse.error("启动失败: " + e.getMessage());
+        }
+    }
+
+    private void audit(String operation, String username, String batchNo, String businessType, boolean success, String detail, long begin) {
+        try {
+            auditLogService.record(
+                    operation,
+                    "POST",
+                    "/payment/batch/" + batchNo + "/start",
+                    null,
+                    null,
+                    businessType,
+                    batchNo,
+                    username,
+                    detail,
+                    success ? "OK" : "FAILED",
+                    success ? null : detail,
+                    System.currentTimeMillis() - begin
+            );
+        } catch (Exception e) {
+            log.warn("支付审计记录失败: {}", e.getMessage());
+        }
     }
 }

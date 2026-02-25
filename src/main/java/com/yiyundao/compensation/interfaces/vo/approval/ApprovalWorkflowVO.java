@@ -1,7 +1,5 @@
 package com.yiyundao.compensation.interfaces.vo.approval;
 
-import com.yiyundao.compensation.enums.ApprovalStatus;
-import com.yiyundao.compensation.enums.WorkflowType;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import lombok.Data;
 

@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper">
+
+    <!-- 查询批次列表并聚合汇总数据 -->
+    <select id="selectBatchSummaryList" resultType="com.yiyundao.compensation.interfaces.vo.payroll.PayrollBatchSummaryVO">
+        SELECT
+            pb.id AS batch_id,
+            pb.payment_batch_no AS batch_no,
+            pb.pay_cycle_id AS pay_cycle_id,
+            pb.period_label AS period_label,
+            pb.type AS payroll_type,
+            pb.currency AS currency,
+            pb.status AS status,
+            pb.remark AS remark,
+            pb.create_time AS created_at,
+            pb.update_time AS updated_at,
+            COALESCE(summary.employee_count, 0) AS total_employees,
+            COALESCE(summary.line_count, 0) AS total_lines,
+            COALESCE(summary.gross_total, 0) AS gross_total,
+            COALESCE(summary.net_total, 0) AS net_total,
+            summary.warnings AS warnings
+        FROM payroll_batch pb
+        LEFT JOIN (
+            SELECT
+                batch_id,
+                COUNT(*) AS employee_count,
+                COUNT(*) AS line_count,
+                COALESCE(SUM(gross_amount), 0) AS gross_total,
+                COALESCE(SUM(net_amount), 0) AS net_total,
+                CONCAT('[', GROUP_CONCAT(DISTINCT CONCAT('"', REPLACE(pl.warning, '"', '\\"'), '"') SEPARATOR ','), ']') AS warnings
+            FROM payroll_line pl
+            WHERE pl.deleted = 0 AND pl.warning IS NOT NULL AND pl.warning != ''
+            GROUP BY batch_id
+        ) summary ON pb.id = summary.batch_id
+        WHERE pb.deleted = 0
+        <if test="type != null and type != ''">
+            AND pb.type = #{type}
+        </if>
+        <if test="periodLabel != null and periodLabel != ''">
+            AND pb.period_label = #{periodLabel}
+        </if>
+        <if test="status != null and status != ''">
+            AND pb.status = #{status}
+        </if>
+        ORDER BY pb.update_time DESC
+        LIMIT #{offset}, #{size}
+    </select>
+
+    <!-- 统计符合条件的批次数量 -->
+    <select id="countBatchSummary" resultType="long">
+        SELECT COUNT(*)
+        FROM payroll_batch pb
+        WHERE pb.deleted = 0
+        <if test="type != null and type != ''">
+            AND pb.type = #{type}
+        </if>
+        <if test="periodLabel != null and periodLabel != ''">
+            AND pb.period_label = #{periodLabel}
+        </if>
+        <if test="status != null and status != ''">
+            AND pb.status = #{status}
+        </if>
+    </select>
+
+</mapper>

@@ -8,38 +8,32 @@ import com.yiyundao.compensation.modules.system.service.IntegrationConfigService
 import com.yiyundao.compensation.interfaces.dto.config.WechatConfigDto;
 import com.yiyundao.compensation.service.PlatformTokenCacheService;
 import com.yiyundao.compensation.modules.system.service.SysConfigService;
+import com.yiyundao.compensation.modules.user.service.UserBindingService;
+import com.yiyundao.compensation.modules.org.service.DepartmentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
-import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 企业微信组织同步适配器（已迁移至 interfaces/adapter/impl）
+ * 企业微信组织同步适配器（配置优先从数据库读取）
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class WeChatOrganizationAdapter implements OrganizationAdapter {
 
-    private final EmployeeService employeeService;
+    private final ObjectProvider<EmployeeService> employeeServiceProvider;
+    private final ObjectProvider<UserBindingService> userBindingServiceProvider;
     private final WebClient webClient;
     private final IntegrationConfigService integrationConfigService;
     private final PlatformTokenCacheService platformTokenCacheService;
     private final SysConfigService sysConfigService;
-
-    @Value("${wechat.corp-id:}")
-    private String corpId;
-
-    @Value("${wechat.corp-secret:}")
-    private String corpSecret;
-
-    @Value("${wechat.agent-id:}")
-    private String agentId;
+    private final DepartmentService departmentService;
 
     private static final String PLATFORM_TYPE = "wechat";
     private static final String API_BASE_URL = "https://qyapi.weixin.qq.com/cgi-bin";
@@ -54,18 +48,27 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         log.info("开始企业微信组织架构同步");
 
         try {
+            if (!integrationConfigService.isPlatformEnabled(PLATFORM_TYPE)) {
+                log.warn("企业微信未启用或未配置，跳过同步");
+                return OrganizationSyncResult.failure(PLATFORM_TYPE, "未启用或未配置，跳过", null);
+            }
             String accessToken = getAccessToken();
             if (accessToken == null) {
                 return OrganizationSyncResult.failure(PLATFORM_TYPE, "获取访问令牌失败", null);
             }
 
-            List<Department> departments = getDepartmentList(accessToken);
+            List<WeChatDepartment> rawDepts = getWeChatDepartmentRawList(accessToken);
+            for (WeChatDepartment d : rawDepts) {
+                String parentPid = (d.getParentid() <= 1) ? null : String.valueOf(d.getParentid());
+                departmentService.upsert(PLATFORM_TYPE, String.valueOf(d.getId()), d.getName(), parentPid, null);
+            }
 
             int newCount = 0;
             int updateCount = 0;
             int totalCount = 0;
             List<String> errors = new ArrayList<>();
 
+            List<Department> departments = getDepartmentList(accessToken);
             for (Department dept : departments) {
                 try {
                     List<WeChatUser> users = getDepartmentUsers(accessToken, dept.getId());
@@ -73,27 +76,30 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
 
                     for (WeChatUser user : users) {
                         try {
-                            Employee existingEmployee = employeeService.getByPlatformUserId(user.getUserid(), PLATFORM_TYPE);
+                            Employee existingEmployee = employeeServiceProvider.getObject().getByPlatformUserId(user.getUserid(), PLATFORM_TYPE);
 
                             if (existingEmployee == null) {
                                 Employee candidate = convertToEmployee(user, dept);
                                 // 按工号回填已有员工
                                 if (candidate.getEmployeeId() != null) {
-                                    Employee byEmpId = employeeService.getByEmployeeId(candidate.getEmployeeId());
+                                    Employee byEmpId = employeeServiceProvider.getObject().getByEmployeeId(candidate.getEmployeeId());
                                     if (byEmpId != null) {
                                         Employee update = candidate;
-                                        employeeService.updateEmployee(byEmpId.getId(), update);
+                                        employeeServiceProvider.getObject().updateEmployee(byEmpId.getId(), update);
                                         updateCount++;
                                         log.debug("回填并更新企微员工(通过工号匹配): {}", candidate.getName());
                                         continue;
                                     }
                                 }
-                                employeeService.createEmployee(candidate);
+                                employeeServiceProvider.getObject().createEmployee(candidate);
+                                // 自动创建并绑定后台用户账号
+                                userBindingServiceProvider.getObject().ensureUserForEmployee(candidate);
                                 newCount++;
                                 log.debug("新增企微员工: {}", user.getName());
                             } else {
                                 Employee updateInfo = convertToEmployee(user, dept);
-                                employeeService.updateEmployee(existingEmployee.getId(), updateInfo);
+                                employeeServiceProvider.getObject().updateEmployee(existingEmployee.getId(), updateInfo);
+                                userBindingServiceProvider.getObject().ensureUserForEmployee(updateInfo);
                                 updateCount++;
                                 log.debug("更新企微员工: {}", user.getName());
                             }
@@ -126,6 +132,100 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             log.error("企业微信组织架构同步异常", e);
             return OrganizationSyncResult.failure(PLATFORM_TYPE, "同步异常: " + e.getMessage(), null);
         }
+    }
+
+    @Override
+    public java.util.List<Employee> fetchAllEmployees() {
+        java.util.Map<String, Employee> seen = new java.util.LinkedHashMap<>();
+        try {
+            if (!integrationConfigService.isPlatformEnabled(PLATFORM_TYPE)) {
+                log.warn("企业微信未启用或未配置，fetch跳过");
+                return new java.util.ArrayList<>();
+            }
+            String accessToken = getAccessToken();
+            if (accessToken == null) return new java.util.ArrayList<>();
+            java.util.List<Department> departments = getDepartmentList(accessToken);
+            java.util.Map<String, String> deptNameMap = new java.util.HashMap<>();
+            for (Department d : departments) deptNameMap.put(d.getId(), d.getName());
+            // 拉取所有部门成员（会有重复），但按用户聚合其部门IDs
+            java.util.Map<String, java.util.LinkedHashSet<String>> userDeptNames = new java.util.HashMap<>();
+            for (Department dept : departments) {
+                java.util.List<WeChatUser> users = getDepartmentUsers(accessToken, dept.getId());
+                for (WeChatUser user : users) {
+                    String key = user.getUserid();
+                    userDeptNames.computeIfAbsent(key, k -> new java.util.LinkedHashSet<>());
+                    if (user.getDepartment() != null) {
+                        for (Integer depId : user.getDepartment()) {
+                            String name = deptNameMap.get(String.valueOf(depId));
+                            if (name != null) userDeptNames.get(key).add(name);
+                        }
+                    }
+                    if (!seen.containsKey(key)) {
+                        Employee e = convertToEmployee(user, null);
+                        e.setEmployeeId(null); // 预览不设置工号
+                        seen.put(key, e);
+                    }
+                }
+            }
+            // 将聚合的部门名称串接到 Employee.department 以便前端拆分
+            for (java.util.Map.Entry<String, Employee> entry : seen.entrySet()) {
+                java.util.LinkedHashSet<String> names = userDeptNames.get(entry.getKey());
+                if (names != null && !names.isEmpty()) {
+                    entry.getValue().setDepartment(String.join(",", names));
+                }
+            }
+        } catch (Exception e) {
+            log.error("企微fetchAllEmployees异常", e);
+        }
+        return new java.util.ArrayList<>(seen.values());
+    }
+
+    @Override
+    public java.util.List<com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto> fetchDepartmentTree() {
+        java.util.List<com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto> roots = new java.util.ArrayList<>();
+        try {
+            if (!integrationConfigService.isPlatformEnabled(PLATFORM_TYPE)) return roots;
+            String accessToken = getAccessToken();
+            if (accessToken == null) return roots;
+            java.util.List<WeChatDepartment> rawDepts = getWeChatDepartmentRawList(accessToken);
+            java.util.Map<Integer, com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto> map = new java.util.LinkedHashMap<>();
+            for (WeChatDepartment d : rawDepts) {
+                com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto node = new com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto();
+                node.setPlatformDeptId(String.valueOf(d.getId()));
+                node.setName(d.getName());
+                node.setParentPlatformDeptId(d.getParentid() <= 1 ? null : String.valueOf(d.getParentid()));
+                map.put(d.getId(), node);
+            }
+            // build tree
+            for (WeChatDepartment d : rawDepts) {
+                com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto node = map.get(d.getId());
+                if (d.getParentid() <= 1) {
+                    roots.add(node);
+                } else {
+                    com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto parent = map.get(d.getParentid());
+                    if (parent != null) parent.getChildren().add(node);
+                }
+            }
+            // attach members per dept
+            for (WeChatDepartment d : rawDepts) {
+                com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto node = map.get(d.getId());
+                java.util.List<WeChatUser> users = getDepartmentUsers(accessToken, String.valueOf(d.getId()));
+                if (users != null) {
+                    for (WeChatUser u : users) {
+                        com.yiyundao.compensation.interfaces.dto.org.OrgMemberPreviewDto m = new com.yiyundao.compensation.interfaces.dto.org.OrgMemberPreviewDto();
+                        m.setPlatformUserId(u.getUserid());
+                        m.setName(u.getName());
+                        m.setPhone(u.getMobile());
+                        m.setEmail(u.getEmail());
+                        m.setPosition(u.getPosition());
+                        node.getMembers().add(m);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.error("获取企微部门树异常", e);
+        }
+        return roots;
     }
 
     @Override
@@ -233,13 +333,21 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
     private String getAccessToken() {
         try {
             WechatConfigDto cfg = integrationConfigService.getWechatConfig();
-            String id = (cfg != null && cfg.getCorpId() != null && !cfg.getCorpId().isBlank()) ? cfg.getCorpId() : corpId;
-            String secret = (cfg != null && cfg.getCorpSecret() != null && !cfg.getCorpSecret().isBlank()) ? cfg.getCorpSecret() : corpSecret;
-            boolean placeholder = (id != null && id.toLowerCase().startsWith("your_")) || (secret != null && secret.toLowerCase().startsWith("your_"));
-            if (placeholder) {
-                log.warn("未配置 wechat.corp-id/corp-secret（占位），跳过获取token");
+            if (cfg == null || cfg.getCorpId() == null || cfg.getCorpId().isBlank() 
+                || cfg.getCorpSecret() == null || cfg.getCorpSecret().isBlank()) {
+                log.error("企业微信配置不存在或未完整配置，请先在数据库中配置");
                 return null;
             }
+            
+            String id = cfg.getCorpId();
+            String secret = cfg.getCorpSecret();
+            
+            // 检查是否是占位符
+            if (id.toLowerCase().startsWith("your_") || secret.toLowerCase().startsWith("your_")) {
+                log.warn("企业微信配置使用了占位符，请配置真实的 corpId 和 corpSecret");
+                return null;
+            }
+            
             // cache first
             String cached = platformTokenCacheService.getToken(PLATFORM_TYPE);
             if (cached != null && !cached.isBlank()) {
@@ -274,8 +382,11 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
 
     private String resolveAgentId() {
         WechatConfigDto cfg = integrationConfigService.getWechatConfig();
-        if (cfg != null && cfg.getAgentId() != null && !cfg.getAgentId().isBlank()) return cfg.getAgentId();
-        return agentId;
+        if (cfg != null && cfg.getAgentId() != null && !cfg.getAgentId().isBlank()) {
+            return cfg.getAgentId();
+        }
+        log.warn("企业微信 agentId 未配置");
+        return null;
     }
 
     private List<Department> getDepartmentList(String accessToken) {
@@ -294,6 +405,23 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                 return list;
             }
             log.warn("获取企微部门列表失败: {}", resp != null ? resp.getErrmsg() : "null response");
+        } catch (Exception e) {
+            log.error("获取企微部门列表异常", e);
+        }
+        return new ArrayList<>();
+    }
+
+    private List<WeChatDepartment> getWeChatDepartmentRawList(String accessToken) {
+        try {
+            String url = API_BASE_URL + "/department/list?access_token=" + accessToken;
+            WeChatDepartmentListResponse resp = webClient.get()
+                    .uri(url)
+                    .retrieve()
+                    .bodyToMono(WeChatDepartmentListResponse.class)
+                    .block();
+            if (resp != null && resp.getErrcode() == 0 && resp.getDepartment() != null) {
+                return resp.getDepartment();
+            }
         } catch (Exception e) {
             log.error("获取企微部门列表异常", e);
         }
@@ -335,6 +463,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
     }
 
     // 内部类定义
+    @SuppressWarnings("unused")
     private static class WeChatTokenResponse {
         private int errcode;
         private String errmsg;
@@ -351,6 +480,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         public void setExpires_in(Integer expires_in) { this.expires_in = expires_in; }
     }
 
+    @SuppressWarnings("unused")
     private static class WeChatUserResponse {
         private int errcode;
         private String errmsg;
@@ -364,6 +494,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         public void setUser(WeChatUser user) { this.user = user; }
     }
 
+    @SuppressWarnings("unused")
     private static class WeChatUser {
         private String userid;
         private String name;
@@ -389,6 +520,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         public void setAlias(String alias) { this.alias = alias; }
     }
 
+    @SuppressWarnings("unused")
     private static class WeChatUserListResponse {
         private int errcode;
         private String errmsg;
@@ -402,6 +534,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         public void setUserlist(List<WeChatUser> userlist) { this.userlist = userlist; }
     }
 
+    @SuppressWarnings("unused")
     private static class WeChatDepartmentListResponse {
         private int errcode;
         private String errmsg;
@@ -415,6 +548,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         public void setDepartment(List<WeChatDepartment> department) { this.department = department; }
     }
 
+    @SuppressWarnings("unused")
     private static class WeChatDepartment {
         private int id;
         private String name;
@@ -428,6 +562,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         public void setParentid(int parentid) { this.parentid = parentid; }
     }
 
+    @SuppressWarnings("unused")
     private static class Department {
         private String id;
         private String name;

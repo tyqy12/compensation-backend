@@ -22,6 +22,9 @@ public class PaymentRecord extends BaseEntity {
     @TableField("employee_id")
     private Long employeeId;
 
+    @TableField(value = "user_id", exist = false)
+    private Long userId;
+
     @TableField("payment_type")
     private PaymentType paymentType;
 

@@ -30,7 +30,7 @@ public class PaymentRecordController {
     public ApiResponse<String> retry(@PathVariable Long id) {
         try {
             String tradeNo = alipayService.singleTransfer(id);
-            return ApiResponse.success("重试成功: " + tradeNo, null);
+            return ApiResponse.success("重试成功", tradeNo);
         } catch (Exception e) {
             throw new BusinessException("重试失败: " + e.getMessage());
         }

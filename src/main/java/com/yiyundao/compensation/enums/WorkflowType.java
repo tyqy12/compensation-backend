@@ -6,7 +6,8 @@ import lombok.Getter;
 public enum WorkflowType {
     BATCH("BATCH", "批量支付"),
     ADHOC("ADHOC", "临时支付"),
-    OFFLINE("OFFLINE", "离线员工");
+    OFFLINE("OFFLINE", "离线员工"),
+    PERMISSION("PERMISSION", "权限授权");
 
     private final String code;
     private final String name;

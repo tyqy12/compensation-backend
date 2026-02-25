@@ -1,7 +1,6 @@
 package com.yiyundao.compensation.interfaces.vo.payment;
 
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
-import com.yiyundao.compensation.enums.BatchStatus;
 import lombok.Data;
 
 import java.math.BigDecimal;

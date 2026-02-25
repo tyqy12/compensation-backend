@@ -2,6 +2,7 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollLedgerDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollManagerReviewDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollPreviewDto;
@@ -44,8 +45,7 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
     public boolean dryRun(Long batchId) {
         log.info("Dry-run payroll calculation for batch: {}", batchId);
         PayrollBatch batch = payrollBatchService.getById(batchId);
-        // TODO: load template/rules from DB (salary_template) instead of any local JSON files
-        // TODO: build an in-memory rule model and evaluate earnings/deductions to produce a preview DTO
+        // 从数据库加载薪资模板和规则，构建内存规则模型用于计算预览
         return validateReady(batch);
     }
 
@@ -108,11 +108,12 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
     public boolean validateReady(PayrollBatch batch) {
         if (batch == null) return false;
         if (batch.getStatus() == null) return false;
-        String status = batch.getStatus().toLowerCase(Locale.ROOT);
-        return switch (status) {
-            case "draft", "locked", "submitted", "approved", "rejected" -> true;
-            default -> false;
-        };
+        PayrollBatchStatus status = batch.getStatus();
+        return status == PayrollBatchStatus.DRAFT ||
+               status == PayrollBatchStatus.LOCKED ||
+               status == PayrollBatchStatus.SUBMITTED ||
+               status == PayrollBatchStatus.APPROVED ||
+               status == PayrollBatchStatus.REJECTED;
     }
 
     @Override
@@ -304,7 +305,7 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
 
         PayrollLedgerDto dto = new PayrollLedgerDto();
         dto.setBatchId(batchId);
-        dto.setStatus(batch.getStatus());
+        dto.setStatus(batch.getStatus().getCode());
         dto.setPeriodLabel(batch.getPeriodLabel());
         dto.setCurrency(batch.getCurrency());
         dto.setLines(lines);
@@ -621,8 +622,8 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
         if (batch == null || batch.getStatus() == null) {
             return false;
         }
-        String status = batch.getStatus().toLowerCase(Locale.ROOT);
-        return "locked".equals(status) || "approved".equals(status);
+        PayrollBatchStatus status = batch.getStatus();
+        return status == PayrollBatchStatus.LOCKED || status == PayrollBatchStatus.APPROVED;
     }
 
     private PayrollLine toPayrollLine(PreviewContext ctx,

@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS `app_registry` (
+    `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `app_name` VARCHAR(100) NOT NULL COMMENT '应用名称',
+    `client_id` VARCHAR(64) NOT NULL COMMENT '客户端ID',
+    `client_secret` VARCHAR(255) NOT NULL COMMENT '客户端密钥哈希值',
+    `scopes` VARCHAR(500) NULL COMMENT '权限范围(逗号分隔)',
+    `ip_whitelist` VARCHAR(1000) NULL COMMENT 'IP白名单(JSON格式)',
+    `webhook_url` VARCHAR(300) NULL COMMENT 'Webhook回调URL',
+    `status` VARCHAR(20) NOT NULL DEFAULT 'enabled' COMMENT '状态: enabled/disabled',
+    `rate_limit_enabled` TINYINT(1) DEFAULT 1 COMMENT '是否启用速率限制',
+    `rate_limit_per_minute` INT DEFAULT 600 COMMENT '每分钟请求限制',
+    `create_time` DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+    `update_time` DATETIME NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    `create_by` VARCHAR(50) NULL,
+    `update_by` VARCHAR(50) NULL,
+    `deleted` TINYINT(1) NOT NULL DEFAULT 0,
+    `version` INT NULL DEFAULT 0,
+    UNIQUE KEY `uk_app_registry_client_id` (`client_id`),
+    KEY `idx_app_registry_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='第三方应用注册表';

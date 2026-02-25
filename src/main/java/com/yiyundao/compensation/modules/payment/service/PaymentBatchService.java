@@ -4,7 +4,6 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.enums.BatchStatus;
-import com.yiyundao.compensation.enums.PaymentType;
 
 public interface PaymentBatchService extends IService<PaymentBatch> {
     PaymentBatch getByBatchNo(String batchNo);

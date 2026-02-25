@@ -4,6 +4,15 @@ spring:
   profiles:
     active: dev
 
+  # AOP配置
+  aop:
+    proxy-target-class: true
+    expose-proxy: true
+
+server:
+  servlet:
+    context-path: /api
+
   # Jackson配置
   jackson:
     time-zone: GMT+8
@@ -38,34 +47,43 @@ logging:
     com.baomidou.mybatisplus: DEBUG
     org.springframework.security: DEBUG
   pattern:
-    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{50} - %msg%n"
-    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{50} - %msg%n"
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] [%X{traceId:-},%X{spanId:-}] %-5level %logger{50} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] [%X{traceId:-},%X{spanId:-}] %-5level %logger{50} - %msg%n"
 
-# 管理端点配置
+# ==================== 监控配置 ====================
 management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
+      environment: ${spring.profiles.active}
 
-# 服务器配置
-server:
-  port: 8080
-  servlet:
-    context-path: /api
-  compression:
+# ==================== 链路追踪配置 ====================
+tracing:
+  sampling:
+    probability: 1.0
+  propagation:
+    type: b3
+  zipkin:
     enabled: true
-    min-response-size: 1024
+    base-url: http://localhost:9411
+    service-name: compensation-backend
 
-# Migrations (disabled by default; enable per profile)
-migration:
-  audit-log:
-    enabled: false
+# ==================== 调度任务配置 ====================
+task:
+  scheduler:
+    pool-size: 5
+    thread-name-prefix: task-scheduler-
 
-notification:
-  retry:
-    max: 3
-    backoff-ms: 500
+# ==================== OAuth 配置 ====================
+oauth:
+  trusted-redirect-hosts: localhost:5173,127.0.0.1:5173,localhost:3000,127.0.0.1:3000

@@ -23,14 +23,18 @@ public class PaymentNotifyController {
     @PostMapping("/alipay/notify")
     public String alipayNotify(HttpServletRequest request) {
         Map<String, String[]> paramMap = request.getParameterMap();
-        String payload = paramMap.entrySet().stream()
-                .map(e -> e.getKey() + "=" + String.join(",", e.getValue()))
-                .collect(Collectors.joining("&"));
 
-        log.info("收到支付宝通知: {}", payload);
+        // 转换为Map<String, String>格式用于签名验证
+        Map<String, String> params = paramMap.entrySet().stream()
+                .collect(Collectors.toMap(
+                    Map.Entry::getKey,
+                    e -> e.getValue()[0] // 取第一个值
+                ));
 
-        // 简化签名校验（生产需严格验签）
-        if (!alipayService.verifyNotification(payload)) {
+        log.info("收到支付宝通知: {}", params);
+
+        // 验证支付宝签名
+        if (!alipayService.verifyNotification(params)) {
             log.warn("支付宝通知验签失败");
             return "failure";
         }

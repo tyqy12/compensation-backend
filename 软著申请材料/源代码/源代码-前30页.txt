@@ -1,0 +1,1000 @@
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface PaymentBatchMapper extends BaseMapper<PaymentBatch> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.employee.entity.Employee;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface EmployeeMapper extends BaseMapper<Employee> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.rbac.entity.SysUserRole;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface SysUserRoleMapper extends BaseMapper<SysUserRole> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.system.entity.IntegrationConfig;
+public interface IntegrationConfigMapper extends BaseMapper<IntegrationConfig> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollImportItem;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface PayrollImportItemMapper extends BaseMapper<PayrollImportItem> {}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.rbac.entity.SysRole;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface SysRoleMapper extends BaseMapper<SysRole> {}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.rbac.entity.SysResource;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
+import java.util.List;
+@Mapper
+public interface SysResourceMapper extends BaseMapper<SysResource> {
+    @Update("<script>" +
+            "UPDATE sys_resource SET order_num = CASE id " +
+            "<foreach collection='items' item='item' separator=' '>" +
+            "WHEN #{item.id} THEN #{item.orderNum} " +
+            "</foreach>" +
+            "END WHERE id IN " +
+            "<foreach collection='items' item='item' open='(' separator=',' close=')'>#{item.id}</foreach>" +
+            "</script>")
+    int batchUpdateOrderNum(@Param("items") List<SortItemDto> items);
+    record SortItemDto(Long id, Integer orderNum) {}
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface PaymentRecordMapper extends BaseMapper<PaymentRecord> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.org.entity.Department;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface DepartmentMapper extends BaseMapper<Department> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.payroll.entity.SalaryTemplate;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface SalaryTemplateMapper extends BaseMapper<SalaryTemplate> {}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.payroll.entity.TimesheetEntry;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface TimesheetEntryMapper extends BaseMapper<TimesheetEntry> {}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.audit.dto.AuditLogQueryRequest;
+import com.yiyundao.compensation.modules.audit.entity.AuditLog;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Select;
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Map;
+@Mapper
+public interface AuditLogMapper extends BaseMapper<AuditLog> {
+    @Select("SELECT * FROM audit_log WHERE username = #{username} ORDER BY create_time DESC LIMIT #{limit}")
+    List<AuditLog> findRecentByUsername(@Param("username") String username, @Param("limit") int limit);
+    @Select("SELECT COUNT(*) FROM audit_log WHERE username = #{username} " +
+            "AND operation LIKE CONCAT('%', '登录', '%') " +
+            "AND response_result = 'FAILED' " +
+            "AND create_time >= #{startTime}")
+    int countLoginFailures(@Param("username") String username, @Param("startTime") LocalDateTime startTime);
+    @Select("SELECT response_result, COUNT(*) as count FROM audit_log " +
+            "WHERE operation LIKE CONCAT('%', '登录', '%') " +
+            "AND DATE(create_time) = CURDATE() " +
+            "GROUP BY response_result")
+    List<Map<String, Object>> getTodayLoginStats();
+    @Select("SELECT operation, COUNT(*) as count FROM audit_log " +
+            "WHERE create_time >= #{startTime} AND create_time <= #{endTime} " +
+            "GROUP BY operation ORDER BY count DESC")
+    List<Map<String, Object>> getOperationStats(@Param("startTime") LocalDateTime startTime,
+                                                @Param("endTime") LocalDateTime endTime);
+    List<AuditLog> findByTimeRange(@Param("startTime") LocalDateTime startTime,
+                                   @Param("endTime") LocalDateTime endTime);
+    List<AuditLog> queryByPage(@Param("request") AuditLogQueryRequest request);
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollAdjustment;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface PayrollAdjustmentMapper extends BaseMapper<PayrollAdjustment> {}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.rbac.entity.SysRoleResource;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface SysRoleResourceMapper extends BaseMapper<SysRoleResource> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.interfaces.vo.payroll.PayrollBatchSummaryVO;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import java.util.List;
+@Mapper
+public interface PayrollBatchMapper extends BaseMapper<PayrollBatch> {
+    List<PayrollBatchSummaryVO> selectBatchSummaryList(
+            @Param("type") String type,
+            @Param("periodLabel") String periodLabel,
+            @Param("status") String status,
+            @Param("offset") int offset,
+            @Param("size") int size
+    );
+    long countBatchSummary(@Param("type") String type, @Param("periodLabel") String periodLabel, @Param("status") String status);
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.system.entity.SysConfig;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface SysConfigMapper extends BaseMapper<SysConfig> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface ApprovalWorkflowMapper extends BaseMapper<ApprovalWorkflow> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.rbac.entity.SysUserResource;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface SysUserResourceMapper extends BaseMapper<SysUserResource> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.user.entity.SysUser;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface SysUserMapper extends BaseMapper<SysUser> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface PayrollLineMapper extends BaseMapper<PayrollLine> {}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.notification.entity.NotificationRecord;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface NotificationRecordMapper extends BaseMapper<NotificationRecord> {
+}package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.employee.entity.EmployeeDepartment;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface EmployeeDepartmentMapper extends BaseMapper<EmployeeDepartment> {}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.approval.entity.ApprovalStep;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface ApprovalStepMapper extends BaseMapper<ApprovalStep> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.app.entity.AppRegistry;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface AppRegistryMapper extends BaseMapper<AppRegistry> {
+}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.payroll.entity.PayCycle;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface PayCycleMapper extends BaseMapper<PayCycle> {}
+package com.yiyundao.compensation.infrastructure.dao;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.yiyundao.compensation.modules.payroll.entity.SalaryItem;
+import org.apache.ibatis.annotations.Mapper;
+@Mapper
+public interface SalaryItemMapper extends BaseMapper<SalaryItem> {}
+package com.yiyundao.compensation.scheduler;
+import com.yiyundao.compensation.entity.ScheduledTask;
+import com.yiyundao.compensation.entity.ScheduledTaskExecution;
+import com.yiyundao.compensation.mapper.ScheduledTaskExecutionMapper;
+import com.yiyundao.compensation.service.ScheduledTaskService;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
+import org.springframework.stereotype.Component;
+import jakarta.annotation.PostConstruct;
+import java.time.LocalDateTime;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ScheduledFuture;
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class TaskScheduler {
+    private final ScheduledTaskService taskService;
+    private final ThreadPoolTaskScheduler taskScheduler;
+    private final ScheduledTaskExecutionMapper executionMapper;
+    private final Map<Long, ScheduledFuture<?>> scheduledTasks = new ConcurrentHashMap<>();
+    @PostConstruct
+    public void init() {
+        try {
+            taskService.listTasksByStatus(ScheduledTask.TaskStatus.RUNNING)
+                    .forEach(this::scheduleTask);
+            log.info("调度任务初始化完成，已加载 {} 个任务", scheduledTasks.size());
+        } catch (Exception e) {
+            log.warn("调度任务初始化失败（可能是数据库表未创建），将在表创建后自动加载: {}", e.getMessage());
+        }
+    }
+    public void scheduleTask(ScheduledTask task) {
+        try {
+            ScheduledFuture<?> future = taskScheduler.schedule(
+                    () -> executeTask(task),
+                    triggerContext -> {
+                        LocalDateTime nextTime = taskService.calculateNextExecutionTime(task.getCronExpression());
+                        if (nextTime != null) {
+                            return nextTime.atZone(java.time.ZoneId.systemDefault()).toInstant();
+                        }
+                        return java.time.LocalDateTime.now().plusMinutes(5).atZone(java.time.ZoneId.systemDefault()).toInstant();
+                    }
+            );
+            scheduledTasks.put(task.getId(), future);
+            log.info("任务已调度: taskKey={}", task.getTaskKey());
+        } catch (Exception e) {
+            log.error("调度任务失败: taskKey={}", task.getTaskKey(), e);
+        }
+    }
+    private void executeTask(ScheduledTask task) {
+        log.info("开始执行任务: taskKey={}", task.getTaskKey());
+        long startTime = System.currentTimeMillis();
+        ScheduledTaskExecution execution = new ScheduledTaskExecution();
+        execution.setTaskId(task.getId());
+        execution.setTaskKey(task.getTaskKey());
+        execution.setStartTime(LocalDateTime.now());
+        execution.setStatus(ScheduledTaskExecution.ExecutionStatus.RUNNING);
+        executionMapper.insert(execution);
+        try {
+            taskService.executeTask(task);
+            execution.setEndTime(LocalDateTime.now());
+            execution.setDurationMs(System.currentTimeMillis() - startTime);
+            execution.setStatus(ScheduledTaskExecution.ExecutionStatus.SUCCESS);
+            execution.setResult("执行成功");
+            executionMapper.updateById(execution);
+            log.info("任务执行成功: taskKey={}", task.getTaskKey());
+        } catch (Exception e) {
+            log.error("任务执行失败: taskKey={}", task.getTaskKey(), e);
+            execution.setEndTime(LocalDateTime.now());
+            execution.setDurationMs(System.currentTimeMillis() - startTime);
+            execution.setStatus(ScheduledTaskExecution.ExecutionStatus.FAILED);
+            execution.setErrorMessage(e.getMessage());
+            executionMapper.updateById(execution);
+            if (task.getAlarmEnabled()) {
+                sendAlarm(task, e.getMessage());
+            }
+        }
+    }
+    private void sendAlarm(ScheduledTask task, String error) {
+        log.warn("任务执行失败告警: taskKey={}, error={}", task.getTaskKey(), error);
+    }
+    public void pauseTask(Long taskId) {
+        ScheduledFuture<?> future = scheduledTasks.get(taskId);
+        if (future != null) {
+            future.cancel(false);
+            scheduledTasks.remove(taskId);
+            log.info("任务已暂停: taskId={}", taskId);
+        }
+    }
+    public void resumeTask(ScheduledTask task) {
+        scheduleTask(task);
+    }
+}
+package com.yiyundao.compensation.enums;
+import lombok.Getter;
+@Getter
+public enum PlatformType {
+    WECHAT("wechat", "企业微信"),
+    DINGTALK("dingtalk", "钉钉"),
+    FEISHU("feishu", "飞书");
+    private final String code;
+    private final String name;
+    PlatformType(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static PlatformType fromCode(String code) {
+        for (PlatformType type : values()) {
+            if (type.getCode().equals(code)) {
+                return type;
+            }
+        }
+        throw new IllegalArgumentException("Unknown platform type: " + code);
+    }
+}package com.yiyundao.compensation.enums;
+import lombok.Getter;
+@Getter
+public enum ApprovalStatus {
+    PENDING("pending", "待审批"),
+    APPROVED("approved", "已通过"),
+    REJECTED("rejected", "已拒绝"),
+    CANCELLED("cancelled", "已取消"),
+    SKIPPED("skipped", "已跳过");
+    private final String code;
+    private final String name;
+    ApprovalStatus(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static ApprovalStatus fromCode(String code) {
+        for (ApprovalStatus status : values()) {
+            if (status.getCode().equals(code)) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("Unknown approval status: " + code);
+    }
+}package com.yiyundao.compensation.enums;
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import lombok.Getter;
+@Getter
+public enum NotificationStatus {
+    PENDING("pending", "待发送"),
+    SENDING("sending", "发送中"),
+    SUCCESS("success", "发送成功"),
+    FAILED("failed", "发送失败"),
+    RETRY("retry", "重试中"),
+    CANCELLED("cancelled", "已取消");
+    @EnumValue
+    private final String code;
+    private final String name;
+    NotificationStatus(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static NotificationStatus fromCode(String code) {
+        for (NotificationStatus status : values()) {
+            if (status.getCode().equals(code)) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("Unknown notification status: " + code);
+    }
+}package com.yiyundao.compensation.enums;
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import lombok.Getter;
+@Getter
+public enum PayrollType {
+    FULL_TIME("full_time", "全职薪资"),
+    PART_TIME("part_time", "兼职薪资"),
+    BONUS("bonus", "奖金"),
+    REIMBURSEMENT("reimbursement", "报销");
+    @EnumValue
+    private final String code;
+    private final String name;
+    PayrollType(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static PayrollType fromCode(String code) {
+        if (code == null) return null;
+        for (PayrollType type : values()) {
+            if (type.getCode().equalsIgnoreCase(code)) {
+                return type;
+            }
+        }
+        return null;
+    }
+}
+package com.yiyundao.compensation.enums;
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import lombok.Getter;
+@Getter
+public enum PayrollBatchStatus {
+    DRAFT("draft", "草稿"),
+    LOCKED("locked", "已锁定"),
+    SUBMITTED("submitted", "已提交审批"),
+    APPROVED("approved", "已审批"),
+    REJECTED("rejected", "已拒绝"),
+    PAY_PROCESSING("pay_processing", "支付处理中"),
+    PAID("paid", "已支付"),
+    ARCHIVED("archived", "已归档");
+    @EnumValue
+    private final String code;
+    private final String name;
+    PayrollBatchStatus(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static PayrollBatchStatus fromCode(String code) {
+        if (code == null) return null;
+        for (PayrollBatchStatus status : values()) {
+            if (status.getCode().equalsIgnoreCase(code)) {
+                return status;
+            }
+        }
+        return null;
+    }
+    public boolean canEdit() {
+        return this == DRAFT;
+    }
+    public boolean canLock() {
+        return this == DRAFT;
+    }
+    public boolean canSubmitApproval() {
+        return this == LOCKED;
+    }
+    public boolean canCompute() {
+        return this == LOCKED || this == APPROVED;
+    }
+}
+package com.yiyundao.compensation.enums;
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import lombok.Getter;
+@Getter
+public enum NotificationType {
+    PAYMENT_SUCCESS("payment_success", "支付成功通知"),
+    PAYMENT_FAILED("payment_failed", "支付失败通知"),
+    BATCH_COMPLETE("batch_complete", "批次完成通知"),
+    APPROVAL_PENDING("approval_pending", "待审批通知"),
+    APPROVAL_APPROVED("approval_approved", "审批通过通知"),
+    APPROVAL_REJECTED("approval_rejected", "审批拒绝通知"),
+    SYSTEM_ALERT("system_alert", "系统告警通知");
+    @EnumValue
+    private final String code;
+    private final String name;
+    NotificationType(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static NotificationType fromCode(String code) {
+        for (NotificationType type : values()) {
+            if (type.getCode().equals(code)) {
+                return type;
+            }
+        }
+        throw new IllegalArgumentException("Unknown notification type: " + code);
+    }
+}package com.yiyundao.compensation.enums;
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import com.fasterxml.jackson.annotation.JsonValue;
+import lombok.Getter;
+@Getter
+public enum UserStatus {
+    ACTIVE("active", "激活"),
+    INACTIVE("inactive", "禁用");
+    @EnumValue
+    @JsonValue
+    private final String code;
+    private final String name;
+    UserStatus(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static UserStatus fromCode(String code) {
+        for (UserStatus status : values()) {
+            if (status.getCode().equals(code)) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("Unknown user status: " + code);
+    }
+}
+package com.yiyundao.compensation.enums;
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import lombok.Getter;
+@Getter
+public enum PaymentType {
+    SALARY("salary", "工资"),
+    BONUS("bonus", "奖金"),
+    REIMBURSEMENT("reimbursement", "报销");
+    @EnumValue
+    private final String code;
+    private final String name;
+    PaymentType(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static PaymentType fromCode(String code) {
+        for (PaymentType type : values()) {
+            if (type.getCode().equals(code)) {
+                return type;
+            }
+        }
+        throw new IllegalArgumentException("Unknown payment type: " + code);
+    }
+}package com.yiyundao.compensation.enums;
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import lombok.Getter;
+@Getter
+public enum PaymentStatus {
+    PENDING("pending", "待处理"),
+    PROCESSING("processing", "处理中"),
+    SUCCESS("success", "成功"),
+    FAILED("failed", "失败"),
+    CANCELLED("cancelled", "已取消");
+    @EnumValue
+    private final String code;
+    private final String name;
+    PaymentStatus(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static PaymentStatus fromCode(String code) {
+        for (PaymentStatus status : values()) {
+            if (status.getCode().equals(code)) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("Unknown payment status: " + code);
+    }
+}package com.yiyundao.compensation.enums;
+import lombok.Getter;
+@Getter
+public enum EmployeeStatus {
+    ACTIVE("active", "在职"),
+    INACTIVE("inactive", "离职"),
+    SUSPENDED("suspended", "停职");
+    private final String code;
+    private final String name;
+    EmployeeStatus(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static EmployeeStatus fromCode(String code) {
+        for (EmployeeStatus status : values()) {
+            if (status.getCode().equals(code)) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("Unknown employee status: " + code);
+    }
+}package com.yiyundao.compensation.enums;
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import lombok.Getter;
+@Getter
+public enum EmploymentType {
+    FULL_TIME("full_time", "全职"),
+    PART_TIME("part_time", "兼职"),
+    INTERN("intern", "实习"),
+    CONTRACT("contract", "合同工");
+    @EnumValue
+    private final String code;
+    private final String name;
+    EmploymentType(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static EmploymentType fromCode(String code) {
+        if (code == null) return null;
+        for (EmploymentType type : values()) {
+            if (type.getCode().equalsIgnoreCase(code)) {
+                return type;
+            }
+        }
+        return null;
+    }
+}
+package com.yiyundao.compensation.enums;
+import lombok.Getter;
+@Getter
+public enum WorkflowType {
+    BATCH("BATCH", "批量支付"),
+    ADHOC("ADHOC", "临时支付"),
+    OFFLINE("OFFLINE", "离线员工");
+    private final String code;
+    private final String name;
+    WorkflowType(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static WorkflowType fromCode(String code) {
+        for (WorkflowType type : values()) {
+            if (type.getCode().equals(code)) {
+                return type;
+            }
+        }
+        throw new IllegalArgumentException("Unknown workflow type: " + code);
+    }
+}package com.yiyundao.compensation.enums;
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import lombok.Getter;
+@Getter
+public enum NotificationChannel {
+    WECHAT("wechat", "企业微信"),
+    DINGTALK("dingtalk", "钉钉"),
+    FEISHU("feishu", "飞书"),
+    SMS("sms", "短信"),
+    EMAIL("email", "邮件"),
+    SYSTEM("system", "站内信");
+    @EnumValue
+    private final String code;
+    private final String name;
+    NotificationChannel(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static NotificationChannel fromCode(String code) {
+        for (NotificationChannel channel : values()) {
+            if (channel.getCode().equals(code)) {
+                return channel;
+            }
+        }
+        throw new IllegalArgumentException("Unknown notification channel: " + code);
+    }
+}package com.yiyundao.compensation.enums;
+import com.baomidou.mybatisplus.annotation.EnumValue;
+import lombok.Getter;
+@Getter
+public enum BatchStatus {
+    DRAFT("draft", "草稿"),
+    SUBMITTED("submitted", "已提交"),
+    APPROVED("approved", "已审批"),
+    PROCESSING("processing", "处理中"),
+    COMPLETED("completed", "已完成"),
+    FAILED("failed", "失败");
+    @EnumValue
+    private final String code;
+    private final String name;
+    BatchStatus(String code, String name) {
+        this.code = code;
+        this.name = name;
+    }
+    public static BatchStatus fromCode(String code) {
+        for (BatchStatus status : values()) {
+            if (status.getCode().equals(code)) {
+                return status;
+            }
+        }
+        throw new IllegalArgumentException("Unknown batch status: " + code);
+    }
+}package com.yiyundao.compensation.security;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.infrastructure.dao.SysResourceMapper;
+import com.yiyundao.compensation.infrastructure.dao.SysUserMapper;
+import com.yiyundao.compensation.infrastructure.dao.SysUserRoleMapper;
+import com.yiyundao.compensation.modules.rbac.entity.SysResource;
+import com.yiyundao.compensation.modules.rbac.entity.SysUserRole;
+import com.yiyundao.compensation.modules.rbac.service.ResourceService;
+import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
+import com.yiyundao.compensation.modules.user.entity.SysUser;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.util.AntPathMatcher;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
+@Slf4j
+@RequiredArgsConstructor
+public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
+    private final SysResourceMapper sysResourceMapper;
+    private final SysUserMapper sysUserMapper;
+    private final SysUserRoleMapper userRoleMapper;
+    private final ResourceService resourceService;
+    private final UserRoleService userRoleService;
+    private final ObjectMapper objectMapper;
+    private final AntPathMatcher pathMatcher = new AntPathMatcher();
+    private volatile List<SysResource> apiResourcesCache;
+    private final AtomicLong lastLoadTs = new AtomicLong(0);
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        String method = request.getMethod();
+        String uri = request.getRequestURI();           // e.g. /api/payment/batch/123/start
+        String servletPath = request.getServletPath();   // e.g. /payment/batch/123/start
+        log.debug("ApiResourceAuthorizationFilter: method={}, uri={}, servletPath={}", method, uri, servletPath);
+        SysResource matched = matchApiResource(method, uri, servletPath);
+        log.debug("ApiResourceAuthorizationFilter: matched={}", matched != null ? matched.getCode() : "null");
+        if (matched == null) {
+            log.debug("ApiResourceAuthorizationFilter: No API resource matched, passing through");
+            filterChain.doFilter(request, response);
+            return;
+        }
+        var auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        log.debug("ApiResourceAuthorizationFilter: auth={}, isAuthenticated={}", auth, auth != null ? auth.isAuthenticated() : "null");
+        if (auth == null || !auth.isAuthenticated()) {
+            writeJson(response, 401, "未登录");
+            return;
+        }
+        String username = auth.getName();
+        SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username).last("limit 1"));
+        if (user == null) {
+            writeJson(response, 401, "未登录");
+            return;
+        }
+        if (isAdminUser(user.getId(), user)) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        boolean hasResource = resourceService.getUserResources(user.getId())
+                .stream().anyMatch(r -> r.getId().equals(matched.getId()));
+        if (!hasResource) {
+            writeJson(response, 403, "无权限访问该接口");
+            return;
+        }
+        List<String> actions = resourceService.getUserActions(user.getId()).get(matched.getId());
+        if (actions == null || actions.isEmpty()) {
+            filterChain.doFilter(request, response);
+            return;
+        }
+        String requiredAction = mapHttpMethodToAction(method);
+        boolean hasPermission = actions.contains("*") || actions.contains(requiredAction) || actions.contains(method.toUpperCase());
+        if (!hasPermission) {
+            writeJson(response, 403, "无权限执行该操作（需要 " + requiredAction + " 权限）");
+            return;
+        }
+        filterChain.doFilter(request, response);
+    }
+    private String mapHttpMethodToAction(String httpMethod) {
+        return switch (httpMethod.toUpperCase()) {
+            case "GET" -> "read";
+            case "POST" -> "write";
+            case "PUT" -> "write";
+            case "DELETE" -> "delete";
+            case "PATCH" -> "write";
+            default -> httpMethod.toLowerCase();
+        };
+    }
+    private boolean isAdminUser(Long userId, SysUser user) {
+        return userRoleService.hasRole(userId, SecurityConstants.ROLE_ADMIN);
+    }
+    private SysResource matchApiResource(String method, String uri, String servletPath) {
+        long now = System.currentTimeMillis();
+        if (apiResourcesCache == null || (now - lastLoadTs.get()) > SecurityConstants.API_RESOURCE_CACHE_TTL_MS) {
+            apiResourcesCache = sysResourceMapper.selectList(new LambdaQueryWrapper<SysResource>()
+                    .eq(SysResource::getType, "API")
+                    .eq(SysResource::getStatus, "enabled"));
+            lastLoadTs.set(now);
+        }
+        for (SysResource r : apiResourcesCache) {
+            if (!StringUtils.hasText(r.getPath())) continue;
+            String pattern = r.getPath();
+            String requiredMethod = extractMethod(r.getPropsJson());
+            if (requiredMethod != null && !requiredMethod.equalsIgnoreCase(method)) continue;
+            if (pathMatcher.match(pattern, uri)) {
+                return r;
+            }
+            if (!pattern.startsWith("/api")) {
+                if (pathMatcher.match(pattern, servletPath)) {
+                    return r;
+                }
+                String normalized = pattern.startsWith("/") ? "/api" + pattern : "/api/" + pattern;
+                if (pathMatcher.match(normalized, uri)) {
+                    return r;
+                }
+            } else {
+                String withoutPrefix = pattern.substring(4);
+                if (!withoutPrefix.startsWith("/")) {
+                    withoutPrefix = "/" + withoutPrefix;
+                }
+                if (pathMatcher.match(withoutPrefix, servletPath)) {
+                    return r;
+                }
+            }
+        }
+        return null;
+    }
+    private String extractMethod(String propsJson) {
+        if (!StringUtils.hasText(propsJson)) return null;
+        try {
+            JsonNode node = objectMapper.readTree(propsJson);
+            JsonNode m = node.get("method");
+            return m == null ? null : m.asText();
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+    private void writeJson(HttpServletResponse response, int code, String message) throws IOException {
+        response.setStatus(200); // 与全局响应格式保持一致
+        response.setCharacterEncoding(StandardCharsets.UTF_8.name());
+        response.setContentType("application/json;charset=UTF-8");
+        String body = objectMapper.writeValueAsString(ApiResponse.error(code, message));
+        response.getWriter().write(body);
+    }
+}
+package com.yiyundao.compensation.security;
+import com.yiyundao.compensation.common.config.ExternalApiAuthProperties;
+import com.yiyundao.compensation.modules.app.entity.AppRegistry;
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.security.Keys;
+import jakarta.annotation.PostConstruct;
+import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.authority.AuthorityUtils;
+import org.springframework.stereotype.Service;
+import org.springframework.util.Assert;
+import org.springframework.util.CollectionUtils;
+import javax.crypto.SecretKey;
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+@Service
+@RequiredArgsConstructor
+public class ExternalApiTokenService {
+    private static final String ROLE_APP = "ROLE_APP";
+    private final ExternalApiAuthProperties properties;
+    private SecretKey secretKey;
+    private long expirationSeconds;
+    @PostConstruct
+    void init() {
+        String secret = properties.getJwt().getSecret();
+        Assert.hasText(secret, "external-api.jwt.secret must be configured");
+        this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        this.expirationSeconds = Math.max(properties.getJwt().getExpirationSeconds(), 60L);
+    }
+    public TokenResult generateToken(AppRegistry app, List<String> requestedScopes) {
+        Assert.notNull(app, "app must not be null");
+        List<String> scopes = normalizeScopes(requestedScopes);
+        if (CollectionUtils.isEmpty(scopes)) {
+            throw new IllegalArgumentException("未授权访问范围");
+        }
+        Instant now = Instant.now();
+        Instant expiry = now.plusSeconds(expirationSeconds);
+        String authorities = buildAuthorityString(scopes);
+        String token = Jwts.builder()
+                .id(UUID.randomUUID().toString())
+                .subject(app.getClientId())
+                .issuedAt(Date.from(now))
+                .expiration(Date.from(expiry))
+                .claim("appId", app.getId())
+                .claim("appName", app.getAppName())
+                .claim("scp", scopes)
+                .claim("authorities", authorities)
+                .signWith(secretKey)
+                .compact();
+        return new TokenResult(token, expiry, scopes);
+    }
+    public ParsedToken parseToken(String token) {
+        Claims claims = Jwts.parser()
+                .verifyWith(secretKey)
+                .build()
+                .parseSignedClaims(token)
+                .getPayload();
+        String clientId = claims.getSubject();
+        Long appId = convertLong(claims.get("appId"));
+        String appName = claims.get("appName", String.class);
+        List<?> scopeRaw = claims.get("scp", List.class);
+        List<String> scopes = new ArrayList<>();
+        if (scopeRaw != null) {
+            scopeRaw.forEach(item -> {
+                if (item != null) {
+                    scopes.add(item.toString());
+                }
+            });
+        }
+        String authorities = claims.get("authorities", String.class);
+        Instant expiresAt = claims.getExpiration() != null ? claims.getExpiration().toInstant() : null;
+        return new ParsedToken(clientId, appId, appName, scopes, authorities, expiresAt);
+    }
+    private List<String> normalizeScopes(List<String> scopes) {
+        if (CollectionUtils.isEmpty(scopes)) {
+            return List.of();
+        }
+        Set<String> normalized = new LinkedHashSet<>();
+        for (String scope : scopes) {
+            if (scope != null) {
+                String trimmed = scope.trim();
+                if (!trimmed.isEmpty()) {
+                    normalized.add(trimmed);
+                }
+            }
+        }
+        return new ArrayList<>(normalized);
+    }
+    private String buildAuthorityString(List<String> scopes) {
+        List<String> authorities = new ArrayList<>();
+        authorities.add(ROLE_APP);
+        for (String scope : scopes) {
+            authorities.add("SCOPE_" + scope);
+        }
+        return String.join(",", authorities);
+    }
+    private Long convertLong(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        return Long.parseLong(value.toString());
+    }
+    public record TokenResult(String accessToken, Instant expiresAt, List<String> scopes) {
+        public long expiresInSeconds() {
+            return expiresAt != null ? Math.max(0, expiresAt.getEpochSecond() - Instant.now().getEpochSecond()) : 0;
+        }
+        public String scopeString() {
+            return String.join(" ", scopes);
+        }
+    }
+    public record ParsedToken(String clientId,
+                              Long appId,
+                              String appName,
+                              List<String> scopes,
+                              String authorities,
+                              Instant expiresAt) {
+        public boolean isExpired() {
+            return expiresAt != null && expiresAt.isBefore(Instant.now());
+        }
+        public List<org.springframework.security.core.authority.SimpleGrantedAuthority> toAuthorities() {
+            if (authorities == null || authorities.isEmpty()) {
+                return List.of();
+            }
+            return AuthorityUtils.commaSeparatedStringToAuthorityList(authorities)
+                    .stream()
+                    .map(auth -> new org.springframework.security.core.authority.SimpleGrantedAuthority(auth.getAuthority()))
+                    .toList();
+        }
+    }
+}
+package com.yiyundao.compensation.security;
+import lombok.Builder;
+import lombok.Data;
+import org.springframework.stereotype.Component;
+@Component
+public class ExternalApiContext {
+    private static final ThreadLocal<ExternalApiClient> CONTEXT = new ThreadLocal<>();
+    public void set(ExternalApiClient client) {
+        CONTEXT.set(client);
+    }
+    public ExternalApiClient current() {
+        return CONTEXT.get();
+    }
+    public void clear() {
+        CONTEXT.remove();
+    }
+    @Data
+    @Builder
+    public static class ExternalApiClient {
+        private Long appId;
+        private String clientId;
+        private String appName;
+        private String clientIp;
+        private java.util.List<String> scopes;
+    }
+}
+package com.yiyundao.compensation.security;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.modules.app.entity.AppRegistry;
+import com.yiyundao.compensation.modules.app.service.AppRateLimitService;
+import com.yiyundao.compensation.modules.app.service.AppRegistryService;
+import com.yiyundao.compensation.modules.app.service.impl.AppRateLimitServiceImpl;
+import com.yiyundao.compensation.modules.audit.service.AuditLogService;

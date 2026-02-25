@@ -1,0 +1,14 @@
+[
+  {"type":"MENU","code":"dashboard","name":"工作台","path":"/","component":"dashboard/Dashboard","icon":"dashboard","parentId":null,"orderNum":1,"propsJson":{"keepAlive":true,"affix":true},"status":"enabled"},
+  {"type":"MENU","code":"employees","name":"员工管理","path":"/employees","component":"employees/List","icon":"team","parentId":null,"orderNum":10,"propsJson":{"keepAlive":true},"status":"enabled"},
+  {"type":"VIEW","code":"employees.detail","name":"员工详情","path":"/employees/:id","component":"employees/Detail","icon":null,"parentId":null,"orderNum":11,"propsJson":{},"status":"enabled"},
+  {"type":"MENU","code":"payments.batches","name":"支付批次","path":"/payments/batches","component":"payments/Batches","icon":"wallet","parentId":null,"orderNum":20,"propsJson":{"keepAlive":true},"status":"enabled"},
+  {"type":"VIEW","code":"payments.batch.detail","name":"批次详情","path":"/payments/batches/:batchNo","component":"payments/BatchDetail","icon":null,"parentId":null,"orderNum":21,"propsJson":{},"status":"enabled"},
+  {"type":"MENU","code":"admin.user-binding","name":"用户绑定","path":"/admin/user-binding","component":"admin/UserBinding","icon":"user-switch","parentId":null,"orderNum":80,"propsJson":{},"status":"enabled"},
+  {"type":"MENU","code":"system.integration","name":"集成配置","path":"/system/integration","component":"system/IntegrationConfig","icon":"global","parentId":null,"orderNum":90,"propsJson":{},"status":"enabled"},
+  {"type":"MENU","code":"system.org-sync","name":"组织同步","path":"/system/org-sync","component":"system/OrgSync","icon":"sync","parentId":null,"orderNum":91,"propsJson":{},"status":"enabled"},
+  {"type":"API","code":"api.payment.batch.start","name":"启动支付批次","path":"/api/payment/batch/{batchNo}/start","component":null,"icon":null,"parentId":null,"orderNum":0,"propsJson":{"method":"POST"},"status":"enabled"},
+  {"type":"API","code":"api.payment.record.retry","name":"重试失败记录","path":"/api/payment/record/{recordId}/retry","component":null,"icon":null,"parentId":null,"orderNum":0,"propsJson":{"method":"POST"},"status":"enabled"},
+  {"type":"API","code":"api.system.org.sync","name":"组织同步触发","path":"/api/system/org/sync","component":null,"icon":null,"parentId":null,"orderNum":0,"propsJson":{"method":"POST"},"status":"enabled"}
+]
+

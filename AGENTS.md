@@ -2,35 +2,42 @@
 
 ## Project Structure & Module Organization
 - Java 17 + Spring Boot (Maven wrapper `./mvnw`).
-- Source: `src/main/java/com/yiyundao/compensation/` with packages: `controller`, `service`, `mapper`, `entity`, `dto`, `config`, `security`, `adapter`.
-- Resources: `src/main/resources/` — `application.yml` + profiles (`application-dev.yml`, `-staging.yml`, `-prod.yml`), `mapper/` (MyBatis XML), `sql/schema.sql`, `static/`, `templates/`.
+- Source code: `src/main/java/com/yiyundao/compensation/` (layers: controller, service, mapper, entity, dto, config, security, modules such as employee, user, org, payment, approval).
+- Resources: `src/main/resources/` (`application*.yml`, `mapper/` for MyBatis XML, `sql/` for schema/seed, `static/`, `templates/`).
 - Tests: `src/test/java/` (JUnit 5, Spring Boot Test).
 
 ## Build, Test, and Development Commands
-- Build: `./mvnw -q clean package -DskipTests`
-- Run (dev): `./mvnw spring-boot:run -Dspring-boot.run.profiles=dev`
-- Run JAR: `java -jar target/compensation-0.0.1-SNAPSHOT.jar`
+- Build (skip tests): `./mvnw -q clean package -DskipTests`
+- Run (dev profile): `./mvnw spring-boot:run -Dspring-boot.run.profiles=dev`
+- Run packaged JAR: `java -jar target/compensation-0.0.1-SNAPSHOT.jar`
 - Test (all): `./mvnw -q test`
-- Test one: `./mvnw -q -Dtest=PaymentBatchServiceTest test`
+- Test single class: `./mvnw -q -Dtest=ClassNameTest test`
 
 ## Coding Style & Naming Conventions
-- 4-space indent, UTF-8, aim for ~120-char lines.
-- Packages lower-case; classes UpperCamelCase; methods/fields lowerCamelCase.
+- 4‑space indentation, UTF‑8, aim for ~120‑char lines.
+- Packages: lower_case; Classes: UpperCamelCase; methods/fields: lowerCamelCase.
 - Suffixes: `*Controller`, `*Service`, `*Mapper`, `*Config`, `*Dto`, `*Entity`, `*Enum`.
-- Prefer constructor injection (`@RequiredArgsConstructor`); use Lombok where present (`@Slf4j`, getters/setters).
-- REST responses use `ApiResponse<T>`; base path is `/api` (see `server.servlet.context-path`).
+- Prefer constructor injection; use Lombok where present (`@RequiredArgsConstructor`, `@Slf4j`).
+- REST returns `ApiResponse<T>`; base path `/api` (see `server.servlet.context-path`).
 
 ## Testing Guidelines
-- Frameworks: JUnit 5 + Spring Boot Test; mock external calls; keep unit tests fast.
-- Integration tests may use Testcontainers MySQL (dependency present) when DB is required.
-- Naming: `ClassNameTest` for unit tests; place under matching package in `src/test/java`.
+- Frameworks: JUnit 5 + Spring Boot Test; mock external calls (Redis/HTTP) and use Testcontainers for MySQL when needed.
+- Test naming: `ClassNameTest` under matching package in `src/test/java`.
+- Running with profiles: prefer `dev` locally; keep tests deterministic and fast.
 
 ## Commit & Pull Request Guidelines
-- Use Conventional Commits: `feat`, `fix`, `docs`, `refactor`, `test`, `build`, `chore` (e.g., `feat(employee): add batch import API`).
-- Branches: `feature/<scope>-short-desc` or `fix/<issue-id>`.
-- PRs must include: purpose, linked issues, how to test (commands/endpoints), config changes, and any screenshots or logs.
+- Conventional Commits: `feat`, `fix`, `docs`, `refactor`, `test`, `build`, `chore` (e.g., `feat(employee): add batch import API`).
+- PRs must include: purpose, linked issues, how to test (commands/endpoints), config changes, and screenshots/logs for failures.
+- Keep changes focused; include migration notes for DB schema updates.
 
 ## Security & Configuration Tips
-- Do not commit secrets. Prefer env vars or an untracked `application-local.yml`; review `application-*.yml` for DB, Redis, JWT, and third-party keys.
-- Default: port 8080, base `/api` (e.g., `GET /api/system/health`).
-- SQL scripts live in `src/main/resources/sql/`; MyBatis XML in `src/main/resources/mapper/`.
+- Do not commit secrets. Use env vars or an untracked `application-local.yml`.
+- Review `application-*.yml` for DB/Redis/JWT/encryption keys. Enable DB migrations only where intended (e.g., `migration.audit-log.enabled`).
+- Sensitive data (ID cards/bank accounts) uses encryption services—avoid logging plaintext.
+
+## Architecture Overview (Quick)
+- Core domains: employee/user/org/payment/approval; MyBatis‑Plus for persistence; RBAC via `sys_resource` + roles; approval engine drives batch workflows; payment integrates with Alipay.
+
+## Agent-Specific Instructions (Automation)
+- Use small, focused patches; prefer `apply_patch` and avoid destructive ops.
+- Follow existing style and naming. Add tests for new logic when practical.

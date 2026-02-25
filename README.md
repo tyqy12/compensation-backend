@@ -63,6 +63,18 @@ com.yiyundao.compensation/
 
 # 指定环境启动
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
+
+# 端口被占用时，可通过 SERVER_PORT、spring-boot.run.arguments 指定端口
+# 或依赖 dev 环境自动回退到临近可用端口（日志会提示实际端口）
+```
+
+### 开发环境快速获取 Token（避免 401/403）
+```bash
+curl -s -X POST http://localhost:8080/api/auth/dev-token \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","roles":["ADMIN"],"authorities":["org:read","org:sync","approval:read"]}' | jq -r .data.token
+
+# 将上面的 token 作为 Authorization: Bearer <token> 调用受保护接口
 ```
 
 ### Docker/WSL 运行（推荐）
@@ -78,7 +90,7 @@ curl http://localhost:8080/api/system/health
 ```
 详见：docs/docker-wsl.md
 
-### 常用端点（更多见 docs/auth-api.md、docs/integration.md、docs/payment-api.md、docs/approval-api.md）
+### 常用端点（更多见 docs/auth-api.md、docs/integration.md、docs/payment-api.md、docs/approval-api.md、docs/dashboard-api.md、docs/admin-api.md、docs/org-structure.md、docs/platform-binding-approval.md、docs/employee-user-linking.md）
 - 系统：
   - `GET /api/system/health` 健康检查
   - `GET /api/system/info` 系统信息
@@ -111,6 +123,23 @@ curl http://localhost:8080/api/system/health
    - `GET /api/approval/workflows/{id}` 流程详情
    - `GET /api/approval/workflows/{id}/steps` 步骤列表
 
+### Dashboard 工作台
+- `GET /api/dashboard/metrics` 指标概览
+- `GET /api/dashboard/status` 系统与组件状态
+- `GET /api/dashboard/todos` 待办清单
+- `GET /api/dashboard/activities` 最近活动
+
+### 管理接口（Admin）
+- 离线员工：`PATCH /api/admin/employees/{id}/offline`、`PUT /api/admin/employees/{id}/manager`
+- 批量支付：`POST /api/admin/payment/batch`、`POST /api/admin/payment/batch/{id}/cancel`、`GET /api/admin/payment/batch/stats`
+- 审计日志：`GET /api/admin/audit-logs`、`GET /api/admin/audit-logs/{id}`；组织历史：`GET /api/system/org/history`
+- 监控：`GET /api/admin/monitor/summary`
+
+### 组织架构与平台绑定审批
+- 部门树（分平台）：见 `docs/org-structure.md`，`GET /api/system/org/departments/tree?platform=...`
+- 平台账号回写冲突审批（含快照）：见 `docs/platform-binding-approval.md`
+- 员工-用户-平台 关联模型与接口：见 `docs/employee-user-linking.md`
+
 ## 📋 下一步开发计划
 
 ### Phase 1: 数据库设计 (第1-2周) ✅
@@ -131,21 +160,31 @@ curl http://localhost:8080/api/system/health
 - [x] Mapper 迁移至 `infrastructure/dao` 并更新 `@MapperScan`
 - [x] `mybatis-plus.type-aliases-package` 调整为 `com.yiyundao.compensation.modules.**.entity`
 
-### Phase 3: 平台集成 (第7-9周)
+### Phase 3: 平台集成 (第7-9周) ✅
 - [x] 企业微信/钉钉/飞书适配器：部门/成员拉取、字段映射与写入
 - [x] 访问令牌缓存（Redis，自动续期 TTL 缓冲）
 - [x] 组织同步汇总结果与错误记录
-- [ ] 通知服务完善（路由到各平台、重试）
+- [x] 通知服务完善（路由到各平台、重试、回退策略）
 
 ### Phase 4: 管理功能 (第10-11周)
 - [x] 平台集成配置管理（DB 加密存储、仅管理员、脱敏返回、连通性测试）
 - [x] 聚合登录：账号密码 + 企微/钉钉/飞书扫码（未绑定拒绝登录）
 - [x] 刷新令牌与登出（白/黑名单）
 - [x] 登录限流/爆破防护（用户名/IP 窗口 + 锁定）
-- [ ] 离线员工管理界面
-- [ ] 批量支付管理
-- [ ] 审计日志查看
-- [ ] 系统监控面板
+- [x] 离线员工管理界面（API）
+  - `PATCH /api/admin/employees/{id}/offline?value=true|false` 设置离线
+  - `PUT /api/admin/employees/{id}/manager?managerId=...` 指定负责人
+  - 辅助：`GET /api/employee/offline` 查询离线员工列表
+- [x] 批量支付管理（API）
+  - `POST /api/admin/payment/batch` 创建批次（草稿）
+  - `POST /api/admin/payment/batch/{id}/cancel` 关闭批次（置为 FAILED）
+  - `GET /api/admin/payment/batch/stats` 批次与支付统计概览
+- [x] 审计日志查看（API）
+  - `GET /api/admin/audit-logs` 分页查询（支持 username/operation/businessType/businessKey/时间范围）
+  - `GET /api/admin/audit-logs/{id}` 详情
+  - 扩展：`GET /api/system/org/history` 组织同步历史（基于审计日志）
+- [x] 系统监控面板（API）
+  - `GET /api/admin/monitor/summary` 应用概览、JVM 内存/线程、数据库/Redis 连通性
 
 ## 🔧 配置说明
 

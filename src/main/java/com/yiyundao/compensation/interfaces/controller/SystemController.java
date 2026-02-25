@@ -23,7 +23,7 @@ public class SystemController {
         healthInfo.put("service", "Compensation Assistant System");
         healthInfo.put("version", "1.0.0");
 
-        return ApiResponse.success("系统运行正常", healthInfo);
+        return ApiResponse.<Map<String, Object>>success("系统运行正常", healthInfo);
     }
 
     @GetMapping("/info")

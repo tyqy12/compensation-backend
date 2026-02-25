@@ -1,15 +1,16 @@
 package com.yiyundao.compensation.service;
 
-// 暂时注释支付宝API相关导入，等SDK下载完成后启用
-/*
 import com.alipay.api.AlipayApiException;
 import com.alipay.api.AlipayClient;
+import com.alipay.api.AlipayConfig;
+import com.alipay.api.DefaultAlipayClient;
 import com.alipay.api.domain.AlipayFundTransUniTransferModel;
 import com.alipay.api.request.AlipayFundTransUniTransferRequest;
 import com.alipay.api.request.AlipayFundTransCommonQueryRequest;
 import com.alipay.api.response.AlipayFundTransUniTransferResponse;
 import com.alipay.api.response.AlipayFundTransCommonQueryResponse;
-*/
+import com.alipay.api.internal.util.AlipaySignature;
+import com.alipay.api.internal.util.AlipayEncrypt;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
@@ -19,6 +20,7 @@ import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.aop.framework.AopContext;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -38,8 +40,6 @@ import java.util.concurrent.TimeUnit;
 @RequiredArgsConstructor
 public class AlipayService {
 
-    // 暂时注释AlipayClient，等SDK下载完成后启用
-    // private final AlipayClient alipayClient;
     private final com.yiyundao.compensation.modules.payment.service.PaymentRecordService paymentRecordService;
     private final com.yiyundao.compensation.modules.payment.service.PaymentBatchService paymentBatchService;
     private final RedisTemplate<String, Object> redisTemplate;
@@ -50,9 +50,91 @@ public class AlipayService {
     private static final String DEDUP_KEY_PREFIX = "alipay:dedup:";
     private static final int BATCH_SIZE = 1000; // 批量转账最大1000笔
     private static final int DEDUP_EXPIRE_HOURS = 24; // 去重缓存24小时
+    private static final String DAILY_LIMIT_KEY_PREFIX = "alipay:daily_limit:";
 
     /**
-     * 单笔转账到支付宝账户 (暂时模拟实现)
+     * 动态创建AlipayClient
+     * <p>
+     * 支持两种模式：
+     * 1. 公钥模式（publicKey）：使用 DefaultAlipayClient，仅基础功能
+     * 2. 证书模式（cert）：使用 AlipayConfig 配置证书，支持转账等敏感操作（推荐）
+     * </p>
+     * <p>
+     * 同时支持接口内容AES加密（独立加密机制）：
+     * - 当配置了 encryptKey 和 encryptType="AES" 时，自动启用请求/响应内容加密
+     * - 需在发起请求时调用 request.setNeedEncrypt(true) 开启加密
+     * </p>
+     */
+    private AlipayClient createAlipayClient() throws IllegalStateException, AlipayApiException {
+        com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto config = integrationConfigService.getAlipayConfig();
+        if (config == null || config.getAppId() == null || config.getPrivateKey() == null) {
+            throw new IllegalStateException("支付宝配置不完整：缺少必要的appId或privateKey");
+        }
+
+        // 构建AlipayConfig配置对象（统一支持公钥/证书模式 + AES加密）
+        AlipayConfig alipayConfig = new AlipayConfig();
+        alipayConfig.setServerUrl(config.getServerUrl() != null ? config.getServerUrl() : "https://openapi.alipay.com/gateway.do");
+        alipayConfig.setAppId(config.getAppId());
+        alipayConfig.setPrivateKey(config.getPrivateKey());
+        alipayConfig.setFormat(config.getFormat() != null ? config.getFormat() : "json");
+        alipayConfig.setCharset(config.getCharset() != null ? config.getCharset() : "UTF-8");
+        alipayConfig.setSignType(config.getSignType() != null ? config.getSignType() : "RSA2");
+
+        // 判断使用证书模式还是公钥模式
+        boolean useCertMode = "cert".equalsIgnoreCase(config.getCertMode());
+
+        if (useCertMode) {
+            // 证书模式配置
+            if (!StringUtils.hasText(config.getAppCertPath())) {
+                throw new IllegalStateException("证书模式需要配置应用公钥证书路径（appCertPath）");
+            }
+            if (!StringUtils.hasText(config.getAlipayCertPath())) {
+                throw new IllegalStateException("证书模式需要配置支付宝公钥证书路径（alipayCertPath）");
+            }
+            if (!StringUtils.hasText(config.getAlipayRootCertPath())) {
+                throw new IllegalStateException("证书模式需要配置支付宝根证书路径（alipayRootCertPath）");
+            }
+
+            alipayConfig.setAppCertPath(config.getAppCertPath());
+            alipayConfig.setAlipayPublicCertPath(config.getAlipayCertPath());
+            alipayConfig.setRootCertPath(config.getAlipayRootCertPath());
+
+            log.debug("使用证书模式创建AlipayClient: appId={}, appCert={}",
+                    config.getAppId(), config.getAppCertPath());
+        } else {
+            // 公钥模式配置
+            if (!StringUtils.hasText(config.getPublicKey())) {
+                throw new IllegalStateException("公钥模式需要配置支付宝公钥（publicKey）");
+            }
+            alipayConfig.setAlipayPublicKey(config.getPublicKey());
+            log.debug("使用公钥模式创建AlipayClient: appId={}", config.getAppId());
+        }
+
+        // 配置接口内容AES加密（独立于签名机制的额外加密层）
+        if (StringUtils.hasText(config.getEncryptKey())) {
+            alipayConfig.setEncryptKey(config.getEncryptKey());
+            // 如果未指定encryptType，默认使用AES
+            alipayConfig.setEncryptType(StringUtils.hasText(config.getEncryptType()) ? config.getEncryptType() : "AES");
+            log.debug("启用支付宝接口内容AES加密: encryptType={}", alipayConfig.getEncryptType());
+        }
+
+        return new DefaultAlipayClient(alipayConfig);
+    }
+
+    /**
+     * 检查是否启用了接口内容加密
+     */
+    private boolean isEncryptEnabled() {
+        try {
+            com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto config = integrationConfigService.getAlipayConfig();
+            return config != null && StringUtils.hasText(config.getEncryptKey());
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /**
+     * 单笔转账到支付宝账户
      */
     @Transactional(rollbackFor = Exception.class)
     public String singleTransfer(Long paymentRecordId) throws Exception {
@@ -71,7 +153,7 @@ public class AlipayService {
         // 生成商户订单号
         String outBizNo = generateOutBizNo();
 
-        log.info("发起支付宝单笔转账(模拟): recordId={}, outBizNo={}, amount={}",
+        log.info("发起支付宝单笔转账: recordId={}, outBizNo={}, amount={}",
                 paymentRecordId, outBizNo, record.getAmount());
 
         try {
@@ -94,22 +176,65 @@ public class AlipayService {
             // 更新支付记录状态为处理中
             updatePaymentStatus(paymentRecordId, PaymentStatus.PROCESSING, outBizNo, null, null, null);
 
-            // TODO: 这里暂时模拟成功，实际需要调用支付宝API
-            Thread.sleep(1000); // 模拟API调用时间
+            // 创建支付宝客户端
+            AlipayClient alipayClient = createAlipayClient();
 
-            String mockTradeNo = "MOCK_" + System.currentTimeMillis();
+            // 构建转账请求
+            AlipayFundTransUniTransferRequest request = new AlipayFundTransUniTransferRequest();
+            AlipayFundTransUniTransferModel model = new AlipayFundTransUniTransferModel();
 
-            // 模拟转账成功，更新记录
-            updatePaymentStatus(paymentRecordId, PaymentStatus.SUCCESS, outBizNo,
-                              mockTradeNo, null, null);
+            model.setOutBizNo(outBizNo);
+            model.setTransAmount(record.getAmount().toString());
+            model.setProductCode("TRANS_ACCOUNT_NO_PWD"); // 单笔转账到支付宝账户
+            model.setBizScene("DIRECT_TRANSFER"); // 直接转账
+            model.setOrderTitle("薪酬发放");
+            model.setRemark(record.getPaymentDesc() != null ? record.getPaymentDesc() : "薪酬发放");
 
-            log.info("支付宝转账成功(模拟): recordId={}, outBizNo={}, tradeNo={}",
-                    paymentRecordId, outBizNo, mockTradeNo);
+            // 收款方信息
+            com.alipay.api.domain.Participant payeeInfo = new com.alipay.api.domain.Participant();
+            payeeInfo.setIdentity(record.getRecipientAccount()); // 支付宝账号
+            payeeInfo.setIdentityType("ALIPAY_LOGON_ID"); // 支付宝登录号
+            payeeInfo.setName(record.getRecipientName()); // 收款方姓名
+            model.setPayeeInfo(payeeInfo);
 
-            // 异步发送成功通知
-            notificationService.sendPaymentSuccessNotification(record);
+            request.setBizModel(model);
 
-            return mockTradeNo;
+            // 如果配置了接口内容加密，开启请求加密（独立于RSA签名的额外加密层）
+            if (isEncryptEnabled()) {
+                request.setNeedEncrypt(true);
+                log.debug("单笔转账请求已开启AES内容加密: recordId={}", paymentRecordId);
+            }
+
+            // 调用支付宝API
+            AlipayFundTransUniTransferResponse response = alipayClient.execute(request);
+
+            if (response.isSuccess()) {
+                String tradeNo = response.getOrderId(); // 支付宝转账单据号
+
+                // 更新支付记录为成功
+                updatePaymentStatus(paymentRecordId, PaymentStatus.SUCCESS, outBizNo,
+                                  tradeNo, null, null);
+
+                log.info("支付宝转账成功: recordId={}, outBizNo={}, tradeNo={}",
+                        paymentRecordId, outBizNo, tradeNo);
+
+                // 异步发送成功通知
+                notificationService.sendPaymentSuccessNotification(record);
+
+                return tradeNo;
+            } else {
+                // 转账失败
+                String errorCode = response.getCode();
+                String errorMsg = response.getMsg() + " - " + response.getSubMsg();
+
+                updatePaymentStatus(paymentRecordId, PaymentStatus.FAILED, outBizNo, null,
+                                  errorCode, errorMsg);
+
+                log.error("支付宝转账失败: recordId={}, outBizNo={}, code={}, msg={}",
+                        paymentRecordId, outBizNo, errorCode, errorMsg);
+
+                throw new AlipayApiException(errorCode, errorMsg);
+            }
 
         } catch (Exception e) {
             // 异常情况，删除去重标记并记录失败状态
@@ -148,7 +273,8 @@ public class AlipayService {
             paymentBatchService.updateStatus(batch.getId(), BatchStatus.PROCESSING);
             batch.setProcessStartTime(LocalDateTime.now());
             paymentBatchService.updateById(batch);
-            syncPayrollBatchStatus(batch);
+            // 使用代理调用以确保事务生效
+            ((AlipayService) AopContext.currentProxy()).syncPayrollBatchStatus(batch);
 
             // 查询批次下的所有待处理支付记录
             List<PaymentRecord> records = paymentRecordService.getByBatchNo(batchNo, PaymentStatus.PENDING);
@@ -221,7 +347,8 @@ public class AlipayService {
             log.error("批量转账异常: batchNo={}", batchNo, e);
             batch.setStatus(BatchStatus.FAILED);
             paymentBatchService.updateStatus(batch.getId(), BatchStatus.FAILED);
-            syncPayrollBatchStatus(batch);
+            // 使用代理调用以确保事务生效
+            ((AlipayService) AopContext.currentProxy()).syncPayrollBatchStatus(batch);
 
             // 确保事务回滚
             if (TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -233,7 +360,17 @@ public class AlipayService {
         }
     }
 
-    private void syncPayrollBatchStatus(PaymentBatch paymentBatch) {
+    /**
+     * 同步薪资批次状态
+     * <p>
+     * 将支付批次的状态同步到关联的薪资批次。
+     * 此方法必须在事务上下文中调用，以确保数据一致性。
+     * </p>
+     *
+     * @param paymentBatch 支付批次
+     */
+    @Transactional(rollbackFor = Exception.class)
+    public void syncPayrollBatchStatus(PaymentBatch paymentBatch) {
         if (paymentBatch == null || !StringUtils.hasText(paymentBatch.getBatchNo())) {
             return;
         }
@@ -248,19 +385,74 @@ public class AlipayService {
                 return;
             }
             payrollBatchMapper.update(null, wrapper);
+            log.info("同步薪资批次状态成功: paymentBatchNo={}, status={}",
+                    paymentBatch.getBatchNo(), paymentBatch.getStatus());
         } catch (Exception e) {
-            log.warn("同步薪资批次状态失败: {}", e.getMessage());
+            log.error("同步薪资批次状态失败: paymentBatchNo={}, error={}",
+                    paymentBatch.getBatchNo(), e.getMessage(), e);
+            // 重新抛出异常以触发事务回滚
+            throw new RuntimeException("同步薪资批次状态失败: " + e.getMessage(), e);
         }
     }
 
     /**
-     * 查询转账状态 (暂时模拟实现)
+     * 查询转账状态
      */
     public PaymentStatus queryTransferStatus(String outBizNo) throws Exception {
-        log.info("查询转账状态(模拟): outBizNo={}", outBizNo);
+        log.info("查询转账状态: outBizNo={}", outBizNo);
 
-        // TODO: 实际需要调用支付宝查询API
-        return PaymentStatus.SUCCESS;
+        try {
+            // 创建支付宝客户端
+            AlipayClient alipayClient = createAlipayClient();
+
+            // 构建查询请求
+            AlipayFundTransCommonQueryRequest request = new AlipayFundTransCommonQueryRequest();
+            com.alipay.api.domain.AlipayFundTransCommonQueryModel model = new com.alipay.api.domain.AlipayFundTransCommonQueryModel();
+
+            model.setOutBizNo(outBizNo);
+            model.setProductCode("TRANS_ACCOUNT_NO_PWD");
+            model.setBizScene("DIRECT_TRANSFER");
+
+            request.setBizModel(model);
+
+            // 如果配置了接口内容加密，开启请求加密
+            if (isEncryptEnabled()) {
+                request.setNeedEncrypt(true);
+                log.debug("查询转账状态请求已开启AES内容加密: outBizNo={}", outBizNo);
+            }
+
+            // 调用支付宝查询API
+            AlipayFundTransCommonQueryResponse response = alipayClient.execute(request);
+
+            if (response.isSuccess()) {
+                String status = response.getStatus();
+                log.info("查询转账状态成功: outBizNo={}, status={}", outBizNo, status);
+
+                // 映射支付宝状态到系统状态
+                switch (status) {
+                    case "SUCCESS":
+                        return PaymentStatus.SUCCESS;
+                    case "FAIL":
+                        return PaymentStatus.FAILED;
+                    case "DEALING":
+                    case "INIT":
+                        return PaymentStatus.PROCESSING;
+                    case "REFUND":
+                        return PaymentStatus.CANCELLED;
+                    default:
+                        log.warn("未知的支付宝转账状态: {}", status);
+                        return PaymentStatus.PROCESSING;
+                }
+            } else {
+                log.error("查询转账状态失败: outBizNo={}, code={}, msg={}",
+                        outBizNo, response.getCode(), response.getMsg());
+                throw new AlipayApiException(response.getCode(), response.getMsg());
+            }
+
+        } catch (Exception e) {
+            log.error("查询转账状态异常: outBizNo={}", outBizNo, e);
+            throw e;
+        }
     }
 
     /**
@@ -350,12 +542,136 @@ public class AlipayService {
     }
 
     /**
-     * 验证支付宝签名 (暂时模拟实现)
+     * 验证支付宝签名
+     *
+     * <p>支持公钥模式和证书模式：</p>
+     * <ul>
+     *   <li>公钥模式：使用配置的支付宝公钥验签</li>
+     *   <li>证书模式：使用支付宝公钥证书验签</li>
+     * </ul>
+     *
+     * <p>注意：如果启用了接口内容加密，验签后还需要调用 {@link #decryptNotificationBizContent(String)}
+     * 解密 biz_content 内容</p>
      */
-    public boolean verifyNotification(String notifyData) {
-        // TODO: 实现支付宝签名验证
-        log.debug("验证支付宝通知签名(模拟): {}", notifyData);
-        return true;
+    public boolean verifyNotification(java.util.Map<String, String> params) {
+        try {
+            // 获取支付宝配置
+            com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto config = integrationConfigService.getAlipayConfig();
+            if (config == null) {
+                log.error("支付宝配置不存在");
+                return false;
+            }
+
+            boolean useCertMode = "cert".equalsIgnoreCase(config.getCertMode());
+            String publicKey;
+
+            if (useCertMode) {
+                // 证书模式：读取支付宝公钥证书内容
+                if (!StringUtils.hasText(config.getAlipayCertPath())) {
+                    log.error("证书模式需要配置支付宝公钥证书路径");
+                    return false;
+                }
+                try {
+                    publicKey = readCertContent(config.getAlipayCertPath());
+                    log.debug("使用证书模式验签: certPath={}", config.getAlipayCertPath());
+                } catch (java.io.IOException e) {
+                    log.error("读取支付宝公钥证书失败: {}", config.getAlipayCertPath(), e);
+                    return false;
+                }
+            } else {
+                // 公钥模式：使用配置的公钥
+                if (!StringUtils.hasText(config.getPublicKey())) {
+                    log.error("公钥模式需要配置支付宝公钥");
+                    return false;
+                }
+                publicKey = config.getPublicKey();
+                log.debug("使用公钥模式验签");
+            }
+
+            // 使用支付宝SDK验证签名
+            boolean verified = AlipaySignature.rsaCheckV1(
+                params,
+                publicKey,
+                "UTF-8",
+                "RSA2"
+            );
+
+            if (verified) {
+                log.debug("支付宝通知签名验证成功");
+            } else {
+                log.warn("支付宝通知签名验证失败");
+            }
+
+            return verified;
+
+        } catch (Exception e) {
+            log.error("支付宝签名验证异常", e);
+            return false;
+        }
+    }
+
+    /**
+     * 解密支付宝异步通知的biz_content内容
+     *
+     * <p>当应用配置了接口内容加密（AES）时，支付宝异步通知中的业务数据会被加密，
+     * 需要在验签成功后调用此方法解密 biz_content。</p>
+     *
+     * <p>解密过程独立于签名验证：先验签，验签通过后再解密内容。</p>
+     *
+     * @param encryptedBizContent 加密的biz_content（从通知参数中获取）
+     * @return 解密后的JSON字符串；如果未配置加密或解密失败，返回null
+     */
+    public String decryptNotificationBizContent(String encryptedBizContent) {
+        if (!StringUtils.hasText(encryptedBizContent)) {
+            return null;
+        }
+
+        try {
+            // 获取支付宝配置
+            com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto config =
+                    integrationConfigService.getAlipayConfig();
+            if (config == null || !StringUtils.hasText(config.getEncryptKey())) {
+                log.debug("未配置接口内容加密密钥，跳过解密");
+                return encryptedBizContent; // 返回原始内容
+            }
+
+            // 使用支付宝SDK解密
+            String decryptType = StringUtils.hasText(config.getEncryptType())
+                    ? config.getEncryptType()
+                    : "AES";
+
+            String decryptedContent = AlipayEncrypt.decryptContent(
+                    encryptedBizContent,
+                    decryptType,
+                    config.getEncryptKey(),
+                    config.getCharset() != null ? config.getCharset() : "UTF-8"
+            );
+
+            log.debug("支付宝通知biz_content解密成功");
+            return decryptedContent;
+
+        } catch (AlipayApiException e) {
+            log.error("支付宝通知biz_content解密失败: {}", e.getErrMsg(), e);
+            return null;
+        } catch (Exception e) {
+            log.error("解密支付宝通知内容异常", e);
+            return null;
+        }
+    }
+
+    /**
+     * 读取证书文件内容
+     *
+     * @param certPath 证书文件路径
+     * @return 证书内容字符串
+     * @throws java.io.IOException 读取失败时抛出
+     */
+    private String readCertContent(String certPath) throws java.io.IOException {
+        java.nio.file.Path path = java.nio.file.Paths.get(certPath);
+        if (!java.nio.file.Files.exists(path)) {
+            throw new java.io.IOException("证书文件不存在: " + certPath);
+        }
+        return new String(java.nio.file.Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /**
@@ -363,23 +679,62 @@ public class AlipayService {
      */
     public BigDecimal getDailyLimit() {
         try {
-            // 优先从通用系统配置读取
-            // 如果未来有独立配置项，可迁移到 sys_config 中
-            String v = null; // TODO: 接入通用配置读取服务
-            if (v != null) {
-                return new BigDecimal(v);
-            }
-        } catch (Exception ignore) {}
-        return new BigDecimal("10000.00");
+            // 从系统配置中读取每日支付限额
+            String limitStr = integrationConfigService.getConfigValue("alipay", "daily_limit", "10000.00");
+            return new BigDecimal(limitStr);
+        } catch (Exception e) {
+            log.warn("读取支付限额配置失败，使用默认值: {}", e.getMessage());
+            return new BigDecimal("10000.00");
+        }
     }
 
     /**
      * 检查支付限额
      */
     public boolean checkDailyLimit(Long employeeId, BigDecimal amount) {
-        // TODO: 实现每日支付限额检查
-        BigDecimal dailyLimit = getDailyLimit();
-        return amount.compareTo(dailyLimit) <= 0;
+        try {
+            BigDecimal dailyLimit = getDailyLimit();
+
+            // 检查单笔金额是否超过限额
+            if (amount.compareTo(dailyLimit) > 0) {
+                log.warn("单笔支付金额超过限额: employeeId={}, amount={}, limit={}",
+                        employeeId, amount, dailyLimit);
+                return false;
+            }
+
+            // 获取今日已支付总额
+            String today = java.time.LocalDate.now().toString();
+            String dailyLimitKey = DAILY_LIMIT_KEY_PREFIX + employeeId + ":" + today;
+
+            String totalAmountStr = (String) redisTemplate.opsForValue().get(dailyLimitKey);
+            BigDecimal totalAmount = totalAmountStr != null ? new BigDecimal(totalAmountStr) : BigDecimal.ZERO;
+
+            // 检查今日累计金额 + 本次金额是否超过限额
+            BigDecimal newTotal = totalAmount.add(amount);
+            if (newTotal.compareTo(dailyLimit) > 0) {
+                log.warn("今日累计支付金额超过限额: employeeId={}, totalAmount={}, newAmount={}, limit={}",
+                        employeeId, totalAmount, amount, dailyLimit);
+                return false;
+            }
+
+            // 更新今日累计金额（设置过期时间为明天凌晨）
+            redisTemplate.opsForValue().set(dailyLimitKey, newTotal.toString());
+
+            // 计算到明天凌晨的秒数
+            java.time.LocalDateTime now = java.time.LocalDateTime.now();
+            java.time.LocalDateTime tomorrow = now.plusDays(1).withHour(0).withMinute(0).withSecond(0).withNano(0);
+            long secondsUntilTomorrow = java.time.Duration.between(now, tomorrow).getSeconds();
+            redisTemplate.expire(dailyLimitKey, secondsUntilTomorrow, TimeUnit.SECONDS);
+
+            log.debug("支付限额检查通过: employeeId={}, amount={}, todayTotal={}, limit={}",
+                    employeeId, amount, newTotal, dailyLimit);
+            return true;
+
+        } catch (Exception e) {
+            log.error("检查支付限额异常: employeeId={}, amount={}", employeeId, amount, e);
+            // 异常情况下，为了安全起见，拒绝支付
+            return false;
+        }
     }
 
     /**
@@ -416,10 +771,41 @@ public class AlipayService {
                 return false;
             }
 
-            // TODO: 实际环境中可以调用支付宝API验证连接
-            // 例如：查询商户信息或调用测试接口
-            log.info("支付宝配置验证通过: appId={}", config.getAppId());
-            return true;
+            // 调用支付宝API验证连接（使用查询接口测试）
+            try {
+                AlipayClient alipayClient = createAlipayClient();
+
+                // 使用一个不存在的订单号查询，如果返回特定错误码说明连接正常
+                AlipayFundTransCommonQueryRequest request = new AlipayFundTransCommonQueryRequest();
+                com.alipay.api.domain.AlipayFundTransCommonQueryModel model = new com.alipay.api.domain.AlipayFundTransCommonQueryModel();
+
+                model.setOutBizNo("CONNECTION_TEST_" + System.currentTimeMillis());
+                model.setProductCode("TRANS_ACCOUNT_NO_PWD");
+                model.setBizScene("DIRECT_TRANSFER");
+
+                request.setBizModel(model);
+
+                AlipayFundTransCommonQueryResponse response = alipayClient.execute(request);
+
+                // 如果能收到响应（即使是错误响应），说明连接正常
+                if (response != null) {
+                    log.info("支付宝连接验证成功: appId={}, responseCode={}", config.getAppId(), response.getCode());
+                    return true;
+                } else {
+                    log.warn("支付宝连接验证失败: 响应为空");
+                    return false;
+                }
+
+            } catch (AlipayApiException e) {
+                // 某些API异常也说明连接是通的，只是业务逻辑问题
+                if (e.getErrCode() != null) {
+                    log.info("支付宝连接验证成功（业务异常）: appId={}, errCode={}", config.getAppId(), e.getErrCode());
+                    return true;
+                } else {
+                    log.error("支付宝连接验证失败: {}", e.getMessage());
+                    return false;
+                }
+            }
 
         } catch (Exception e) {
             log.error("支付宝连接检查异常", e);

@@ -40,5 +40,7 @@ public class SysUser extends BaseEntity {
 
     @TableField("last_login_ip")
     private String lastLoginIp;
-}
 
+    @TableField("permission_version")
+    private Integer permissionVersion;
+}

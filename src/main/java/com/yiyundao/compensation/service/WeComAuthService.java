@@ -1,6 +1,5 @@
 package com.yiyundao.compensation.service;
 
-import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.interfaces.dto.config.WechatConfigDto;
 import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
 import com.yiyundao.compensation.modules.system.service.SysConfigService;

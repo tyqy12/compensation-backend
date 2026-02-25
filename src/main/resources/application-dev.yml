@@ -1,8 +1,10 @@
 spring:
+  main:
+    allow-circular-references: true
   # 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    url: jdbc:mysql://47.108.70.177:3306/s06?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&useSSL=false&allowPublicKeyRetrieval=true
+    url: jdbc:mysql://47.93.215.12:3306/s06?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&useSSL=false&allowPublicKeyRetrieval=true
     username: s06
     password: 123456
     hikari:
@@ -50,8 +52,8 @@ alipay:
   charset: UTF-8
   sign-type: RSA2
   format: json
-  notify-url: http://localhost:8080/api/alipay/notify
-  return-url: http://localhost:8080/api/alipay/return
+  notify-url: "http://localhost:${server.port:8080}/api/alipay/notify"
+  return-url: "http://localhost:${server.port:8080}/api/alipay/return"
 
 # 企业微信配置
 wechat:
@@ -86,3 +88,15 @@ encryption:
 migration:
   audit-log:
     enabled: true
+
+external-api:
+  jwt:
+    secret: external-api-dev-secret-key-2024-compensation
+    expiration-seconds: 1800
+  rate-limit:
+    per-minute: 600
+    alert-cooldown-seconds: 300
+
+# OAuth 信任重定向域名（开发环境）
+oauth:
+  trusted-redirect-hosts: localhost:5173,127.0.0.1:5173,localhost:3000,127.0.0.1:3000

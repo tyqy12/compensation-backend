@@ -2,6 +2,7 @@ package com.yiyundao.compensation.service;
 
 import com.yiyundao.compensation.interfaces.adapter.OrganizationAdapter;
 import com.yiyundao.compensation.dto.OrganizationSyncResult;
+import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +23,9 @@ public class OrganizationSyncService {
 
     private final Map<String, OrganizationAdapter> adapters;
     private final NotificationService notificationService;
+    private final com.yiyundao.compensation.modules.system.service.IntegrationConfigService integrationConfigService;
+    private final com.yiyundao.compensation.modules.employee.service.EmployeeService employeeService;
+    private final com.yiyundao.compensation.modules.user.service.UserBindingService userBindingService;
 
     @Value("${notification.retry.max:3}")
     private int notifyRetryMax;
@@ -29,14 +33,24 @@ public class OrganizationSyncService {
     @Value("${notification.retry.backoff-ms:500}")
     private long notifyBackoffMs;
 
+    @Value("${org.sync.scheduled.enabled:false}")
+    private boolean scheduledEnabled;
+
     @Autowired
-    public OrganizationSyncService(List<OrganizationAdapter> adapterList, NotificationService notificationService) {
+    public OrganizationSyncService(List<OrganizationAdapter> adapterList,
+                                   NotificationService notificationService,
+                                   com.yiyundao.compensation.modules.system.service.IntegrationConfigService integrationConfigService,
+                                   com.yiyundao.compensation.modules.employee.service.EmployeeService employeeService,
+                                   com.yiyundao.compensation.modules.user.service.UserBindingService userBindingService) {
         this.adapters = adapterList.stream()
                 .collect(Collectors.toMap(
                     OrganizationAdapter::getPlatformType,
                     adapter -> adapter
                 ));
         this.notificationService = notificationService;
+        this.integrationConfigService = integrationConfigService;
+        this.employeeService = employeeService;
+        this.userBindingService = userBindingService;
         log.info("已注册组织同步适配器: {}", adapters.keySet());
     }
 
@@ -52,6 +66,12 @@ public class OrganizationSyncService {
             return OrganizationSyncResult.failure(platformType, "未找到平台适配器", null);
         }
 
+        // 平台未启用或未配置，则跳过
+        if (!integrationConfigService.isPlatformEnabled(platformType)) {
+            log.warn("平台未启用，同步跳过: {}", platformType);
+            return OrganizationSyncResult.failure(platformType, "平台未启用或未配置，跳过", null);
+        }
+
         try {
             return adapter.syncOrganization();
         } catch (Exception e) {
@@ -64,22 +84,8 @@ public class OrganizationSyncService {
      * 同步所有平台
      */
     public List<OrganizationSyncResult> syncAllPlatforms() {
-        log.info("开始同步所有平台组织架构");
-
-        return adapters.values().stream()
-                .map(adapter -> {
-                    try {
-                        return adapter.syncOrganization();
-                    } catch (Exception e) {
-                        log.error("平台同步失败: {}", adapter.getPlatformType(), e);
-                        return OrganizationSyncResult.failure(
-                            adapter.getPlatformType(),
-                            "同步失败: " + e.getMessage(),
-                            null
-                        );
-                    }
-                })
-                .collect(Collectors.toList());
+        // 已取消自动同步
+        return java.util.Collections.emptyList();
     }
 
     /**
@@ -87,22 +93,8 @@ public class OrganizationSyncService {
      */
     @Scheduled(cron = "0 0 * * * ?")
     public void scheduledSync() {
-        log.info("开始定时组织架构同步");
-
-        List<OrganizationSyncResult> results = syncAllPlatforms();
-
-        // 记录同步结果
-        for (OrganizationSyncResult result : results) {
-            if (result.isSuccess()) {
-                log.info("平台{}同步成功: 总计{}人, 新增{}人, 更新{}人",
-                        result.getPlatformType(),
-                        result.getTotalEmployees(),
-                        result.getNewEmployees(),
-                        result.getUpdatedEmployees());
-            } else {
-                log.error("平台{}同步失败: {}", result.getPlatformType(), result.getMessage());
-            }
-        }
+        // 已取消自动同步
+        return;
     }
 
     /**
@@ -127,6 +119,59 @@ public class OrganizationSyncService {
      */
     public List<String> getSupportedPlatforms() {
         return adapters.keySet().stream().collect(Collectors.toList());
+    }
+
+    /**
+     * 手动获取平台员工预览（不落库）
+     */
+    public java.util.List<com.yiyundao.compensation.modules.employee.entity.Employee> fetchPreview(String platformType) {
+        OrganizationAdapter adapter = adapters.get(platformType);
+        if (adapter == null) return java.util.Collections.emptyList();
+        if (!integrationConfigService.isPlatformEnabled(platformType)) return java.util.Collections.emptyList();
+        return adapter.fetchAllEmployees();
+    }
+
+    public java.util.List<com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto> fetchDepartmentTree(String platformType) {
+        OrganizationAdapter adapter = adapters.get(platformType);
+        if (adapter == null) return java.util.Collections.emptyList();
+        if (!integrationConfigService.isPlatformEnabled(platformType)) return java.util.Collections.emptyList();
+        return adapter.fetchDepartmentTree();
+    }
+
+    /**
+     * 手动导入单个员工（带用户名偏好）
+     */
+    public com.yiyundao.compensation.modules.employee.entity.Employee importOne(com.yiyundao.compensation.modules.employee.entity.Employee employee, String preferredUsername) {
+        com.yiyundao.compensation.modules.employee.entity.Employee target = null;
+        if (employee.getPlatformUserId() != null && employee.getPlatformType() != null) {
+            try {
+                com.yiyundao.compensation.modules.employee.entity.Employee exist = employeeService.getByPlatformUserId(employee.getPlatformUserId(), employee.getPlatformType());
+                if (exist != null) {
+                    // 更新已有记录
+                    com.yiyundao.compensation.modules.employee.entity.Employee update = new com.yiyundao.compensation.modules.employee.entity.Employee();
+                    update.setName(employee.getName());
+                    update.setPhone(employee.getPhone());
+                    update.setEmail(employee.getEmail());
+                    update.setDepartment(employee.getDepartment());
+                    update.setPosition(employee.getPosition());
+                    update.setEmploymentType(employee.getEmploymentType());
+                    update.setStatus(employee.getStatus());
+                    update.setOffline(employee.getOffline());
+                    update.setManagerId(employee.getManagerId());
+                    update.setBankAccount(employee.getBankAccount());
+                    update.setBankName(employee.getBankName());
+                    update.setHireDate(employee.getHireDate());
+                    EmployeeVO updatedVo = employeeService.updateEmployee(exist.getId(), update);
+                    target = employeeService.getById(updatedVo.getId());
+                }
+            } catch (Exception ignored) {}
+        }
+        if (target == null) {
+            EmployeeVO createdVo = employeeService.createEmployee(employee);
+            target = employeeService.getById(createdVo.getId());
+        }
+        userBindingService.ensureUserForEmployee(target, preferredUsername);
+        return target;
     }
 
     /**

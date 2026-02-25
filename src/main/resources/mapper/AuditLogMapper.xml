@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.yiyundao.compensation.infrastructure.dao.AuditLogMapper">
+
+    <!-- 根据时间范围查询 -->
+    <select id="findByTimeRange" resultType="com.yiyundao.compensation.modules.audit.entity.AuditLog">
+        SELECT * FROM audit_log
+        WHERE create_time &gt;= #{startTime}
+        AND create_time &lt;= #{endTime}
+        ORDER BY create_time DESC
+    </select>
+
+    <!-- 分页查询 -->
+    <select id="queryByPage" resultType="com.yiyundao.compensation.modules.audit.entity.AuditLog">
+        SELECT * FROM audit_log
+        <where>
+            <if test="request.username != null and request.username != ''">
+                AND username = #{request.username}
+            </if>
+            <if test="request.operation != null and request.operation != ''">
+                AND operation LIKE CONCAT('%', #{request.operation}, '%')
+            </if>
+            <if test="request.businessType != null and request.businessType != ''">
+                AND business_type = #{request.businessType}
+            </if>
+            <if test="request.requestIp != null and request.requestIp != ''">
+                AND request_ip = #{request.requestIp}
+            </if>
+            <if test="request.responseResult != null and request.responseResult != ''">
+                AND response_result = #{request.responseResult}
+            </if>
+            <if test="request.startTime != null">
+                AND create_time &gt;= #{request.startTime}
+            </if>
+            <if test="request.endTime != null">
+                AND create_time &lt;= #{request.endTime}
+            </if>
+            <if test="request.keyword != null and request.keyword != ''">
+                AND (operation LIKE CONCAT('%', #{request.keyword}, '%')
+                OR username LIKE CONCAT('%', #{request.keyword}, '%')
+                OR error_msg LIKE CONCAT('%', #{request.keyword}, '%'))
+            </if>
+        </where>
+        ORDER BY create_time DESC
+        LIMIT #{request.size} OFFSET #{request.offset}
+    </select>
+
+</mapper>

@@ -1,0 +1,31 @@
+# Summary
+
+- Getting Started
+  - [Stack Overview](stack.md)
+  - [Environment Variables](env.md)
+  - [Blueprint (Index)](README.md)
+- Architecture & Patterns
+  - [Architecture & Structure](architecture.md)
+  - [Routing & RBAC Guards](routing.md)
+  - [State Management](state.md)
+  - [API Client & Contracts](api.md)
+- UI & Guidelines
+  - [UI & ProComponents Guidelines](ui.md)
+  - [Design Guidelines](design-guidelines.md)
+- Testing & Quality
+  - [Testing Strategy](testing.md)
+  - [Implementation Checklist](checklist.md)
+- Business APIs
+  - [Employee API](employee-api.md)
+  - [Admin API](admin-api.md)
+  - [Dashboard API](dashboard-api.md)
+  - [Payment Batch API](payment-batch-api.md)
+  - [Frontend Integration Config API](frontend-integration-config-api.md)
+- Domain Specs & Flows
+  - [Org Structure (per platform)](org-structure.md)
+  - [Employee–User–Platform Linking](employee-user-linking.md)
+  - [Platform Binding Approval](platform-binding-approval.md)
+- Plans & Roadmap
+  - [Dynamic Permissions Plan](frontend-dynamic-permissions-plan.md)
+  - [Project Issues & Plan](plan-issues.md)
+

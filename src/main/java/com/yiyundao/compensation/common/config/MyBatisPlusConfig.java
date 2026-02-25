@@ -15,7 +15,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import java.time.LocalDateTime;
 
 @Configuration
-@MapperScan("com.yiyundao.compensation.infrastructure.dao")
+@MapperScan({"com.yiyundao.compensation.infrastructure.dao", "com.yiyundao.compensation.mapper"})
 public class MyBatisPlusConfig {
 
     @Bean

@@ -15,6 +15,7 @@ import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.enums.BatchStatus;
+import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.enums.PaymentStatus;
 import com.yiyundao.compensation.enums.PaymentType;
 import com.yiyundao.compensation.service.AlipayService;
@@ -139,13 +140,13 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
                 .eq(PayrollBatch::getId, payrollBatch.getId())
                 .set(PayrollBatch::getPaymentBatchNo, batchNo);
         if (payableCount > 0) {
-            wrapper.set(PayrollBatch::getStatus, "pay_processing");
+            wrapper.set(PayrollBatch::getStatus, PayrollBatchStatus.PAY_PROCESSING);
         }
         payrollBatchMapper.update(null, wrapper);
 
         payrollBatch.setPaymentBatchNo(batchNo);
         if (payableCount > 0) {
-            payrollBatch.setStatus("pay_processing");
+            payrollBatch.setStatus(PayrollBatchStatus.PAY_PROCESSING);
         }
 
         if (triggerTransfer && payableCount > 0) {

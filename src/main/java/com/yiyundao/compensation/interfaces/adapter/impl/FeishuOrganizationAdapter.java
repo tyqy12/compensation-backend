@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.interfaces.adapter.impl;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.interfaces.adapter.OrganizationAdapter;
 import com.yiyundao.compensation.dto.OrganizationSyncResult;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
@@ -8,25 +9,34 @@ import com.yiyundao.compensation.modules.system.service.IntegrationConfigService
 import com.yiyundao.compensation.interfaces.dto.config.FeishuConfigDto;
 import com.yiyundao.compensation.service.PlatformTokenCacheService;
 import com.yiyundao.compensation.modules.system.service.SysConfigService;
+import com.yiyundao.compensation.modules.user.service.UserBindingService;
+import com.yiyundao.compensation.modules.org.service.DepartmentService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class FeishuOrganizationAdapter implements OrganizationAdapter {
 
-    private final EmployeeService employeeService;
+    private final ObjectProvider<EmployeeService> employeeServiceProvider;
+    private final ObjectProvider<UserBindingService> userBindingServiceProvider;
     private final WebClient webClient;
     private final IntegrationConfigService integrationConfigService;
     private final PlatformTokenCacheService platformTokenCacheService;
     private final SysConfigService sysConfigService;
+    private final DepartmentService departmentService;
+    private final ObjectMapper objectMapper;
 
     @Value("${feishu.app-id:}")
     private String appId;
@@ -46,11 +56,19 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
     public OrganizationSyncResult syncOrganization() {
         log.info("开始飞书组织架构同步");
         try {
+            if (!integrationConfigService.isPlatformEnabled(PLATFORM_TYPE)) {
+                log.warn("飞书未启用或未配置，跳过同步");
+                return OrganizationSyncResult.failure(PLATFORM_TYPE, "未启用或未配置，跳过", null);
+            }
             String tenantToken = getTenantAccessToken();
             if (tenantToken == null) {
                 return OrganizationSyncResult.failure(PLATFORM_TYPE, "获取访问令牌失败", null);
             }
             List<FeishuDepartment> departments = getAllDepartments(tenantToken);
+            for (FeishuDepartment d : departments) {
+                String parentPid = (d.getParent_department_id() == null || d.getParent_department_id().isBlank()) ? null : d.getParent_department_id();
+                departmentService.upsert(PLATFORM_TYPE, d.getDepartment_id(), d.getName(), parentPid, null);
+            }
             int total = 0, created = 0, updated = 0;
             List<String> errors = new ArrayList<>();
 
@@ -70,21 +88,23 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
                         total += page.getData().getItems().size();
                         for (FeishuUser u : page.getData().getItems()) {
                             try {
-                                Employee existing = employeeService.getByPlatformUserId(u.getUser_id(), PLATFORM_TYPE);
+                                Employee existing = employeeServiceProvider.getObject().getByPlatformUserId(u.getUser_id(), PLATFORM_TYPE);
                                 Employee candidate = convertToEmployee(u, deptNameMap);
                                 if (existing == null) {
                                     if (candidate.getEmployeeId() != null) {
-                                        Employee byEmpId = employeeService.getByEmployeeId(candidate.getEmployeeId());
+                                        Employee byEmpId = employeeServiceProvider.getObject().getByEmployeeId(candidate.getEmployeeId());
                                         if (byEmpId != null) {
-                                            employeeService.updateEmployee(byEmpId.getId(), candidate);
+                                            employeeServiceProvider.getObject().updateEmployee(byEmpId.getId(), candidate);
                                             updated++;
                                             continue;
                                         }
                                     }
-                                    employeeService.createEmployee(candidate);
+                                    employeeServiceProvider.getObject().createEmployee(candidate);
+                                    userBindingServiceProvider.getObject().ensureUserForEmployee(candidate);
                                     created++;
                                 } else {
-                                    employeeService.updateEmployee(existing.getId(), candidate);
+                                    employeeServiceProvider.getObject().updateEmployee(existing.getId(), candidate);
+                                    userBindingServiceProvider.getObject().ensureUserForEmployee(candidate);
                                     updated++;
                                 }
                             } catch (Exception ex) {
@@ -105,6 +125,108 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
             log.error("飞书组织架构同步异常", e);
             return OrganizationSyncResult.failure(PLATFORM_TYPE, "同步异常: " + e.getMessage(), null);
         }
+    }
+
+    @Override
+    public java.util.List<Employee> fetchAllEmployees() {
+        java.util.Map<String, Employee> seen = new java.util.LinkedHashMap<>();
+        try {
+            if (!integrationConfigService.isPlatformEnabled(PLATFORM_TYPE)) {
+                log.warn("飞书未启用或未配置，fetch跳过");
+                return new java.util.ArrayList<>();
+            }
+            String tenantToken = getTenantAccessToken();
+            if (tenantToken == null) return new java.util.ArrayList<>();
+            java.util.List<FeishuDepartment> departments = getAllDepartments(tenantToken);
+            java.util.Map<String, String> deptNameMap = new java.util.HashMap<>();
+            for (FeishuDepartment d : departments) deptNameMap.put(d.getDepartment_id(), d.getName());
+            for (FeishuDepartment dept : departments) {
+                String pageToken = null; boolean hasMore = true;
+                while (hasMore) {
+                    FeishuUserListResponse page = getDepartmentUsers(tenantToken, dept.getDepartment_id(), pageToken);
+                    if (page == null || page.getData() == null) break;
+                    if (page.getData().getItems() != null) {
+                        for (FeishuUser u : page.getData().getItems()) {
+                            String key = u.getUser_id();
+                            Employee exist = seen.get(key);
+                            if (exist == null) {
+                                exist = convertToEmployee(u, deptNameMap);
+                                exist.setEmployeeId(null);
+                                seen.put(key, exist);
+                            }
+                            if (u.getDepartment_ids() != null) {
+                                java.util.LinkedHashSet<String> names = new java.util.LinkedHashSet<>();
+                                if (exist.getDepartment() != null && !exist.getDepartment().isBlank()) {
+                                    names.addAll(java.util.Arrays.asList(exist.getDepartment().split(",")));
+                                }
+                                for (String depId : u.getDepartment_ids()) {
+                                    String name = deptNameMap.get(depId);
+                                    if (name != null) names.add(name);
+                                }
+                                exist.setDepartment(String.join(",", names));
+                            }
+                        }
+                    }
+                    hasMore = page.getData().getHas_more();
+                    pageToken = page.getData().getPage_token();
+                }
+            }
+        } catch (Exception e) {
+            log.error("飞书fetchAllEmployees异常", e);
+        }
+        return new java.util.ArrayList<>(seen.values());
+    }
+
+    @Override
+    public java.util.List<com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto> fetchDepartmentTree() {
+        java.util.List<com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto> roots = new java.util.ArrayList<>();
+        try {
+            if (!integrationConfigService.isPlatformEnabled(PLATFORM_TYPE)) return roots;
+            String tenantToken = getTenantAccessToken();
+            if (tenantToken == null) return roots;
+            java.util.List<FeishuDepartment> depts = getAllDepartments(tenantToken);
+            java.util.Map<String, com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto> map = new java.util.LinkedHashMap<>();
+            for (FeishuDepartment d : depts) {
+                com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto node = new com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto();
+                node.setPlatformDeptId(d.getDepartment_id());
+                node.setName(d.getName());
+                node.setParentPlatformDeptId(d.getParent_department_id());
+                map.put(d.getDepartment_id(), node);
+            }
+            for (FeishuDepartment d : depts) {
+                com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto node = map.get(d.getDepartment_id());
+                if (d.getParent_department_id() == null || d.getParent_department_id().isBlank()) roots.add(node);
+                else {
+                    com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto parent = map.get(d.getParent_department_id());
+                    if (parent != null) parent.getChildren().add(node);
+                }
+            }
+            // members per dept (paged)
+            for (FeishuDepartment dept : depts) {
+                com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto node = map.get(dept.getDepartment_id());
+                String pageToken = null; boolean hasMore = true;
+                while (hasMore) {
+                    FeishuUserListResponse page = getDepartmentUsers(tenantToken, dept.getDepartment_id(), pageToken);
+                    if (page == null || page.getData() == null) break;
+                    if (page.getData().getItems() != null) {
+                        for (FeishuUser u : page.getData().getItems()) {
+                            com.yiyundao.compensation.interfaces.dto.org.OrgMemberPreviewDto m = new com.yiyundao.compensation.interfaces.dto.org.OrgMemberPreviewDto();
+                            m.setPlatformUserId(u.getUser_id());
+                            m.setName(u.getName());
+                            m.setPhone(u.getMobile());
+                            m.setEmail(u.getEmail());
+                            m.setPosition(u.getJob_title());
+                            node.getMembers().add(m);
+                        }
+                    }
+                    hasMore = page.getData().getHas_more();
+                    pageToken = page.getData().getPage_token();
+                }
+            }
+        } catch (Exception e) {
+            log.error("获取飞书部门树异常", e);
+        }
+        return roots;
     }
 
     @Override
@@ -131,8 +253,49 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
 
     @Override
     public boolean isManager(String platformUserId) {
-        // TODO: 管理员判断
-        return true;
+        try {
+            String tenantToken = getTenantAccessToken();
+            if (tenantToken == null || platformUserId == null) {
+                return false;
+            }
+
+            // 获取用户详情，检查是否是管理员
+            String url = API_BASE_URL + "/contact/v3/users/" + platformUserId + "?user_id_type=user_id";
+
+            FeishuUserDetailResponse resp = webClient.get()
+                    .uri(url)
+                    .headers(h -> h.setBearerAuth(tenantToken))
+                    .retrieve()
+                    .bodyToMono(FeishuUserDetailResponse.class)
+                    .block();
+
+            if (resp != null && resp.getCode() == 0 && resp.getData() != null && resp.getData().getUser() != null) {
+                FeishuUser user = resp.getData().getUser();
+
+                // 检查是否是主管理员或部门管理员（基于响应中的可用信息）
+                // 飞书用户详情中可能包含is_tenant_manager字段
+                try {
+                    java.lang.reflect.Method isTenantManager = user.getClass().getMethod("isIsTenantManager");
+                    Boolean isManager = (Boolean) isTenantManager.invoke(user);
+                    if (Boolean.TRUE.equals(isManager)) {
+                        return true;
+                    }
+                } catch (NoSuchMethodException e) {
+                    // 方法不存在，使用备用逻辑
+                    log.debug("飞书用户信息不包含is_tenant_manager字段，使用备用管理员判断逻辑");
+                }
+
+                // 如果无法确定，默认为非管理员，需要管理员在系统中明确配置
+                log.debug("无法确定用户是否为飞书管理员: userId={}", platformUserId);
+                return false;
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            log.error("判断飞书管理员失败: userId={}", platformUserId, e);
+            return false;
+        }
     }
 
     @Override
@@ -164,11 +327,145 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
     public void sendApprovalNotification(String platformUserId, String message) {
         try {
             String tenantToken = getTenantAccessToken();
-            if (tenantToken == null) return;
-            // TODO: 使用消息接口发送
-            log.info("[Feishu] 通知: userId={}, message={}", platformUserId, message);
+            if (tenantToken == null) {
+                log.warn("无法获取飞书访问令牌");
+                return;
+            }
+
+            // 使用飞书消息接口发送通知
+            sendMessage(tenantToken, platformUserId, message);
+
+            log.info("[Feishu] 通知发送完成: userId={}, message={}", platformUserId, message);
+
         } catch (Exception e) {
             log.error("发送飞书通知失败", e);
+        }
+    }
+
+    /**
+     * 使用飞书消息接口发送消息
+     */
+    private void sendMessage(String tenantToken, String userId, String message) {
+        try {
+            // 方法1：使用即时消息接口发送（需要用户ID）
+            boolean sent = sendIMMessage(tenantToken, userId, message);
+
+            if (!sent) {
+                // 方法2：使用应用消息接口发送（备用方案）
+                sendAppMessage(tenantToken, userId, message);
+            }
+
+        } catch (Exception e) {
+            log.error("[Feishu] 消息发送异常", e);
+        }
+    }
+
+    /**
+     * 使用即时消息接口发送
+     */
+    private boolean sendIMMessage(String tenantToken, String userId, String message) {
+        try {
+            String url = API_BASE_URL + "/im/v1/messages";
+
+            // 构建请求参数
+            Map<String, Object> params = new HashMap<>();
+            params.put("receive_id_type", "open_id");
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("receive_id", userId);
+            body.put("msg_type", "text");
+
+            Map<String, String> content = new HashMap<>();
+            content.put("text", message);
+            body.put("content", objectMapper.writeValueAsString(content));
+
+            params.put("body", body);
+
+            // 发送请求 - webClient返回String而不是ResponseEntity
+            String responseBody = webClient.post()
+                    .uri(url)
+                    .headers(h -> {
+                        h.setBearerAuth(tenantToken);
+                        h.setContentType(MediaType.APPLICATION_JSON);
+                    })
+                    .bodyValue(params)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            if (responseBody != null && !responseBody.isEmpty()) {
+                com.fasterxml.jackson.databind.JsonNode result = objectMapper.readTree(responseBody);
+                if (result.has("code") && result.get("code").asInt() == 0) {
+                    log.info("[Feishu] 即时消息发送成功: userId={}", userId);
+                    return true;
+                } else {
+                    log.warn("[Feishu] 即时消息发送失败: code={}, msg={}",
+                            result.has("code") ? result.get("code") : "N/A",
+                            result.has("msg") ? result.get("msg") : "N/A");
+                }
+            }
+
+            return false;
+
+        } catch (Exception e) {
+            log.error("[Feishu] 即时消息发送异常", e);
+            return false;
+        }
+    }
+
+    /**
+     * 使用应用消息接口发送
+     */
+    private void sendAppMessage(String tenantToken, String userId, String message) {
+        try {
+            FeishuConfigDto cfg = integrationConfigService.getFeishuConfig();
+            String appToken = cfg != null && cfg.getAppToken() != null ? cfg.getAppToken() : null;
+
+            if (appToken == null || appToken.isBlank()) {
+                log.warn("[Feishu] 应用Token未配置，无法发送应用消息");
+                return;
+            }
+
+            // 首先创建消息
+            String url = API_BASE_URL + "/im/v1/messages";
+
+            Map<String, Object> params = new HashMap<>();
+            params.put("receive_id_type", "open_id");
+
+            Map<String, Object> body = new HashMap<>();
+            body.put("receive_id", userId);
+            body.put("msg_type", "text");
+
+            Map<String, String> content = new HashMap<>();
+            content.put("text", "【薪酬助手通知】" + message);
+            body.put("content", objectMapper.writeValueAsString(content));
+
+            params.put("body", body);
+
+            // 发送请求创建消息 - webClient返回String而不是ResponseEntity
+            String responseBody = webClient.post()
+                    .uri(url)
+                    .headers(h -> {
+                        h.setBearerAuth(tenantToken);
+                        h.setContentType(MediaType.APPLICATION_JSON);
+                    })
+                    .bodyValue(params)
+                    .retrieve()
+                    .bodyToMono(String.class)
+                    .block();
+
+            if (responseBody != null && !responseBody.isEmpty()) {
+                com.fasterxml.jackson.databind.JsonNode result = objectMapper.readTree(responseBody);
+                if (result.has("code") && result.get("code").asInt() == 0) {
+                    log.info("[Feishu] 应用消息发送成功: userId={}", userId);
+                } else {
+                    log.warn("[Feishu] 应用消息发送失败: code={}",
+                            result.has("code") ? result.get("code") : "N/A");
+                }
+            }
+
+        } catch (Exception e) {
+            log.error("[Feishu] 应用消息发送异常", e);
         }
     }
 
@@ -276,6 +573,7 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         return e;
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuTokenRequest {
         private String app_id;
         private String app_secret;
@@ -284,6 +582,7 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         public String getApp_secret() { return app_secret; }
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuTokenResponse {
         private int code;
         private String msg;
@@ -299,6 +598,7 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         public void setExpire(Integer expire) { this.expire = expire; }
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuDepartmentListResponse {
         private int code;
         private String msg;
@@ -311,6 +611,7 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         public void setData(FeishuDepartmentListData data) { this.data = data; }
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuDepartmentListData {
         private java.util.List<FeishuDepartment> items;
         private boolean has_more;
@@ -323,6 +624,7 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         public void setPage_token(String page_token) { this.page_token = page_token; }
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuDepartment {
         private String department_id;
         private String name;
@@ -335,6 +637,7 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         public void setParent_department_id(String parent_department_id) { this.parent_department_id = parent_department_id; }
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuUserListResponse {
         private int code;
         private String msg;
@@ -347,6 +650,7 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         public void setData(FeishuUserListData data) { this.data = data; }
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuUserListData {
         private java.util.List<FeishuUser> items;
         private boolean has_more;
@@ -359,6 +663,7 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         public void setPage_token(String page_token) { this.page_token = page_token; }
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuUserDetailResponse {
         private int code;
         private String msg;
@@ -371,12 +676,14 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         public void setData(FeishuUserDetailData data) { this.data = data; }
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuUserDetailData {
         private FeishuUser user;
         public FeishuUser getUser() { return user; }
         public void setUser(FeishuUser user) { this.user = user; }
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuUser {
         private String user_id;
         private String name;
@@ -407,6 +714,7 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         public void setEmployee_no(String employee_no) { this.employee_no = employee_no; }
     }
 
+    @SuppressWarnings("unused")
     private static class FeishuUserStatus {
         private Boolean is_frozen;
         private Boolean is_resigned;
