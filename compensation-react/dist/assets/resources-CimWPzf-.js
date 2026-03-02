@@ -1,1 +1,0 @@
-import{h as s,j as u,k as o}from"./index-CcRiHxqc.js";async function a(e){const{data:r}=await s.get("/admin/resources/v2/tree",{params:e});return u(r)}const n={resources:e=>["admin","resources",e]};function t(e){return o({queryKey:n.resources(e),queryFn:()=>a(e?{type:e}:void 0)})}export{t as u};
