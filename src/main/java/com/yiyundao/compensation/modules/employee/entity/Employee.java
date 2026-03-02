@@ -36,6 +36,22 @@ public class Employee extends BaseEntity {
 
     private LocalDate hireDate;
     private String status;
+
+    @TableField("settlement_account_type")
+    private String settlementAccountType;
+
+    @TableField("settlement_account")
+    private String settlementAccount;
+
+    @TableField("settlement_account_name")
+    private String settlementAccountName;
+
+    @TableField("settlement_provider_code")
+    private String settlementProviderCode;
+
     private String bankAccount;
     private String bankName;
+
+    @TableField("bank_branch_name")
+    private String bankBranchName;
 }

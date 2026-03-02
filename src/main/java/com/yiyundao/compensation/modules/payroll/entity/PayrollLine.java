@@ -6,6 +6,8 @@ import com.yiyundao.compensation.entity.BaseEntity;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
+import java.time.LocalDateTime;
+
 @Data
 @EqualsAndHashCode(callSuper = true)
 @TableName("payroll_line")
@@ -33,5 +35,22 @@ public class PayrollLine extends BaseEntity {
     private String note;
     @TableField("warning")
     private String warning;
+    @TableField("confirmation_assignee_employee_id")
+    private Long confirmationAssigneeEmployeeId;
+    @TableField("confirmation_status")
+    private String confirmationStatus;
+    @TableField("confirmed_by_user_id")
+    private Long confirmedByUserId;
+    @TableField("confirmed_by_employee_id")
+    private Long confirmedByEmployeeId;
+    @TableField("confirmed_at")
+    private LocalDateTime confirmedAt;
+    @TableField("confirmation_comment")
+    private String confirmationComment;
+    @TableField("objection_reason")
+    private String objectionReason;
+    @TableField("objection_at")
+    private LocalDateTime objectionAt;
+    @TableField("dispute_workflow_id")
+    private Long disputeWorkflowId;
 }
-

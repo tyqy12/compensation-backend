@@ -114,6 +114,69 @@ describe('integration queries', () => {
     expect(result.current.data).toEqual(mockDetail);
   });
 
+  it('keeps config when platform is disabled (for edit-after-disable)', async () => {
+    const platform: Platform = 'yunzhanghu';
+    const disabledDetail = {
+      platformType: 'yunzhanghu',
+      platformName: '云账户',
+      enabled: false,
+      config: {
+        dealerId: '***1234',
+        brokerId: '***5678',
+        appKey: '***9999',
+        des3Key: '******',
+        rsaPrivateKey: '******',
+        rsaPublicKey: '******',
+        signType: 'rsa',
+        url: 'https://api-service.yunzhanghu.com/sandbox',
+      },
+      connectionStatus: 'disconnected',
+      lastModified: '2026-02-26T09:00:00',
+    } satisfies IntegrationConfigDetail;
+
+    mockApi.get.mockResolvedValue({
+      data: { code: 200, message: 'success', data: disabledDetail },
+    });
+
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useIntegrationConfigQuery(platform), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockApi.get).toHaveBeenCalledWith('/admin/integration-configs/yunzhanghu');
+    expect(result.current.data?.enabled).toBe(false);
+    expect((result.current.data?.config as any)?.dealerId).toBe('***1234');
+    expect((result.current.data?.config as any)?.url).toBe('https://api-service.yunzhanghu.com/sandbox');
+  });
+
+  it('parses configJson when detail.config is empty', async () => {
+    const platform: Platform = 'yunzhanghu';
+    mockApi.get.mockResolvedValue({
+      data: {
+        code: 200,
+        message: 'success',
+        data: {
+          platformType: 'yunzhanghu',
+          platformName: '云账户',
+          enabled: false,
+          config: null,
+          configJson: '{"dealerId":"***1234","url":"https://api-service.yunzhanghu.com/sandbox"}',
+          connectionStatus: 'disconnected',
+          lastModified: null,
+        },
+      },
+    });
+
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useIntegrationConfigQuery(platform), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(result.current.data?.enabled).toBe(false);
+    expect((result.current.data?.config as any)?.dealerId).toBe('***1234');
+    expect((result.current.data?.config as any)?.url).toBe('https://api-service.yunzhanghu.com/sandbox');
+  });
+
   it('saves integration config and invalidates caches', async () => {
     mockApi.put.mockResolvedValue({
       data: { code: 200, message: 'success', data: '配置保存成功' },
@@ -163,7 +226,7 @@ describe('integration queries', () => {
     const response = await result.current.mutateAsync('wechat');
 
     expect(mockApi.post).toHaveBeenCalledWith('/admin/integration-configs/wechat/test-connection');
-    expect(response).toBe(true);
+    expect(response).toEqual({ success: true });
   });
 
   it('propagates errors from API', async () => {

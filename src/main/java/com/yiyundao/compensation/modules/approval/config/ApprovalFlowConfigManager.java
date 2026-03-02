@@ -3,6 +3,7 @@ package com.yiyundao.compensation.modules.approval.config;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.yiyundao.compensation.enums.WorkflowType;
+import com.yiyundao.compensation.security.SecurityConstants;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -43,21 +44,21 @@ public class ApprovalFlowConfigManager {
                 ApprovalStepConfig.builder()
                         .stepNo(1)
                         .stepName("部门负责人审批")
-                        .role("ROLE_MANAGER")
+                        .role(SecurityConstants.ROLE_MANAGER)
                         .timeoutHours(24)
                         .optional(false)
                         .build(),
                 ApprovalStepConfig.builder()
                         .stepNo(2)
                         .stepName("财务负责人审批")
-                        .role("ROLE_FINANCE")
+                        .role(SecurityConstants.ROLE_FINANCE)
                         .timeoutHours(24)
                         .optional(false)
                         .build(),
                 ApprovalStepConfig.builder()
                         .stepNo(3)
                         .stepName("总监审批")
-                        .role("ROLE_ADMIN")
+                        .role(SecurityConstants.ROLE_ADMIN)
                         .timeoutHours(48)
                         .optional(false)
                         .finalStep(true)
@@ -69,14 +70,14 @@ public class ApprovalFlowConfigManager {
                 ApprovalStepConfig.builder()
                         .stepNo(1)
                         .stepName("直接上级审批")
-                        .role("ROLE_MANAGER")
+                        .role(SecurityConstants.ROLE_MANAGER)
                         .timeoutHours(24)
                         .optional(false)
                         .build(),
                 ApprovalStepConfig.builder()
                         .stepNo(2)
                         .stepName("财务审批")
-                        .role("ROLE_FINANCE")
+                        .role(SecurityConstants.ROLE_FINANCE)
                         .timeoutHours(24)
                         .optional(false)
                         .finalStep(true)
@@ -88,7 +89,7 @@ public class ApprovalFlowConfigManager {
                 ApprovalStepConfig.builder()
                         .stepNo(1)
                         .stepName("管理员审批")
-                        .role("ROLE_ADMIN")
+                        .role(SecurityConstants.ROLE_ADMIN)
                         .timeoutHours(24)
                         .optional(false)
                         .finalStep(true)
@@ -100,9 +101,35 @@ public class ApprovalFlowConfigManager {
                 ApprovalStepConfig.builder()
                         .stepNo(1)
                         .stepName("管理员审批")
-                        .role("ROLE_ADMIN")
+                        .role(SecurityConstants.ROLE_ADMIN)
                         .timeoutHours(24)
                         .optional(false)
+                        .finalStep(true)
+                        .build()
+        ));
+
+        // 薪酬异议审批流程 - 负责人 -> 财务 -> 老板（可通过配置覆盖）
+        defaultFlowConfigs.put(WorkflowType.PAYROLL_DISPUTE, List.of(
+                ApprovalStepConfig.builder()
+                        .stepNo(1)
+                        .stepName("负责人核实")
+                        .role(SecurityConstants.ROLE_MANAGER)
+                        .timeoutHours(24)
+                        .optional(false)
+                        .build(),
+                ApprovalStepConfig.builder()
+                        .stepNo(2)
+                        .stepName("财务复核")
+                        .role(SecurityConstants.ROLE_FINANCE)
+                        .timeoutHours(24)
+                        .optional(false)
+                        .build(),
+                ApprovalStepConfig.builder()
+                        .stepNo(3)
+                        .stepName("老板终审")
+                        .role(SecurityConstants.ROLE_ADMIN)
+                        .timeoutHours(48)
+                        .optional(true)
                         .finalStep(true)
                         .build()
         ));

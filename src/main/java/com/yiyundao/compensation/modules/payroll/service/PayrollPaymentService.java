@@ -11,9 +11,8 @@ public interface PayrollPaymentService {
      *
      * @param payrollBatch 薪资批次
      * @param approver     审批人（可为空）
-     * @param triggerTransfer 是否自动触发支付通道（如支付宝）
+     * @param triggerTransfer 是否自动触发支付通道（统一结算路由）
      * @return 新建或已存在的支付批次，若无可支付记录则返回 null
      */
     PaymentBatch createPaymentBatch(PayrollBatch payrollBatch, SysUser approver, boolean triggerTransfer);
 }
-

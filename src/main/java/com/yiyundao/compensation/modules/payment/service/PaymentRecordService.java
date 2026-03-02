@@ -9,4 +9,5 @@ import java.util.List;
 public interface PaymentRecordService extends IService<PaymentRecord> {
     List<PaymentRecord> getByBatchNo(String batchNo, PaymentStatus status);
     PaymentRecord getByAlipayOrderNo(String alipayOrderNo);
+    PaymentRecord getByProviderOrderNo(String providerCode, String providerOrderNo);
 }

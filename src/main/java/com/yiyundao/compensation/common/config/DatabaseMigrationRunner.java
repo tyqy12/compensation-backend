@@ -18,12 +18,12 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
 
     @Override
     public void run(ApplicationArguments args) {
-        log.info("Running DB migrations (audit_log, core tables) if needed...");
+        log.info("Running idempotent DB migrations only (audit_log, core tables); destructive bootstrap scripts are excluded.");
         // 1) Ensure core tables exist (idempotent)
         createTableIfMissing("integration_config",
                 "CREATE TABLE `integration_config` (\n" +
                 "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
-                "  `platform_type` varchar(20) NOT NULL COMMENT '平台类型(wechat/dingtalk/feishu/alipay)',\n" +
+                "  `platform_type` varchar(20) NOT NULL COMMENT '平台类型(wechat/dingtalk/feishu/alipay/yunzhanghu)',\n" +
                 "  `config_json` text COMMENT '配置JSON',\n" +
                 "  `enabled` tinyint(1) DEFAULT '1' COMMENT '是否启用',\n" +
                 "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n" +
@@ -132,6 +132,26 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         // Extend employee: employment_type
         addColumnIfMissing("employee", "employment_type",
                 "ALTER TABLE employee ADD COLUMN `employment_type` varchar(20) DEFAULT 'full_time' COMMENT '用工类型(full_time/part_time)' AFTER `position`");
+        addColumnIfMissing("employee", "settlement_account_type",
+                "ALTER TABLE employee ADD COLUMN `settlement_account_type` varchar(20) DEFAULT NULL COMMENT '收款账户类型(bank_card/alipay/wechat/other)' AFTER `status`");
+        addColumnIfMissing("employee", "settlement_account",
+                "ALTER TABLE employee ADD COLUMN `settlement_account` varchar(128) DEFAULT NULL COMMENT '收款账户(加密存储)' AFTER `settlement_account_type`");
+        addColumnIfMissing("employee", "settlement_account_name",
+                "ALTER TABLE employee ADD COLUMN `settlement_account_name` varchar(100) DEFAULT NULL COMMENT '收款账户实名/户名' AFTER `settlement_account`");
+        addColumnIfMissing("employee", "bank_branch_name",
+                "ALTER TABLE employee ADD COLUMN `bank_branch_name` varchar(120) DEFAULT NULL COMMENT '开户支行' AFTER `bank_name`");
+        executeSqlSafely("UPDATE employee SET settlement_account = bank_account " +
+                "WHERE (settlement_account IS NULL OR settlement_account = '') " +
+                "AND bank_account IS NOT NULL AND bank_account <> ''");
+        executeSqlSafely("UPDATE employee SET settlement_account_type = 'bank_card' " +
+                "WHERE (settlement_account_type IS NULL OR settlement_account_type = '') " +
+                "AND ((settlement_account IS NOT NULL AND settlement_account <> '') OR (bank_account IS NOT NULL AND bank_account <> ''))");
+        executeSqlSafely("UPDATE employee SET settlement_account_name = name " +
+                "WHERE (settlement_account_name IS NULL OR settlement_account_name = '') " +
+                "AND ((settlement_account IS NOT NULL AND settlement_account <> '') OR (bank_account IS NOT NULL AND bank_account <> ''))");
+
+        // Ensure payment_record can be queried by latest entity mapping
+        migratePaymentRecordProviderColumns();
 
         // New table: employee_department (多部门关联)
         createTableIfMissing("employee_department",
@@ -331,7 +351,100 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  PRIMARY KEY (`id`),\n" +
                 "  KEY `idx_batch_emp` (`batch_id`,`employee_id`)\n" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪酬导入暂存';");
+
+        // Payroll confirmation workflow columns
+        migratePayrollConfirmationColumns();
+        // Approval workflow incremental columns
+        migrateApprovalWorkflowColumns();
         log.info("DB migrations finished.");
+    }
+
+    private void migratePaymentRecordProviderColumns() {
+        addColumnIfMissing("payment_record", "provider_code",
+                "ALTER TABLE payment_record ADD COLUMN `provider_code` varchar(32) NOT NULL DEFAULT 'alipay' " +
+                        "COMMENT '渠道编码: alipay/yunzhanghu/wechat/bank' AFTER `alipay_trade_no`");
+        addColumnIfMissing("payment_record", "provider_order_no",
+                "ALTER TABLE payment_record ADD COLUMN `provider_order_no` varchar(64) DEFAULT NULL " +
+                        "COMMENT '渠道侧商户订单号(我方生成)' AFTER `provider_code`");
+        addColumnIfMissing("payment_record", "provider_trade_no",
+                "ALTER TABLE payment_record ADD COLUMN `provider_trade_no` varchar(64) DEFAULT NULL " +
+                        "COMMENT '渠道侧平台流水号(渠道返回)' AFTER `provider_order_no`");
+        addColumnIfMissing("payment_record", "provider_metadata",
+                "ALTER TABLE payment_record ADD COLUMN `provider_metadata` json DEFAULT NULL " +
+                        "COMMENT '渠道扩展信息' AFTER `provider_trade_no`");
+        addColumnIfMissing("payment_record", "id_card_hash",
+                "ALTER TABLE payment_record ADD COLUMN `id_card_hash` varchar(64) DEFAULT NULL " +
+                        "COMMENT '收款人身份证哈希' AFTER `provider_metadata`");
+
+        addIndexIfMissing("payment_record", "idx_provider_order",
+                "CREATE INDEX `idx_provider_order` ON `payment_record` (`provider_code`, `provider_order_no`)");
+        addIndexIfMissing("payment_record", "idx_provider_trade",
+                "CREATE INDEX `idx_provider_trade` ON `payment_record` (`provider_code`, `provider_trade_no`)");
+
+        executeSqlSafely("UPDATE payment_record SET provider_code = 'alipay' " +
+                "WHERE provider_code IS NULL OR provider_code = ''");
+        executeSqlSafely("UPDATE payment_record SET provider_order_no = alipay_order_no " +
+                "WHERE (provider_order_no IS NULL OR provider_order_no = '') " +
+                "AND alipay_order_no IS NOT NULL AND alipay_order_no <> ''");
+        executeSqlSafely("UPDATE payment_record SET provider_trade_no = alipay_trade_no " +
+                "WHERE (provider_trade_no IS NULL OR provider_trade_no = '') " +
+                "AND alipay_trade_no IS NOT NULL AND alipay_trade_no <> ''");
+        executeSqlSafely("UPDATE payment_record SET provider_metadata = '{\"legacy\":true}' WHERE provider_metadata IS NULL");
+    }
+
+    private void migratePayrollConfirmationColumns() {
+        addColumnIfMissing("payroll_batch", "confirmation_required",
+                "ALTER TABLE payroll_batch ADD COLUMN `confirmation_required` tinyint(1) DEFAULT 1 COMMENT '是否需要员工确认' AFTER `payment_batch_no`");
+        addColumnIfMissing("payroll_batch", "confirmation_mode",
+                "ALTER TABLE payroll_batch ADD COLUMN `confirmation_mode` varchar(20) DEFAULT 'individual' COMMENT '确认模式(individual/group)' AFTER `confirmation_required`");
+        addColumnIfMissing("payroll_batch", "confirmation_completed_time",
+                "ALTER TABLE payroll_batch ADD COLUMN `confirmation_completed_time` datetime DEFAULT NULL COMMENT '确认完成时间' AFTER `confirmation_mode`");
+
+        // warning 字段在独立迁移脚本中新增；Runner 兜底确保字段存在
+        addColumnIfMissing("payroll_line", "warning",
+                "ALTER TABLE payroll_line ADD COLUMN `warning` varchar(500) DEFAULT NULL COMMENT '预警信息' AFTER `note`");
+        addColumnIfMissing("payroll_line", "confirmation_assignee_employee_id",
+                "ALTER TABLE payroll_line ADD COLUMN `confirmation_assignee_employee_id` bigint DEFAULT NULL COMMENT '确认负责人员工ID' AFTER `warning`");
+        addColumnIfMissing("payroll_line", "confirmation_status",
+                "ALTER TABLE payroll_line ADD COLUMN `confirmation_status` varchar(30) DEFAULT 'pending' COMMENT '确认状态' AFTER `confirmation_assignee_employee_id`");
+        addColumnIfMissing("payroll_line", "confirmed_by_user_id",
+                "ALTER TABLE payroll_line ADD COLUMN `confirmed_by_user_id` bigint DEFAULT NULL COMMENT '确认人用户ID' AFTER `confirmation_status`");
+        addColumnIfMissing("payroll_line", "confirmed_by_employee_id",
+                "ALTER TABLE payroll_line ADD COLUMN `confirmed_by_employee_id` bigint DEFAULT NULL COMMENT '确认人员工ID' AFTER `confirmed_by_user_id`");
+        addColumnIfMissing("payroll_line", "confirmed_at",
+                "ALTER TABLE payroll_line ADD COLUMN `confirmed_at` datetime DEFAULT NULL COMMENT '确认时间' AFTER `confirmed_by_employee_id`");
+        addColumnIfMissing("payroll_line", "confirmation_comment",
+                "ALTER TABLE payroll_line ADD COLUMN `confirmation_comment` varchar(500) DEFAULT NULL COMMENT '确认备注/签字' AFTER `confirmed_at`");
+        addColumnIfMissing("payroll_line", "objection_reason",
+                "ALTER TABLE payroll_line ADD COLUMN `objection_reason` varchar(500) DEFAULT NULL COMMENT '异议原因' AFTER `confirmation_comment`");
+        addColumnIfMissing("payroll_line", "objection_at",
+                "ALTER TABLE payroll_line ADD COLUMN `objection_at` datetime DEFAULT NULL COMMENT '异议时间' AFTER `objection_reason`");
+        addColumnIfMissing("payroll_line", "dispute_workflow_id",
+                "ALTER TABLE payroll_line ADD COLUMN `dispute_workflow_id` bigint DEFAULT NULL COMMENT '异议审批流程ID' AFTER `objection_at`");
+
+        addIndexIfMissing("payroll_line", "idx_confirmation_assignee_status",
+                "CREATE INDEX `idx_confirmation_assignee_status` ON `payroll_line` (`confirmation_assignee_employee_id`, `confirmation_status`)");
+        addIndexIfMissing("payroll_line", "idx_dispute_workflow",
+                "CREATE INDEX `idx_dispute_workflow` ON `payroll_line` (`dispute_workflow_id`)");
+
+        executeSqlSafely("UPDATE payroll_batch SET confirmation_required = 1 WHERE confirmation_required IS NULL");
+        executeSqlSafely("UPDATE payroll_batch SET confirmation_mode = 'individual' " +
+                "WHERE confirmation_mode IS NULL OR confirmation_mode = ''");
+        executeSqlSafely("UPDATE payroll_line SET confirmation_assignee_employee_id = employee_id " +
+                "WHERE confirmation_assignee_employee_id IS NULL");
+        executeSqlSafely("UPDATE payroll_line SET confirmation_status = 'pending' " +
+                "WHERE confirmation_status IS NULL OR confirmation_status = ''");
+
+        executeSqlSafely("INSERT INTO sys_config(config_key, config_value, config_type, config_desc, create_time, update_time) " +
+                "SELECT 'payroll.dispute.approval.flow', '', 'json', '薪酬异议审批流程配置(JSON，空值使用默认链路)', NOW(), NOW() " +
+                "WHERE NOT EXISTS (SELECT 1 FROM sys_config WHERE config_key='payroll.dispute.approval.flow')");
+    }
+
+    private void migrateApprovalWorkflowColumns() {
+        addColumnIfMissing("approval_workflow", "employee_id",
+                "ALTER TABLE approval_workflow ADD COLUMN `employee_id` bigint DEFAULT NULL COMMENT '关联员工ID' AFTER `initiator_id`");
+        addIndexIfMissing("approval_workflow", "idx_employee",
+                "CREATE INDEX `idx_employee` ON `approval_workflow` (`employee_id`)");
     }
 
     private void addColumnIfMissing(String table, String column, String ddl) {
@@ -347,6 +460,32 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
             }
         } catch (Exception e) {
             log.warn("Failed adding column {}.{}: {}", table, column, e.getMessage());
+        }
+    }
+
+    private void addIndexIfMissing(String table, String index, String ddl) {
+        try {
+            Integer cnt = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() " +
+                            "AND TABLE_NAME = ? AND INDEX_NAME = ?",
+                    Integer.class, table, index);
+            if (cnt == null || cnt == 0) {
+                log.info("Adding index {}.{} via: {}", table, index, ddl);
+                jdbcTemplate.execute(ddl);
+            } else {
+                log.debug("Index {}.{} already exists", table, index);
+            }
+        } catch (Exception e) {
+            log.warn("Failed adding index {}.{}: {}", table, index, e.getMessage());
+        }
+    }
+
+    private void executeSqlSafely(String sql) {
+        try {
+            int affectedRows = jdbcTemplate.update(sql);
+            log.info("Executed data migration SQL, affectedRows={}", affectedRows);
+        } catch (Exception e) {
+            log.warn("Failed executing data migration SQL [{}]: {}", sql, e.getMessage());
         }
     }
 

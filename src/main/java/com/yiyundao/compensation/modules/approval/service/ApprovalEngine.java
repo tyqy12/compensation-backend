@@ -19,6 +19,7 @@ import com.yiyundao.compensation.service.OrganizationSyncService;
 import com.yiyundao.compensation.modules.system.service.SysConfigService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -47,7 +48,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
 
     private final ApprovalStepService approvalStepService;
     private final SysUserService sysUserService;
-    private final OrganizationSyncService organizationSyncService;
+    private final ObjectProvider<OrganizationSyncService> organizationSyncServiceProvider;
     private final ObjectMapper objectMapper;
     private final SysConfigService sysConfigService;
     private final ApprovalFlowConfigManager approvalFlowConfigManager;
@@ -67,6 +68,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
             workflow.setCurrentStep(1);
             workflow.setStatus(ApprovalStatus.PENDING);
             workflow.setInitiatorId(initiatorId);
+            workflow.setEmployeeId(extractEmployeeId(workflowData, businessKey));
             workflow.setSubmitTime(LocalDateTime.now());
 
             if (workflowData != null && !workflowData.isEmpty()) {
@@ -166,6 +168,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
             case ADHOC -> generateAdhocPaymentSteps();
             case OFFLINE -> generateOfflineEmployeeSteps();
             case PERMISSION -> generatePermissionSteps();
+            case PAYROLL_DISPUTE -> generatePayrollDisputeSteps();
         };
     }
 
@@ -209,6 +212,17 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
         List<ApprovalFlowConfigManager.ApprovalStepConfig> config = loadPermissionApprovalConfig();
         if (config.isEmpty()) {
             config = approvalFlowConfigManager.getDefaultSteps(WorkflowType.PERMISSION);
+        }
+        return buildStepsFromConfig(config);
+    }
+
+    /**
+     * 生成薪酬异议审批步骤
+     */
+    private List<ApprovalStep> generatePayrollDisputeSteps() {
+        List<ApprovalFlowConfigManager.ApprovalStepConfig> config = loadPayrollDisputeApprovalConfig();
+        if (config.isEmpty()) {
+            config = approvalFlowConfigManager.getDefaultSteps(WorkflowType.PAYROLL_DISPUTE);
         }
         return buildStepsFromConfig(config);
     }
@@ -321,6 +335,13 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     }
 
     /**
+     * 从数据库加载薪酬异议审批配置
+     */
+    private List<ApprovalFlowConfigManager.ApprovalStepConfig> loadPayrollDisputeApprovalConfig() {
+        return loadApprovalConfig(SecurityConstants.CONFIG_PAYROLL_DISPUTE_APPROVAL_FLOW);
+    }
+
+    /**
      * 从数据库加载审批配置
      */
     private List<ApprovalFlowConfigManager.ApprovalStepConfig> loadApprovalConfig(String configKey) {
@@ -403,7 +424,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
             SysUser approver = sysUserService.getById(step.getApproverId());
             if (approver == null || approver.getPlatformUserId() == null) return;
             String message = String.format("您有新的审批任务：%s，请及时处理。", step.getStepName());
-            organizationSyncService.sendNotification(
+            sendPlatformNotification(
                     approver.getPlatformType(),
                     approver.getPlatformUserId(),
                     message
@@ -418,12 +439,22 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
             String statusText = finalStatus == ApprovalStatus.APPROVED ? "审批通过" :
                               finalStatus == ApprovalStatus.REJECTED ? "审批拒绝" : "已取消";
             String message = String.format("您的审批流程 %s 已%s。", workflow.getWorkflowName(), statusText);
-            organizationSyncService.sendNotification(
+            sendPlatformNotification(
                     initiator.getPlatformType(),
                     initiator.getPlatformUserId(),
                     message
             );
         } catch (Exception ignored) { }
+    }
+
+    private void sendPlatformNotification(String platformType, String platformUserId, String message) {
+        OrganizationSyncService organizationSyncService = organizationSyncServiceProvider.getIfAvailable();
+        if (organizationSyncService == null) {
+            log.debug("OrganizationSyncService 未就绪，跳过通知: platformType={}, platformUserId={}",
+                    platformType, platformUserId);
+            return;
+        }
+        organizationSyncService.sendNotification(platformType, platformUserId, message);
     }
 
     // ==================== 其他 ====================
@@ -434,8 +465,35 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
             case ADHOC -> "临时支付审批";
             case OFFLINE -> "离线员工审批";
             case PERMISSION -> "权限授权审批";
+            case PAYROLL_DISPUTE -> "薪酬异议审批";
         };
         return prefix + "-" + businessKey;
+    }
+
+    private Long extractEmployeeId(Map<String, Object> workflowData, String businessKey) {
+        if (workflowData != null && workflowData.get("employeeId") != null) {
+            Object raw = workflowData.get("employeeId");
+            if (raw instanceof Number number) {
+                return number.longValue();
+            }
+            try {
+                return Long.parseLong(String.valueOf(raw));
+            } catch (Exception ignored) {
+                // ignore and fall back to businessKey parsing
+            }
+        }
+
+        if (businessKey != null && businessKey.startsWith("EMPLOYEE-")) {
+            try {
+                String remain = businessKey.substring("EMPLOYEE-".length());
+                int split = remain.indexOf('-');
+                String idPart = split > 0 ? remain.substring(0, split) : remain;
+                return Long.parseLong(idPart);
+            } catch (Exception ignored) {
+                // ignore invalid key format
+            }
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")

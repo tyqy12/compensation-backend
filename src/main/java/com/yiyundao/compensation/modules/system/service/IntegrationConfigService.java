@@ -14,6 +14,7 @@ public interface IntegrationConfigService extends IService<IntegrationConfig> {
     DingTalkConfigDto getDingTalkConfig();
     FeishuConfigDto getFeishuConfig();
     AlipayConfigDto getAlipayConfig();
+    YunzhanghuConfigDto getYunzhanghuConfig();
     SmsConfigDto getSmsConfig();
     EmailConfigDto getEmailConfig();
     EncryptionConfigDto getEncryptionConfig();
@@ -38,4 +39,3 @@ public interface IntegrationConfigService extends IService<IntegrationConfig> {
      */
     String getConfigValue(String platformType, String key, String defaultValue);
 }
-

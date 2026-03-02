@@ -4,7 +4,10 @@ import com.baomidou.mybatisplus.extension.service.IService;
 import com.yiyundao.compensation.common.response.PageResponse;
 import com.yiyundao.compensation.enums.EmployeeStatus;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeListItemVO;
+import com.yiyundao.compensation.interfaces.vo.employee.EmployeeApprovalRecordVO;
+import com.yiyundao.compensation.interfaces.vo.employee.EmployeePayslipRecordVO;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
+import com.yiyundao.compensation.interfaces.vo.payment.PaymentRecordItemVO;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformRequest;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
@@ -16,6 +19,9 @@ public interface EmployeeService extends IService<Employee> {
     EmployeeVO createEmployeeWithUser(Employee employee, String username);
     EmployeeVO updateEmployee(Long id, Employee updateInfo);
     EmployeeVO getEmployeeVO(Long id);
+    PageResponse<EmployeeApprovalRecordVO> pageEmployeeApprovals(Long employeeId, int pageNum, int pageSize);
+    PageResponse<EmployeePayslipRecordVO> pageEmployeePayslips(Long employeeId, int pageNum, int pageSize);
+    PageResponse<PaymentRecordItemVO> pageEmployeePayments(Long employeeId, int pageNum, int pageSize);
     PageResponse<EmployeeListItemVO> pageEmployees(int pageNum, int pageSize, String keyword,
                                                    String department, String status,
                                                    Boolean isOffline, String platformType,
@@ -46,6 +52,7 @@ public interface EmployeeService extends IService<Employee> {
     void batchImport(List<Employee> employees);
     String getDecryptedIdCard(Long employeeId);
     String getDecryptedBankAccount(Long employeeId);
+    String getDecryptedSettlementAccount(Long employeeId);
     Employee getByPlatformUserId(String platformUserId, String platformType);
     Employee getByEmployeeId(String employeeId);
     boolean existsByEmployeeId(String employeeId);

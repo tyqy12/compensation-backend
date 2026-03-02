@@ -61,7 +61,7 @@ public class UserBindingServiceImpl implements UserBindingService {
             }
             Long wfId = approvalEngineProvider.getObject().startWorkflow(
                     com.yiyundao.compensation.enums.WorkflowType.OFFLINE,
-                    "USER-" + userId,
+                    buildUserApprovalBusinessKey(userId),
                     "PLATFORM_LINK",
                     initiator,
                     data
@@ -91,7 +91,7 @@ public class UserBindingServiceImpl implements UserBindingService {
                 data.put("snapshotEmployee", toJsonSafe(emp));
                 Long wfId = approvalEngineProvider.getObject().startWorkflow(
                         com.yiyundao.compensation.enums.WorkflowType.OFFLINE,
-                        "USER-" + userId,
+                        buildUserApprovalBusinessKey(userId),
                         "PLATFORM_LINK",
                         initiator,
                         data
@@ -292,6 +292,10 @@ public class UserBindingServiceImpl implements UserBindingService {
 
     private String randomInitPassword() {
         return "Init@" + Integer.toHexString((int) (Math.random() * Integer.MAX_VALUE));
+    }
+
+    private String buildUserApprovalBusinessKey(Long userId) {
+        return "USER-" + userId + "-" + System.currentTimeMillis();
     }
 
     private Long currentUserIdOrAdmin() {

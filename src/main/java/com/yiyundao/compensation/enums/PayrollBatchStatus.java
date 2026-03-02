@@ -7,10 +7,14 @@ import lombok.Getter;
 public enum PayrollBatchStatus {
     DRAFT("draft", "草稿"),
     LOCKED("locked", "已锁定"),
+    CONFIRMING("confirming", "待员工确认"),
+    DISPUTE_PROCESSING("dispute_processing", "异议处理中"),
+    CONFIRMED("confirmed", "确认完成"),
     SUBMITTED("submitted", "已提交审批"),
     APPROVED("approved", "已审批"),
     REJECTED("rejected", "已拒绝"),
     PAY_PROCESSING("pay_processing", "支付处理中"),
+    PAY_FAILED("pay_failed", "支付失败"),
     PAID("paid", "已支付"),
     ARCHIVED("archived", "已归档");
 
@@ -42,10 +46,15 @@ public enum PayrollBatchStatus {
     }
 
     public boolean canSubmitApproval() {
-        return this == LOCKED;
+        return this == CONFIRMED;
     }
 
     public boolean canCompute() {
-        return this == LOCKED || this == APPROVED;
+        return this == LOCKED
+                || this == CONFIRMING
+                || this == DISPUTE_PROCESSING
+                || this == CONFIRMED
+                || this == APPROVED
+                || this == REJECTED;
     }
 }

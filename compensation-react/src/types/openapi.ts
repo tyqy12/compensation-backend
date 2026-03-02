@@ -21,10 +21,16 @@ export interface EmployeeVO {
   platformUserId?: string;
   platformType?: string; // wechat | dingtalk | feishu
   managerId?: number;
+  managerName?: string;
   hireDate?: string; // date
   status?: string; // active | inactive | suspended
+  settlementAccountType?: 'bank_card' | 'alipay' | 'wechat' | 'other';
+  settlementAccountTypeName?: string;
+  settlementAccountMasked?: string;
+  settlementAccountName?: string;
   bankAccountMasked?: string;
   bankName?: string;
+  bankBranchName?: string;
   offline?: boolean;
   employmentType?: 'full_time' | 'part_time';
   createTime?: string; // date-time
@@ -45,8 +51,12 @@ export interface EmployeeCreateRequest {
   managerId?: number;
   hireDate?: string; // date
   status?: string;
+  settlementAccountType?: 'bank_card' | 'alipay' | 'wechat' | 'other';
+  settlementAccount?: string;
+  settlementAccountName?: string;
   bankAccount?: string;
   bankName?: string;
+  bankBranchName?: string;
   offline?: boolean;
   // New optional fields after backend upgrade
   employmentType?: 'full_time' | 'part_time';
@@ -62,9 +72,16 @@ export interface EmployeeUpdateRequest {
   departments?: string[]; // 多部门数组
   position?: string;
   hireDate?: string; // date
+  managerId?: number;
+  status?: string;
+  settlementAccountType?: 'bank_card' | 'alipay' | 'wechat' | 'other';
+  settlementAccount?: string;
+  settlementAccountName?: string;
   bankAccount?: string;
   bankName?: string;
+  bankBranchName?: string;
   employmentType?: 'full_time' | 'part_time';
+  offline?: boolean;
 }
 
 export interface UpdateStatusRequest {
@@ -107,6 +124,9 @@ export interface PaymentRecordItemVO {
   status?: string;
   alipayOrderNo?: string;
   alipayTradeNo?: string;
+  providerCode?: string;
+  providerOrderNo?: string;
+  providerTradeNo?: string;
   errorCode?: string;
   errorMsg?: string;
   paymentTime?: string; // date-time

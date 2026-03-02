@@ -25,6 +25,8 @@ import {
   useCreateEmployeeMutation,
   useUpdateEmployeeStatusMutation,
   useBindPlatformMutation,
+  useBatchImportEmployeesMutation,
+  fetchEmployees,
   type Employee,
   type EmployeeQueryParams,
   type EmployeeFormData,
@@ -66,6 +68,8 @@ const EmployeesList: React.FC = () => {
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [bindModalVisible, setBindModalVisible] = useState(false);
+  const [importModalVisible, setImportModalVisible] = useState(false);
+  const [importPayload, setImportPayload] = useState('');
   const [bindingEmployee, setBindingEmployee] = useState<Employee | null>(null);
 
   const actionRef = useRef<ActionType>();
@@ -74,10 +78,10 @@ const EmployeesList: React.FC = () => {
   const [bindForm] = Form.useForm();
 
   const { message, modal } = AntdApp.useApp();
-  const canCreate = useHasAction('employee.create');
-  const canBind = useHasAction('employee.bind');
-  const canUpdateStatus = useHasAction('employee.status.update');
-  const canImport = useHasAction('employee.import');
+  const canCreate = useHasAction('api.employee.create');
+  const canBind = useHasAction('api.employee.bind-platform');
+  const canUpdateStatus = useHasAction('api.employee.status');
+  const canImport = useHasAction('api.employee.batch-import');
 
   // 查询员工列表
   const employeesQuery = useEmployeesQuery(queryParams);
@@ -86,6 +90,7 @@ const EmployeesList: React.FC = () => {
   const createEmployeeMutation = useCreateEmployeeMutation();
   const updateStatusMutation = useUpdateEmployeeStatusMutation();
   const bindPlatformMutation = useBindPlatformMutation();
+  const batchImportMutation = useBatchImportEmployeesMutation();
 
   // 更新URL参数
   const updateUrlParams = (params: EmployeeQueryParams) => {
@@ -111,6 +116,27 @@ const EmployeesList: React.FC = () => {
       actionRef.current?.reload();
     } catch (error: any) {
       message.error(`创建失败：${error.message || '网络错误'}`);
+    }
+  };
+
+  const handleBatchImport = async () => {
+    try {
+      const parsed = JSON.parse(importPayload);
+      if (!Array.isArray(parsed) || parsed.length === 0) {
+        message.error('导入数据必须是非空 JSON 数组');
+        return;
+      }
+      await batchImportMutation.mutateAsync({ employees: parsed });
+      message.success(`批量导入成功，共处理 ${parsed.length} 条`);
+      setImportModalVisible(false);
+      setImportPayload('');
+      actionRef.current?.reload();
+    } catch (error: any) {
+      if (error instanceof SyntaxError) {
+        message.error('JSON 格式不正确，请检查后重试');
+        return;
+      }
+      message.error(`批量导入失败：${error?.message || '网络错误'}`);
     }
   };
 
@@ -346,7 +372,8 @@ const EmployeesList: React.FC = () => {
   const isLoading = employeesQuery.isLoading ||
                    createEmployeeMutation.isPending ||
                    updateStatusMutation.isPending ||
-                   bindPlatformMutation.isPending;
+                   bindPlatformMutation.isPending ||
+                   batchImportMutation.isPending;
 
   return (
     <PageContainer
@@ -358,7 +385,7 @@ const EmployeesList: React.FC = () => {
         canImport && <Button
           key="import"
           icon={<ImportOutlined />}
-          onClick={() => message.info('批量导入功能开发中')}
+          onClick={() => setImportModalVisible(true)}
         >
           批量导入
         </Button>,
@@ -392,7 +419,12 @@ const EmployeesList: React.FC = () => {
             department: params.department,
             status: params.status,
             platformType: params.platformType,
-            isOffline: params.isOffline === 'true' ? true : undefined,
+            isOffline:
+              params.isOffline === true || params.isOffline === 'true'
+                ? true
+                : params.isOffline === false || params.isOffline === 'false'
+                  ? false
+                  : undefined,
             sortBy: Object.keys(sort || {})[0] || 'createTime',
             order: Object.keys(sort || {}).length > 0 ?
               (Object.values(sort || {})[0] === 'ascend' ? 'asc' : 'desc') : 'desc',
@@ -402,8 +434,7 @@ const EmployeesList: React.FC = () => {
           updateUrlParams(newParams);
 
           try {
-            const result = await employeesQuery.refetch();
-            const data = result.data;
+            const data = await fetchEmployees(newParams);
 
             return {
               data: getPagedRecords(data),
@@ -510,6 +541,7 @@ const EmployeesList: React.FC = () => {
         <Form
           form={createForm}
           layout="vertical"
+          initialValues={{ employmentType: 'full_time', offline: false, settlementAccountType: 'bank_card' }}
           onFinish={handleCreate}
         >
           <Form.Item
@@ -536,6 +568,50 @@ const EmployeesList: React.FC = () => {
             <Input placeholder="请输入邮箱地址" />
           </Form.Item>
 
+          <Form.Item name="settlementAccountType" label="收款账户类型">
+            <Select placeholder="请选择收款账户类型">
+              <Option value="bank_card">银行卡</Option>
+              <Option value="alipay">支付宝</Option>
+              <Option value="wechat">微信</Option>
+              <Option value="other">其他</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="settlementAccount" label="收款账户">
+            <Input placeholder="请输入收款账户（银行卡号/支付宝账号等）" />
+          </Form.Item>
+
+          <Form.Item name="settlementAccountName" label="收款账户实名">
+            <Input placeholder="请输入收款账户实名（选填）" />
+          </Form.Item>
+
+          <Form.Item name="bankName" label="开户银行">
+            <Input placeholder="请输入开户银行（银行卡场景）" />
+          </Form.Item>
+
+          <Form.Item name="bankBranchName" label="开户支行">
+            <Input placeholder="请输入开户支行（银行卡场景）" />
+          </Form.Item>
+
+          <Form.Item name="bankAccount" label="银行卡号（兼容字段）">
+            <Input placeholder="仅银行卡场景需要，通常可与收款账户保持一致" />
+          </Form.Item>
+
+          <Form.Item
+            name="employmentType"
+            label="用工类型"
+            rules={[{ required: true, message: '请选择用工类型' }]}
+          >
+            <Select placeholder="请选择用工类型">
+              <Option value="full_time" title="全职">全职</Option>
+              <Option value="part_time" title="兼职">兼职</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="username" label="系统用户名">
+            <Input placeholder="如 zhangfei 或 wbzhangfei" />
+          </Form.Item>
+
           <Form.Item name="department" label="部门">
             <Select placeholder="请选择部门">
               <Option value="技术部">技术部</Option>
@@ -555,13 +631,38 @@ const EmployeesList: React.FC = () => {
             <DatePicker placeholder="请选择入职日期" style={{ width: '100%' }} />
           </Form.Item>
 
-          <Form.Item name="offline" label="离线员工" valuePropName="checked">
+          <Form.Item name="offline" label="离线员工">
             <Select placeholder="是否为离线员工">
               <Option value={false}>否</Option>
               <Option value={true}>是</Option>
             </Select>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="批量导入员工"
+        open={importModalVisible}
+        onCancel={() => {
+          setImportModalVisible(false);
+          setImportPayload('');
+        }}
+        onOk={handleBatchImport}
+        confirmLoading={batchImportMutation.isPending}
+        width={760}
+      >
+        <div style={{ marginBottom: 8, color: '#8c8c8c' }}>
+          请输入 JSON 数组，字段至少包含 <Text code>employeeId</Text>、<Text code>name</Text>。
+        </div>
+        <Input.TextArea
+          rows={14}
+          value={importPayload}
+          onChange={(event) => setImportPayload(event.target.value)}
+          placeholder={`[
+  {"employeeId":"E1001","name":"张三","employmentType":"full_time"},
+  {"employeeId":"E1002","name":"李四","employmentType":"part_time","username":"wblisi"}
+]`}
+        />
       </Modal>
 
       {/* 绑定平台弹窗 */}

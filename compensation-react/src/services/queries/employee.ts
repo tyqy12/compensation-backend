@@ -7,6 +7,7 @@ import type {
   EmployeeUpdateRequest,
   BindPlatformRequest,
   BatchImportRequest,
+  PaymentRecordItemVO,
   PagedResponse,
 } from '@/types/openapi';
 
@@ -27,6 +28,47 @@ export interface EmployeeQueryParams extends PageParams {
   order?: 'asc' | 'desc';
 }
 
+export interface EmployeeApprovalRecord {
+  id: number;
+  employeeId?: number;
+  workflowName?: string;
+  workflowType?: string;
+  workflowTypeName?: string;
+  businessType?: string;
+  businessKey?: string;
+  currentStep?: number;
+  totalSteps?: number;
+  status?: string;
+  statusName?: string;
+  initiatorId?: number;
+  initiatorName?: string;
+  currentApproverId?: number;
+  currentApproverName?: string;
+  submitTime?: string;
+  completeTime?: string;
+}
+
+export interface EmployeePayslipRecord {
+  lineId: number;
+  batchId?: number;
+  payCycleId?: number;
+  periodLabel?: string;
+  periodStart?: string;
+  periodEnd?: string;
+  batchStatus?: string;
+  paymentBatchNo?: string;
+  employmentType?: string;
+  currency?: string;
+  grossAmount?: number;
+  taxAmount?: number;
+  socialAmount?: number;
+  netAmount?: number;
+  status?: string;
+  confirmationStatus?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
 // 员工创建/更新数据
 export type EmployeeFormData = EmployeeCreateRequest & Partial<EmployeeUpdateRequest>;
 
@@ -41,32 +83,34 @@ export interface StatusUpdateData {
 // 批量导入数据
 export type BatchImportData = BatchImportRequest;
 
+function cleanEmployeeQueryParams(params: EmployeeQueryParams) {
+  const queryParams = {
+    page: params.current || 1,
+    size: params.pageSize || 10,
+    keyword: params.keyword,
+    department: params.department,
+    status: params.status,
+    isOffline: params.isOffline,
+    platformType: params.platformType,
+    managerId: params.managerId,
+    sortBy: params.sortBy || 'createTime',
+    order: params.order || 'desc',
+  };
+  return Object.fromEntries(
+    Object.entries(queryParams).filter(([, value]) => value !== undefined && value !== ''),
+  );
+}
+
+export async function fetchEmployees(params: EmployeeQueryParams): Promise<PagedResponse<Employee>> {
+  const { data } = await api.get('/employee', { params: cleanEmployeeQueryParams(params) });
+  return unwrap<PagedResponse<Employee>>(data);
+}
+
 // 查询员工列表
 export function useEmployeesQuery(params: EmployeeQueryParams, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['employees', params],
-    queryFn: async () => {
-      const queryParams = {
-        page: params.current || 1,
-        size: params.pageSize || 10,
-        keyword: params.keyword,
-        department: params.department,
-        status: params.status,
-        isOffline: params.isOffline,
-        platformType: params.platformType,
-        managerId: params.managerId,
-        sortBy: params.sortBy || 'createTime',
-        order: params.order || 'desc',
-      };
-
-      // 移除空值参数
-      const cleanParams = Object.fromEntries(
-        Object.entries(queryParams).filter(([, value]) => value !== undefined && value !== ''),
-      );
-
-      const { data } = await api.get('/employee', { params: cleanParams });
-      return unwrap<PagedResponse<Employee>>(data);
-    },
+    queryFn: () => fetchEmployees(params),
     enabled: options?.enabled,
   });
 }
@@ -252,5 +296,77 @@ export function useEmployeeBankAccountQuery(id: number, options?: { enabled?: bo
     enabled: !!id && options?.enabled !== false,
     staleTime: 0, // 敏感信息不缓存
     gcTime: 0,
+  });
+}
+
+export function useEmployeeSettlementAccountQuery(
+  id: number,
+  options?: { enabled?: boolean; onEmpty?: (empty: boolean) => void },
+) {
+  return useQuery({
+    queryKey: ['employee', id, 'settlementAccount'],
+    queryFn: async () => {
+      const { data } = await api.get<string>(`/employee/${id}/settlement-account`);
+      const result = unwrap<string>(data);
+      const normalizedResult = result ?? '';
+      if (options?.onEmpty) {
+        options.onEmpty(normalizedResult === '');
+      }
+      return normalizedResult;
+    },
+    enabled: !!id && options?.enabled !== false,
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
+export function useEmployeeApprovalsQuery(
+  employeeId: number,
+  params: { current: number; pageSize: number },
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: ['employee', employeeId, 'approvals', params],
+    queryFn: async () => {
+      const { data } = await api.get(`/employee/${employeeId}/approvals`, {
+        params: { page: params.current, size: params.pageSize },
+      });
+      return unwrap<PagedResponse<EmployeeApprovalRecord>>(data);
+    },
+    enabled: !!employeeId && options?.enabled !== false,
+  });
+}
+
+export function useEmployeePayslipsQuery(
+  employeeId: number,
+  params: { current: number; pageSize: number },
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: ['employee', employeeId, 'payslips', params],
+    queryFn: async () => {
+      const { data } = await api.get(`/employee/${employeeId}/payslips`, {
+        params: { page: params.current, size: params.pageSize },
+      });
+      return unwrap<PagedResponse<EmployeePayslipRecord>>(data);
+    },
+    enabled: !!employeeId && options?.enabled !== false,
+  });
+}
+
+export function useEmployeePaymentsQuery(
+  employeeId: number,
+  params: { current: number; pageSize: number },
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: ['employee', employeeId, 'payments', params],
+    queryFn: async () => {
+      const { data } = await api.get(`/employee/${employeeId}/payments`, {
+        params: { page: params.current, size: params.pageSize },
+      });
+      return unwrap<PagedResponse<PaymentRecordItemVO>>(data);
+    },
+    enabled: !!employeeId && options?.enabled !== false,
   });
 }

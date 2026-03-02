@@ -10,7 +10,7 @@ import com.yiyundao.compensation.interfaces.vo.payment.PaymentRecordItemVO;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
-import com.yiyundao.compensation.service.AlipayService;
+import com.yiyundao.compensation.modules.payment.service.SettlementService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -28,7 +28,7 @@ public class PaymentBatchController {
 
     private final PaymentBatchService paymentBatchService;
     private final PaymentRecordService paymentRecordService;
-    private final AlipayService alipayService;
+    private final SettlementService settlementService;
     private final AuditLogService auditLogService;
 
     // 分页查询支付批次
@@ -83,7 +83,7 @@ public class PaymentBatchController {
                 return ApiResponse.error("批次不存在");
             }
 
-            alipayService.batchTransfer(batchNo);
+            settlementService.batchTransfer(batchNo);
             audit("启动批量转账", null, batchNo, "PAYMENT", true,
                     "amount=" + batch.getTotalAmount() + ",count=" + batch.getTotalCount(), begin);
             return ApiResponse.success("批量转账已启动");

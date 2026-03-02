@@ -192,9 +192,16 @@ public class AlipayService {
 
             // 收款方信息
             com.alipay.api.domain.Participant payeeInfo = new com.alipay.api.domain.Participant();
-            payeeInfo.setIdentity(record.getRecipientAccount()); // 支付宝账号
-            payeeInfo.setIdentityType("ALIPAY_LOGON_ID"); // 支付宝登录号
-            payeeInfo.setName(record.getRecipientName()); // 收款方姓名
+            String normalizedPaymentMethod = normalizePaymentMethod(record.getPaymentMethod());
+            String payeeIdentity = normalizeRecipientAccount(record.getRecipientAccount(), normalizedPaymentMethod);
+            if (!StringUtils.hasText(payeeIdentity)) {
+                throw new IllegalArgumentException("收款账户不能为空");
+            }
+            payeeInfo.setIdentity(payeeIdentity);
+            payeeInfo.setIdentityType(resolvePayeeIdentityType(normalizedPaymentMethod));
+            if (StringUtils.hasText(record.getRecipientName())) {
+                payeeInfo.setName(record.getRecipientName());
+            }
             model.setPayeeInfo(payeeInfo);
 
             request.setBizModel(model);
@@ -463,7 +470,10 @@ public class AlipayService {
         log.info("处理支付宝通知: outTradeNo={}, tradeNo={}, status={}",
                 outTradeNo, tradeNo, tradeStatus);
 
-        PaymentRecord record = paymentRecordService.getByAlipayOrderNo(outTradeNo);
+        PaymentRecord record = paymentRecordService.getByProviderOrderNo("alipay", outTradeNo);
+        if (record == null) {
+            record = paymentRecordService.getByAlipayOrderNo(outTradeNo);
+        }
         if (record == null) {
             log.warn("未找到对应支付记录: outTradeNo={}", outTradeNo);
             return;
@@ -488,6 +498,9 @@ public class AlipayService {
             LambdaUpdateWrapper<PaymentRecord> updateWrapper = new LambdaUpdateWrapper<>();
             updateWrapper.eq(PaymentRecord::getId, record.getId())
                         .set(PaymentRecord::getStatus, newStatus)
+                        .set(PaymentRecord::getProviderCode, "alipay")
+                        .set(PaymentRecord::getProviderOrderNo, outTradeNo)
+                        .set(PaymentRecord::getProviderTradeNo, tradeNo)
                         .set(PaymentRecord::getAlipayTradeNo, tradeNo)
                         .set(PaymentRecord::getNotificationTime, LocalDateTime.now());
 
@@ -515,6 +528,32 @@ public class AlipayService {
                UUID.randomUUID().toString().substring(0, 8).toUpperCase();
     }
 
+    private String normalizePaymentMethod(String paymentMethod) {
+        if (!StringUtils.hasText(paymentMethod)) {
+            return "ALIPAY";
+        }
+        return paymentMethod.trim().toUpperCase();
+    }
+
+    private String resolvePayeeIdentityType(String normalizedPaymentMethod) {
+        return switch (normalizedPaymentMethod) {
+            case "ALIPAY" -> "ALIPAY_LOGON_ID";
+            case "BANK_CARD" -> "BANKCARD_ACCOUNT";
+            default -> throw new IllegalArgumentException("支付宝渠道暂不支持的收款方式: " + normalizedPaymentMethod);
+        };
+    }
+
+    private String normalizeRecipientAccount(String recipientAccount, String normalizedPaymentMethod) {
+        if (!StringUtils.hasText(recipientAccount)) {
+            return recipientAccount;
+        }
+        String account = recipientAccount.trim();
+        if ("BANK_CARD".equals(normalizedPaymentMethod)) {
+            return account.replaceAll("\\s+", "");
+        }
+        return account;
+    }
+
     /**
      * 更新支付记录状态
      */
@@ -523,9 +562,12 @@ public class AlipayService {
         LambdaUpdateWrapper<PaymentRecord> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(PaymentRecord::getId, recordId)
                     .set(PaymentRecord::getStatus, status)
+                    .set(PaymentRecord::getProviderCode, "alipay")
+                    .set(PaymentRecord::getProviderOrderNo, outBizNo)
                     .set(PaymentRecord::getAlipayOrderNo, outBizNo);
 
         if (tradeNo != null) {
+            updateWrapper.set(PaymentRecord::getProviderTradeNo, tradeNo);
             updateWrapper.set(PaymentRecord::getAlipayTradeNo, tradeNo);
         }
         if (errorCode != null) {

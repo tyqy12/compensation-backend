@@ -13,9 +13,12 @@ const mockUseEmployeeQuery = vi.fn();
 const mockUseUpdateEmployeeMutation = vi.fn();
 const mockUseBindPlatformMutation = vi.fn();
 const mockUseEmployeeIdCardQuery = vi.fn();
-const mockUseEmployeeBankAccountQuery = vi.fn();
+const mockUseEmployeeSettlementAccountQuery = vi.fn();
 const mockUseToggleEmployeeOfflineMutation = vi.fn();
 const mockUseAssignEmployeeManagerMutation = vi.fn();
+const mockUseEmployeeApprovalsQuery = vi.fn();
+const mockUseEmployeePayslipsQuery = vi.fn();
+const mockUseEmployeePaymentsQuery = vi.fn();
 
 // Mock react-router-dom
 const mockNavigate = vi.fn();
@@ -37,8 +40,14 @@ vi.mock('@services/queries/employee', () => ({
   useToggleEmployeeOfflineMutation: () => mockUseToggleEmployeeOfflineMutation(),
   useAssignEmployeeManagerMutation: () => mockUseAssignEmployeeManagerMutation(),
   useEmployeeIdCardQuery: (id: number, options?: any) => mockUseEmployeeIdCardQuery(id, options),
-  useEmployeeBankAccountQuery: (id: number, options?: any) =>
-    mockUseEmployeeBankAccountQuery(id, options),
+  useEmployeeSettlementAccountQuery: (id: number, options?: any) =>
+    mockUseEmployeeSettlementAccountQuery(id, options),
+  useEmployeeApprovalsQuery: (id: number, params?: any, options?: any) =>
+    mockUseEmployeeApprovalsQuery(id, params, options),
+  useEmployeePayslipsQuery: (id: number, params?: any, options?: any) =>
+    mockUseEmployeePayslipsQuery(id, params, options),
+  useEmployeePaymentsQuery: (id: number, params?: any, options?: any) =>
+    mockUseEmployeePaymentsQuery(id, params, options),
 }));
 
 const TestWrapper = ({
@@ -128,10 +137,31 @@ describe('EmployeeDetail 员工详情', () => {
       isError: false,
     });
 
-    mockUseEmployeeBankAccountQuery.mockReturnValue({
+    mockUseEmployeeSettlementAccountQuery.mockReturnValue({
       data: null,
       isLoading: false,
       isError: false,
+    });
+
+    mockUseEmployeeApprovalsQuery.mockReturnValue({
+      data: { records: [], total: 0 },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    mockUseEmployeePayslipsQuery.mockReturnValue({
+      data: { records: [], total: 0 },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    mockUseEmployeePaymentsQuery.mockReturnValue({
+      data: { records: [], total: 0 },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
     });
   });
 
@@ -631,6 +661,27 @@ describe('EmployeeDetail 功能验证', () => {
       data: null,
       isLoading: false,
       isError: false,
+    });
+
+    mockUseEmployeeApprovalsQuery.mockReturnValue({
+      data: { records: [], total: 0 },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    mockUseEmployeePayslipsQuery.mockReturnValue({
+      data: { records: [], total: 0 },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
+    });
+
+    mockUseEmployeePaymentsQuery.mockReturnValue({
+      data: { records: [], total: 0 },
+      isLoading: false,
+      isError: false,
+      refetch: vi.fn(),
     });
   });
 

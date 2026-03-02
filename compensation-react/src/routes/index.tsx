@@ -24,6 +24,7 @@ const Batches = React.lazy(() => import('@pages/payments/Batches'));
 const BatchDetail = React.lazy(() => import('@pages/payments/BatchDetail'));
 const PayrollBatchLedgerPage = React.lazy(() => import('@pages/payroll/BatchLedger'));
 const PayrollManagerReviewPage = React.lazy(() => import('@pages/payroll/ManagerReview'));
+const PayrollConfirmationsPage = React.lazy(() => import('@pages/payroll/Confirmations'));
 const PartTimeReadonlyPage = React.lazy(() => import('@pages/payroll/PartTimeReadonly'));
 const ApprovalWorkflowsPage = React.lazy(() => import('@pages/approval/Workflows'));
 const AuditLogsPage = React.lazy(() => import('@pages/admin/AuditLogs'));
@@ -92,6 +93,7 @@ export const router = createBrowserRouter([
       { path: 'payments/batches/:batchNo', element: withGuard(<Suspense fallback={<Loading />}><BatchDetail /></Suspense>) },
       { path: 'payroll/batches/:batchId/ledger', element: withGuard(<Suspense fallback={<Loading />}><PayrollBatchLedgerPage /></Suspense>) },
       { path: 'payroll/batches/:batchId/manager-review', element: withGuard(<Suspense fallback={<Loading />}><PayrollManagerReviewPage /></Suspense>) },
+      { path: 'payroll/confirmations', element: withGuard(<Suspense fallback={<Loading />}><PayrollConfirmationsPage /></Suspense>) },
       { path: 'payroll/pt-readonly', element: withGuard(<Suspense fallback={<Loading />}><PartTimeReadonlyPage /></Suspense>) },
       // 动态路由渲染：当后端下发了新 VIEW/MENU 资源且前端未静态注册时，由此兜底加载对应组件
       { path: '*', element: withGuard(<Suspense fallback={<Loading />}><DynamicPageRenderer /></Suspense>) },

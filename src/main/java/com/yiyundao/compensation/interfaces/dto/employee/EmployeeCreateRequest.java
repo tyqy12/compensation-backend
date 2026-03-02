@@ -26,8 +26,16 @@ public class EmployeeCreateRequest {
     private Long managerId;
     private LocalDate hireDate;
     private String status; // 默认 active
+    // 收款账户类型: bank_card/alipay/wechat/other
+    private String settlementAccountType;
+    // 收款账户（明文，后端加密）
+    private String settlementAccount;
+    // 收款账户实名/户名
+    private String settlementAccountName;
     private String bankAccount; // 明文，后端加密
     private String bankName;
+    // 开户支行（银行卡场景）
+    private String bankBranchName;
     private Boolean offline;
     // 可选：指定要创建的系统用户名（若冲突会自动追加数字）
     private String username;

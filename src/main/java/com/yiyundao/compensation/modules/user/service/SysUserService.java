@@ -8,6 +8,7 @@ import java.util.Set;
 public interface SysUserService extends IService<SysUser> {
     SysUser findByUsername(String username);
     SysUser findByPlatform(String platformType, String platformUserId);
+    SysUser findByEmployeeId(Long employeeId);
     SysUser findFirstByRole(String roleCode);
 
     /**

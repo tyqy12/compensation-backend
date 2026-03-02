@@ -38,6 +38,9 @@ public class ApprovalWorkflow extends BaseEntity {
     @TableField("initiator_id")
     private Long initiatorId;
 
+    @TableField("employee_id")
+    private Long employeeId;
+
     @TableField("current_approver_id")
     private Long currentApproverId;
 
@@ -50,4 +53,3 @@ public class ApprovalWorkflow extends BaseEntity {
     @TableField("workflow_data")
     private String workflowData;
 }
-

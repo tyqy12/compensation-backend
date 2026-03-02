@@ -63,25 +63,12 @@ public class SecurityConfig {
      * 获取所有公共路径模式
      */
     private String[] getPublicPatterns() {
-        return new String[]{
-                // OpenAPI 文档
-                SecurityConstants.PATTERNS_OPENAPI_DOCS[0],
-                SecurityConstants.PATTERNS_OPENAPI_DOCS[1],
-                SecurityConstants.PATTERNS_OPENAPI_DOCS[2],
-                SecurityConstants.PATTERNS_OPENAPI_DOCS[3],
-                // 健康检查
-                SecurityConstants.PATTERNS_HEALTH[0],
-                SecurityConstants.PATTERNS_HEALTH[1],
-                // 认证相关
-                SecurityConstants.PATTERNS_AUTH_PUBLIC[0],
-                SecurityConstants.PATTERNS_AUTH_PUBLIC[1],
-                SecurityConstants.PATTERNS_AUTH_PUBLIC[2],
-                SecurityConstants.PATTERNS_AUTH_PUBLIC[3],
-                SecurityConstants.PATTERNS_AUTH_PUBLIC[4],
-                // 支付通知
-                SecurityConstants.PATTERNS_PAYMENT_NOTIFY[0],
-                SecurityConstants.PATTERNS_PAYMENT_NOTIFY[1]
-        };
+        java.util.List<String> patterns = new java.util.ArrayList<>();
+        java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_OPENAPI_DOCS);
+        java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_HEALTH);
+        java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_AUTH_PUBLIC);
+        java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_PAYMENT_NOTIFY);
+        return patterns.toArray(new String[0]);
     }
 
     // ==================== CORS 过滤器 ====================

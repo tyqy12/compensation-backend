@@ -13,6 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -114,8 +115,18 @@ public class AuthResourceController {
         SysUser user = currentUser(auth != null ? auth : authentication);
         if (user == null) return ApiResponse.error(ErrorCode.UNAUTHORIZED, "未登录");
         Map<Long, List<String>> actions = resourceService.getUserActions(user.getId());
-        List<String> flat = actions.values().stream().flatMap(Collection::stream).distinct().toList();
-        return ApiResponse.success(flat);
+        List<String> actionCodes = actions.values().stream()
+                .flatMap(Collection::stream)
+                .filter(StringUtils::hasText)
+                .toList();
+        List<String> resourceCodes = resourceService.getUserResources(user.getId()).stream()
+                .map(SysResource::getCode)
+                .filter(StringUtils::hasText)
+                .toList();
+        LinkedHashSet<String> merged = new LinkedHashSet<>();
+        merged.addAll(actionCodes);
+        merged.addAll(resourceCodes);
+        return ApiResponse.success(new ArrayList<>(merged));
     }
 
     private SysUser currentUser(Authentication authentication) {

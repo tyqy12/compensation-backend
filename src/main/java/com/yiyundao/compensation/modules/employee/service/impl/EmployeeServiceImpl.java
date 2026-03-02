@@ -9,9 +9,15 @@ import com.yiyundao.compensation.common.response.PageResponse;
 import com.yiyundao.compensation.common.utils.VOConverter;
 import com.yiyundao.compensation.enums.EmployeeStatus;
 import com.yiyundao.compensation.enums.EmploymentType;
+import com.yiyundao.compensation.enums.SettlementAccountType;
 import com.yiyundao.compensation.enums.WorkflowType;
+import com.yiyundao.compensation.infrastructure.dao.ApprovalWorkflowMapper;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeListItemVO;
+import com.yiyundao.compensation.interfaces.vo.employee.EmployeeApprovalRecordVO;
+import com.yiyundao.compensation.interfaces.vo.employee.EmployeePayslipRecordVO;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
+import com.yiyundao.compensation.interfaces.vo.payment.PaymentRecordItemVO;
+import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.service.ApprovalEngine;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformRequest;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult;
@@ -21,6 +27,14 @@ import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.infrastructure.dao.EmployeeMapper;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.common.utils.ValidationUtils;
+import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
+import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
+import com.yiyundao.compensation.modules.payroll.entity.PayCycle;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
+import com.yiyundao.compensation.modules.payroll.service.PayCycleService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.modules.user.service.UserBindingService;
@@ -36,8 +50,11 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
@@ -48,6 +65,11 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     private final ObjectProvider<UserBindingService> userBindingServiceProvider;
     private final ObjectProvider<ApprovalEngine> approvalEngineProvider;
     private final SysUserService sysUserService;
+    private final ApprovalWorkflowMapper approvalWorkflowMapper;
+    private final PayrollLineService payrollLineService;
+    private final PayrollBatchService payrollBatchService;
+    private final PayCycleService payCycleService;
+    private final PaymentRecordService paymentRecordService;
     private final VOConverter voConverter;
     private final ObjectMapper objectMapper;
 
@@ -59,6 +81,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (StringUtils.hasText(employee.getEmail()) && !ValidationUtils.isValidEmail(employee.getEmail())) {
             throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "邮箱格式不正确");
         }
+        validateFinancialData(employee.getSettlementAccountType(), employee.getSettlementAccount(), employee.getBankAccount());
         log.debug("员工数据验证通过");
     }
 
@@ -66,6 +89,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     @Transactional
     public EmployeeVO createEmployee(Employee employee) {
         log.info("创建员工: {}", employee.getName());
+        normalizeFinancialFields(employee);
         validateEmployeeData(employee);
         if (existsByEmployeeId(employee.getEmployeeId())) {
             throw new BusinessException(ErrorCode.RESOURCE_EXISTS, "员工工号已存在: " + employee.getEmployeeId());
@@ -97,19 +121,66 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (existingEmployee == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "员工不存在: " + id);
         }
+        validateFinancialData(updateInfo.getSettlementAccountType(), updateInfo.getSettlementAccount(), updateInfo.getBankAccount());
         if (StringUtils.hasText(updateInfo.getName())) existingEmployee.setName(updateInfo.getName());
         if (StringUtils.hasText(updateInfo.getPhone())) existingEmployee.setPhone(updateInfo.getPhone());
         if (StringUtils.hasText(updateInfo.getEmail())) existingEmployee.setEmail(updateInfo.getEmail());
         if (StringUtils.hasText(updateInfo.getDepartment())) existingEmployee.setDepartment(updateInfo.getDepartment());
         if (StringUtils.hasText(updateInfo.getPosition())) existingEmployee.setPosition(updateInfo.getPosition());
+        if (StringUtils.hasText(updateInfo.getEmploymentType())) existingEmployee.setEmploymentType(updateInfo.getEmploymentType());
+        if (StringUtils.hasText(updateInfo.getStatus())) existingEmployee.setStatus(updateInfo.getStatus());
+        if (updateInfo.getOffline() != null) existingEmployee.setOffline(updateInfo.getOffline());
+        if (updateInfo.getManagerId() != null) existingEmployee.setManagerId(updateInfo.getManagerId());
         if (updateInfo.getHireDate() != null) existingEmployee.setHireDate(updateInfo.getHireDate());
         if (StringUtils.hasText(updateInfo.getEncryptedIdCard())) {
             existingEmployee.setEncryptedIdCard(encryptionService.encryptIdCard(updateInfo.getEncryptedIdCard()));
         }
+        if (StringUtils.hasText(updateInfo.getSettlementAccountType())) {
+            existingEmployee.setSettlementAccountType(normalizeSettlementAccountType(updateInfo.getSettlementAccountType()));
+        }
+        if (StringUtils.hasText(updateInfo.getSettlementAccountName())) {
+            existingEmployee.setSettlementAccountName(updateInfo.getSettlementAccountName().trim());
+        }
+        if (StringUtils.hasText(updateInfo.getBankBranchName())) {
+            existingEmployee.setBankBranchName(updateInfo.getBankBranchName().trim());
+        }
+        String encryptedSettlementAccount = null;
+        if (StringUtils.hasText(updateInfo.getSettlementAccount())) {
+            encryptedSettlementAccount = encryptionService.encrypt(updateInfo.getSettlementAccount().trim());
+            existingEmployee.setSettlementAccount(encryptedSettlementAccount);
+        }
+        String encryptedBankAccount = null;
         if (StringUtils.hasText(updateInfo.getBankAccount())) {
-            existingEmployee.setBankAccount(encryptionService.encrypt(updateInfo.getBankAccount()));
+            encryptedBankAccount = encryptionService.encrypt(updateInfo.getBankAccount().trim());
+            existingEmployee.setBankAccount(encryptedBankAccount);
         }
         if (StringUtils.hasText(updateInfo.getBankName())) existingEmployee.setBankName(updateInfo.getBankName());
+
+        if (StringUtils.hasText(updateInfo.getSettlementAccount())
+                && SettlementAccountType.BANK_CARD.getCode().equals(resolveSettlementType(existingEmployee))
+                && !StringUtils.hasText(updateInfo.getBankAccount())) {
+            existingEmployee.setBankAccount(encryptedSettlementAccount);
+        }
+
+        if (StringUtils.hasText(updateInfo.getBankAccount()) && !StringUtils.hasText(updateInfo.getSettlementAccount())) {
+            existingEmployee.setSettlementAccount(encryptedBankAccount);
+            if (!StringUtils.hasText(existingEmployee.getSettlementAccountType())
+                    || SettlementAccountType.BANK_CARD.getCode().equals(resolveSettlementType(existingEmployee))) {
+                existingEmployee.setSettlementAccountType(SettlementAccountType.BANK_CARD.getCode());
+            }
+        }
+
+        if ((StringUtils.hasText(updateInfo.getSettlementAccount()) || StringUtils.hasText(updateInfo.getBankAccount()))
+                && !StringUtils.hasText(existingEmployee.getSettlementAccountName())) {
+            existingEmployee.setSettlementAccountName(existingEmployee.getName());
+        }
+
+        if (!StringUtils.hasText(existingEmployee.getSettlementAccountType())
+                && (StringUtils.hasText(existingEmployee.getSettlementAccount())
+                || StringUtils.hasText(existingEmployee.getBankAccount()))) {
+            existingEmployee.setSettlementAccountType(SettlementAccountType.BANK_CARD.getCode());
+        }
+
         updateById(existingEmployee);
         log.info("员工信息更新成功: id={}", id);
         return voConverter.toEmployeeVO(existingEmployee);
@@ -118,7 +189,141 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     @Override
     public EmployeeVO getEmployeeVO(Long id) {
         Employee employee = getById(id);
-        return voConverter.toEmployeeVO(employee);
+        EmployeeVO vo = voConverter.toEmployeeVO(employee);
+        if (vo == null || vo.getManagerId() == null) {
+            return vo;
+        }
+        Employee manager = getById(vo.getManagerId());
+        if (manager != null) {
+            vo.setManagerName(manager.getName());
+        }
+        return vo;
+    }
+
+    @Override
+    public PageResponse<EmployeeApprovalRecordVO> pageEmployeeApprovals(Long employeeId, int pageNum, int pageSize) {
+        long current = Math.max(1, pageNum);
+        long size = Math.max(1, pageSize);
+        Page<ApprovalWorkflow> page = new Page<>(current, size);
+        LambdaQueryWrapper<ApprovalWorkflow> queryWrapper = new LambdaQueryWrapper<ApprovalWorkflow>()
+                .eq(ApprovalWorkflow::getEmployeeId, employeeId)
+                .orderByDesc(ApprovalWorkflow::getSubmitTime);
+        Page<ApprovalWorkflow> result = approvalWorkflowMapper.selectPage(page, queryWrapper);
+
+        Set<Long> userIds = new HashSet<>();
+        for (ApprovalWorkflow workflow : result.getRecords()) {
+            if (workflow.getInitiatorId() != null) {
+                userIds.add(workflow.getInitiatorId());
+            }
+            if (workflow.getCurrentApproverId() != null) {
+                userIds.add(workflow.getCurrentApproverId());
+            }
+        }
+        Map<Long, String> userNameMap = buildUserNameMap(userIds);
+
+        List<EmployeeApprovalRecordVO> records = result.getRecords().stream().map(workflow -> {
+            EmployeeApprovalRecordVO vo = new EmployeeApprovalRecordVO();
+            vo.setId(workflow.getId());
+            vo.setEmployeeId(workflow.getEmployeeId());
+            vo.setWorkflowName(workflow.getWorkflowName());
+            vo.setWorkflowType(workflow.getWorkflowType() != null ? workflow.getWorkflowType().getCode() : null);
+            vo.setWorkflowTypeName(workflow.getWorkflowType() != null ? workflow.getWorkflowType().getName() : null);
+            vo.setBusinessType(workflow.getBusinessType());
+            vo.setBusinessKey(workflow.getBusinessKey());
+            vo.setCurrentStep(workflow.getCurrentStep());
+            vo.setTotalSteps(workflow.getTotalSteps());
+            vo.setStatus(workflow.getStatus() != null ? workflow.getStatus().getCode() : null);
+            vo.setStatusName(workflow.getStatus() != null ? workflow.getStatus().getName() : null);
+            vo.setInitiatorId(workflow.getInitiatorId());
+            vo.setInitiatorName(userNameMap.get(workflow.getInitiatorId()));
+            vo.setCurrentApproverId(workflow.getCurrentApproverId());
+            vo.setCurrentApproverName(userNameMap.get(workflow.getCurrentApproverId()));
+            vo.setSubmitTime(workflow.getSubmitTime());
+            vo.setCompleteTime(workflow.getCompleteTime());
+            return vo;
+        }).toList();
+
+        return PageResponse.of(result, records);
+    }
+
+    @Override
+    public PageResponse<EmployeePayslipRecordVO> pageEmployeePayslips(Long employeeId, int pageNum, int pageSize) {
+        long current = Math.max(1, pageNum);
+        long size = Math.max(1, pageSize);
+        Page<PayrollLine> result = payrollLineService.page(
+                new Page<>(current, size),
+                new LambdaQueryWrapper<PayrollLine>()
+                        .eq(PayrollLine::getEmployeeId, employeeId)
+                        .orderByDesc(PayrollLine::getId)
+        );
+
+        Set<Long> batchIds = result.getRecords().stream()
+                .map(PayrollLine::getBatchId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, PayrollBatch> batchMap = batchIds.isEmpty() ? Map.of() : payrollBatchService.listByIds(batchIds)
+                .stream()
+                .filter(batch -> batch != null && batch.getId() != null)
+                .collect(Collectors.toMap(PayrollBatch::getId, batch -> batch));
+
+        Set<Long> cycleIds = batchMap.values().stream()
+                .map(PayrollBatch::getPayCycleId)
+                .filter(java.util.Objects::nonNull)
+                .collect(Collectors.toSet());
+        Map<Long, PayCycle> cycleMap = cycleIds.isEmpty() ? Map.of() : payCycleService.listByIds(cycleIds)
+                .stream()
+                .filter(cycle -> cycle != null && cycle.getId() != null)
+                .collect(Collectors.toMap(PayCycle::getId, cycle -> cycle));
+
+        List<EmployeePayslipRecordVO> records = result.getRecords().stream().map(line -> {
+            EmployeePayslipRecordVO vo = new EmployeePayslipRecordVO();
+            vo.setLineId(line.getId());
+            vo.setBatchId(line.getBatchId());
+            vo.setEmploymentType(line.getEmploymentType());
+            vo.setCurrency(line.getCurrency());
+            vo.setGrossAmount(line.getGrossAmount());
+            vo.setTaxAmount(line.getTaxAmount());
+            vo.setSocialAmount(line.getSocialAmount());
+            vo.setNetAmount(line.getNetAmount());
+            vo.setStatus(line.getStatus());
+            vo.setCreateTime(line.getCreateTime());
+            vo.setUpdateTime(line.getUpdateTime());
+
+            PayrollBatch batch = batchMap.get(line.getBatchId());
+            if (batch != null) {
+                vo.setPayCycleId(batch.getPayCycleId());
+                vo.setPeriodLabel(batch.getPeriodLabel());
+                vo.setBatchStatus(batch.getStatus() != null ? batch.getStatus().name().toLowerCase() : null);
+                vo.setPaymentBatchNo(batch.getPaymentBatchNo());
+            }
+            if (vo.getPayCycleId() != null) {
+                PayCycle cycle = cycleMap.get(vo.getPayCycleId());
+                if (cycle != null) {
+                    vo.setPeriodStart(cycle.getStartDate());
+                    vo.setPeriodEnd(cycle.getEndDate());
+                }
+            }
+            return vo;
+        }).toList();
+
+        return PageResponse.of(result, records);
+    }
+
+    @Override
+    public PageResponse<PaymentRecordItemVO> pageEmployeePayments(Long employeeId, int pageNum, int pageSize) {
+        long current = Math.max(1, pageNum);
+        long size = Math.max(1, pageSize);
+        Page<PaymentRecord> result = paymentRecordService.page(
+                new Page<>(current, size),
+                new LambdaQueryWrapper<PaymentRecord>()
+                        .eq(PaymentRecord::getEmployeeId, employeeId)
+                        .orderByDesc(PaymentRecord::getCreateTime)
+                        .orderByDesc(PaymentRecord::getId)
+        );
+        List<PaymentRecordItemVO> records = result.getRecords().stream()
+                .map(PaymentRecordItemVO::from)
+                .toList();
+        return PageResponse.of(result, records);
     }
 
     @Override
@@ -338,7 +543,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         ApprovalEngine approvalEngine = approvalEngineProvider.getObject();
         Long workflowId = approvalEngine.startWorkflow(
                 WorkflowType.OFFLINE,
-                "EMPLOYEE-" + employee.getId(),
+                buildEmployeeApprovalBusinessKey(employee.getId()),
                 "PLATFORM_BIND",
                 operatorId,
                 data
@@ -395,6 +600,22 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         try { return objectMapper.writeValueAsString(o); } catch (Exception e) { return null; }
     }
 
+    private String buildEmployeeApprovalBusinessKey(Long employeeId) {
+        return "EMPLOYEE-" + employeeId + "-" + System.currentTimeMillis();
+    }
+
+    private Map<Long, String> buildUserNameMap(Set<Long> userIds) {
+        if (userIds == null || userIds.isEmpty()) {
+            return Map.of();
+        }
+        return sysUserService.listByIds(userIds).stream()
+                .filter(user -> user != null && user.getId() != null)
+                .collect(Collectors.toMap(
+                        SysUser::getId,
+                        user -> StringUtils.hasText(user.getRealName()) ? user.getRealName() : user.getUsername()
+                ));
+    }
+
     @Override
     @Transactional
     public void updateStatus(Long employeeId, EmployeeStatus status) {
@@ -420,7 +641,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
                 return false;
             }
             return true;
-        }).peek(this::encryptSensitiveData).peek(this::setDefaultValues).toList();
+        }).peek(this::normalizeFinancialFields).peek(this::encryptSensitiveData).peek(this::setDefaultValues).toList();
         saveBatch(toSave);
         log.info("批量导入完成: 成功导入{}个员工", toSave.size());
     }
@@ -437,10 +658,32 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     @Override
     public String getDecryptedBankAccount(Long employeeId) {
         Employee employee = getById(employeeId);
-        if (employee != null && StringUtils.hasText(employee.getBankAccount())) {
+        if (employee == null) {
+            return "";
+        }
+        if (StringUtils.hasText(employee.getBankAccount())) {
             return encryptionService.decrypt(employee.getBankAccount());
         }
+        if (SettlementAccountType.BANK_CARD.getCode().equals(resolveSettlementType(employee))
+                && StringUtils.hasText(employee.getSettlementAccount())) {
+            return encryptionService.decrypt(employee.getSettlementAccount());
+        }
         return ""; // 返回空字符串而非 null，避免前端处理困难
+    }
+
+    @Override
+    public String getDecryptedSettlementAccount(Long employeeId) {
+        Employee employee = getById(employeeId);
+        if (employee == null) {
+            return "";
+        }
+        if (StringUtils.hasText(employee.getSettlementAccount())) {
+            return encryptionService.decrypt(employee.getSettlementAccount());
+        }
+        if (StringUtils.hasText(employee.getBankAccount())) {
+            return encryptionService.decrypt(employee.getBankAccount());
+        }
+        return "";
     }
 
     @Override
@@ -480,6 +723,9 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (StringUtils.hasText(employee.getEncryptedIdCard())) {
             employee.setEncryptedIdCard(encryptionService.encryptIdCard(employee.getEncryptedIdCard()));
         }
+        if (StringUtils.hasText(employee.getSettlementAccount())) {
+            employee.setSettlementAccount(encryptionService.encrypt(employee.getSettlementAccount()));
+        }
         if (StringUtils.hasText(employee.getBankAccount())) {
             employee.setBankAccount(encryptionService.encrypt(employee.getBankAccount()));
         }
@@ -495,6 +741,123 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (employee.getOffline() == null) {
             employee.setOffline(false);
         }
+        if (!StringUtils.hasText(employee.getSettlementAccountType())
+                && (StringUtils.hasText(employee.getSettlementAccount())
+                || StringUtils.hasText(employee.getBankAccount()))) {
+            employee.setSettlementAccountType(SettlementAccountType.BANK_CARD.getCode());
+        }
+        if (!StringUtils.hasText(employee.getSettlementAccountName())
+                && (StringUtils.hasText(employee.getSettlementAccount())
+                || StringUtils.hasText(employee.getBankAccount()))) {
+            employee.setSettlementAccountName(employee.getName());
+        }
+    }
+
+    private void normalizeFinancialFields(Employee employee) {
+        if (employee == null) {
+            return;
+        }
+        if (StringUtils.hasText(employee.getSettlementAccountType())) {
+            employee.setSettlementAccountType(normalizeSettlementAccountType(employee.getSettlementAccountType()));
+        }
+        if (StringUtils.hasText(employee.getSettlementAccount())) {
+            employee.setSettlementAccount(employee.getSettlementAccount().trim());
+        }
+        if (StringUtils.hasText(employee.getBankAccount())) {
+            employee.setBankAccount(employee.getBankAccount().trim());
+        }
+        if (StringUtils.hasText(employee.getSettlementAccountName())) {
+            employee.setSettlementAccountName(employee.getSettlementAccountName().trim());
+        }
+        if (StringUtils.hasText(employee.getBankName())) {
+            employee.setBankName(employee.getBankName().trim());
+        }
+        if (StringUtils.hasText(employee.getBankBranchName())) {
+            employee.setBankBranchName(employee.getBankBranchName().trim());
+        }
+
+        if (!StringUtils.hasText(employee.getSettlementAccount()) && StringUtils.hasText(employee.getBankAccount())) {
+            employee.setSettlementAccount(employee.getBankAccount());
+        }
+        if (!StringUtils.hasText(employee.getSettlementAccountType())
+                && (StringUtils.hasText(employee.getSettlementAccount()) || StringUtils.hasText(employee.getBankAccount()))) {
+            employee.setSettlementAccountType(SettlementAccountType.BANK_CARD.getCode());
+        }
+        if (SettlementAccountType.BANK_CARD.getCode().equals(resolveSettlementType(employee))
+                && !StringUtils.hasText(employee.getBankAccount())
+                && StringUtils.hasText(employee.getSettlementAccount())) {
+            employee.setBankAccount(employee.getSettlementAccount());
+        }
+        if (!StringUtils.hasText(employee.getSettlementAccountName())
+                && (StringUtils.hasText(employee.getSettlementAccount()) || StringUtils.hasText(employee.getBankAccount()))) {
+            employee.setSettlementAccountName(employee.getName());
+        }
+    }
+
+    private void validateFinancialData(String settlementAccountType, String settlementAccount, String bankAccount) {
+        String normalizedType = normalizeSettlementAccountType(settlementAccountType);
+        if (StringUtils.hasText(normalizedType) && SettlementAccountType.fromCode(normalizedType) == null) {
+            throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "不支持的收款账户类型: " + settlementAccountType);
+        }
+        String account = StringUtils.hasText(settlementAccount) ? settlementAccount.trim() : null;
+        String bank = StringUtils.hasText(bankAccount) ? bankAccount.trim() : null;
+        if (!StringUtils.hasText(account) && StringUtils.hasText(bank)) {
+            account = bank;
+            if (!StringUtils.hasText(normalizedType)) {
+                normalizedType = SettlementAccountType.BANK_CARD.getCode();
+            }
+        }
+        if (!StringUtils.hasText(account)) {
+            return;
+        }
+        if (!StringUtils.hasText(normalizedType)) {
+            normalizedType = SettlementAccountType.BANK_CARD.getCode();
+        }
+        switch (normalizedType) {
+            case "bank_card" -> {
+                if (!ValidationUtils.isValidBankCard(account)) {
+                    throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "银行卡号格式不正确");
+                }
+            }
+            case "alipay" -> {
+                if (!ValidationUtils.isValidPhone(account) && !ValidationUtils.isValidEmail(account)) {
+                    throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "支付宝账户格式不正确，应为手机号或邮箱");
+                }
+            }
+            case "wechat", "other" -> {
+                if (account.length() > 128) {
+                    throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "收款账户长度不能超过128个字符");
+                }
+            }
+            default -> throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "不支持的收款账户类型: " + settlementAccountType);
+        }
+    }
+
+    private String normalizeSettlementAccountType(String settlementAccountType) {
+        if (!StringUtils.hasText(settlementAccountType)) {
+            return null;
+        }
+        String normalized = settlementAccountType.trim().toLowerCase();
+        return switch (normalized) {
+            case "bank", "bankcard", "bank_card" -> SettlementAccountType.BANK_CARD.getCode();
+            case "alipay" -> SettlementAccountType.ALIPAY.getCode();
+            case "wechat", "weixin", "wx" -> SettlementAccountType.WECHAT.getCode();
+            case "other" -> SettlementAccountType.OTHER.getCode();
+            default -> normalized;
+        };
+    }
+
+    private String resolveSettlementType(Employee employee) {
+        if (employee == null) {
+            return null;
+        }
+        if (StringUtils.hasText(employee.getSettlementAccountType())) {
+            return normalizeSettlementAccountType(employee.getSettlementAccountType());
+        }
+        if (StringUtils.hasText(employee.getSettlementAccount()) || StringUtils.hasText(employee.getBankAccount())) {
+            return SettlementAccountType.BANK_CARD.getCode();
+        }
+        return null;
     }
 
     private LambdaQueryWrapper<Employee> buildQueryWrapper(String keyword, String department, String status,

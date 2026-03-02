@@ -25,6 +25,7 @@ import {
 } from 'antd';
 import {
   CalendarOutlined,
+  CheckCircleOutlined,
   ClockCircleOutlined,
   EditOutlined,
   ExclamationCircleOutlined,
@@ -55,6 +56,10 @@ const payrollTypeEnum: Record<string, { text: string; color: string }> = {
 const statusEnum: Record<string, { text: string; color: string }> = {
   draft: { text: '草稿', color: 'default' },
   locked: { text: '已锁定', color: 'warning' },
+  confirming: { text: '待确认', color: 'processing' },
+  dispute_processing: { text: '异议处理中', color: 'processing' },
+  confirmed: { text: '确认完成', color: 'success' },
+  submitted: { text: '已提交审批', color: 'processing' },
   computed: { text: '已计算', color: 'processing' },
   approved: { text: '已审批', color: 'success' },
   released: { text: '已发薪', color: 'success' },
@@ -71,6 +76,9 @@ const computeEnum: Record<string, { text: string; color: string }> = {
   running: { text: '计算中', color: 'processing' },
   completed: { text: '已完成', color: 'success' },
   failed: { text: '失败', color: 'error' },
+  confirming: { text: '确认中', color: 'processing' },
+  dispute_processing: { text: '异议处理中', color: 'processing' },
+  confirmed: { text: '确认完成', color: 'success' },
   pay_processing: { text: '发薪中', color: 'processing' },
 };
 
@@ -244,6 +252,15 @@ const PayrollBatches: React.FC = () => {
     navigate(`/payroll/batches/${batchKey}/manager-review`);
   }, [navigate, message]);
 
+  const handleOpenConfirmationWorkbench = useCallback((record?: PayrollBatchSummaryDto) => {
+    const batchKey = record ? getBatchId(record) : undefined;
+    if (batchKey) {
+      navigate(`/payroll/confirmations?batchId=${batchKey}`);
+      return;
+    }
+    navigate('/payroll/confirmations');
+  }, [navigate]);
+
   // ==================== 表格列定义 ====================
   const columns: ProColumns<PayrollBatchSummaryDto>[] = [
     {
@@ -368,6 +385,12 @@ const PayrollBatches: React.FC = () => {
             icon: <TeamOutlined />,
             onClick: () => handleViewManager(record),
           },
+          {
+            key: 'confirmations',
+            label: '确认工作台',
+            icon: <CheckCircleOutlined />,
+            onClick: () => handleOpenConfirmationWorkbench(record),
+          },
         ];
 
         // 只有草稿状态可以编辑
@@ -383,6 +406,9 @@ const PayrollBatches: React.FC = () => {
         return [
           <Button key="ledger" type="link" size="small" onClick={() => handleViewLedger(record)}>
             台账
+          </Button>,
+          <Button key="confirmations" type="link" size="small" onClick={() => handleOpenConfirmationWorkbench(record)}>
+            确认
           </Button>,
           <Dropdown key="more" menu={{ items }} trigger={['click']}>
             <Button type="link" size="small">
@@ -494,6 +520,9 @@ const PayrollBatches: React.FC = () => {
         toolBarRender={() => [
           <Button key="create" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
             新建批次
+          </Button>,
+          <Button key="confirm-workbench" icon={<CheckCircleOutlined />} onClick={() => handleOpenConfirmationWorkbench()}>
+            确认工作台
           </Button>,
           <Tooltip key="refresh" title="刷新列表">
             <Button icon={<ReloadOutlined />} onClick={() => actionRef.current?.reload()} />

@@ -4,6 +4,7 @@ import lombok.Data;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Data
@@ -23,6 +24,10 @@ public class EmployeePayslipDto {
         private LocalDate periodStart;
         private LocalDate periodEnd;
         private String status;
+        private String confirmationStatus;
+        private Long confirmationAssigneeEmployeeId;
+        private LocalDateTime confirmedAt;
+        private String objectionReason;
     }
 
     @Data
@@ -46,8 +51,13 @@ public class EmployeePayslipDto {
         private BigDecimal taxAmount;
         private BigDecimal socialAmount;
         private BigDecimal netAmount;
+        private String confirmationStatus;
+        private Long confirmationAssigneeEmployeeId;
+        private LocalDateTime confirmedAt;
+        private String confirmationComment;
+        private String objectionReason;
+        private Long disputeWorkflowId;
         private List<PayrollPreviewDto.PayrollPreviewItemDto> items;
         private List<String> warnings;
     }
 }
-

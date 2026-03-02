@@ -37,6 +37,16 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     }
 
     @Override
+    public SysUser findByEmployeeId(Long employeeId) {
+        if (employeeId == null) {
+            return null;
+        }
+        return getOne(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getEmployeeId, employeeId)
+                .last("limit 1"));
+    }
+
+    @Override
     public SysUser findFirstByRole(String roleCode) {
         if (roleCode == null || roleCode.isBlank()) {
             return null;

@@ -11,6 +11,7 @@ public class PayrollBatchCreateRequest {
     private String type; // full_time / part_time
     private String scopeJson; // JSON string
     private String currency; // 默认 CNY
+    private Boolean confirmationRequired; // 默认 true
+    private String confirmationMode; // individual/group
     private String remark;
 }
-

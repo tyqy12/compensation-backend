@@ -8,6 +8,7 @@ import com.yiyundao.compensation.infrastructure.dao.PaymentRecordMapper;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.util.List;
 
@@ -28,6 +29,18 @@ public class PaymentRecordServiceImpl extends ServiceImpl<PaymentRecordMapper, P
     public PaymentRecord getByAlipayOrderNo(String alipayOrderNo) {
         LambdaQueryWrapper<PaymentRecord> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(PaymentRecord::getAlipayOrderNo, alipayOrderNo);
+        return getOne(queryWrapper);
+    }
+
+    @Override
+    public PaymentRecord getByProviderOrderNo(String providerCode, String providerOrderNo) {
+        if (!StringUtils.hasText(providerCode) || !StringUtils.hasText(providerOrderNo)) {
+            return null;
+        }
+        LambdaQueryWrapper<PaymentRecord> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(PaymentRecord::getProviderCode, providerCode.toLowerCase())
+                .eq(PaymentRecord::getProviderOrderNo, providerOrderNo)
+                .last("limit 1");
         return getOne(queryWrapper);
     }
 }

@@ -16,6 +16,9 @@ DROP TABLE IF EXISTS `resource_snapshot`;
 DROP TABLE IF EXISTS `approval_step`;
 DROP TABLE IF EXISTS `approval_workflow`;
 DROP TABLE IF EXISTS `notification_record`;
+DROP TABLE IF EXISTS `settlement_reconciliation`;
+DROP TABLE IF EXISTS `employee_type_provider_mapping`;
+DROP TABLE IF EXISTS `settlement_provider_config`;
 DROP TABLE IF EXISTS `payment_record`;
 DROP TABLE IF EXISTS `payment_batch`;
 DROP TABLE IF EXISTS `employee_department`;
@@ -45,8 +48,13 @@ CREATE TABLE `employee` (
   `manager_id` bigint DEFAULT NULL COMMENT '管理员ID',
   `hire_date` date DEFAULT NULL COMMENT '入职日期',
   `status` varchar(20) DEFAULT 'active' COMMENT '员工状态',
+  `settlement_account_type` varchar(20) DEFAULT NULL COMMENT '收款账户类型(bank_card/alipay/wechat/other)',
+  `settlement_account` varchar(128) DEFAULT NULL COMMENT '收款账户(加密存储)',
+  `settlement_account_name` varchar(100) DEFAULT NULL COMMENT '收款账户实名/户名',
+  `settlement_provider_code` varchar(32) DEFAULT NULL COMMENT '结算渠道编码（优先级最高）',
   `bank_account` varchar(100) DEFAULT NULL COMMENT '银行卡号(加密存储)',
   `bank_name` varchar(100) DEFAULT NULL COMMENT '开户银行',
+  `bank_branch_name` varchar(120) DEFAULT NULL COMMENT '开户支行',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
   `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
@@ -127,6 +135,11 @@ CREATE TABLE `payment_record` (
   `status` varchar(20) DEFAULT 'pending' COMMENT '支付状态',
   `alipay_order_no` varchar(100) DEFAULT NULL COMMENT '支付宝订单号',
   `alipay_trade_no` varchar(100) DEFAULT NULL COMMENT '支付宝交易号',
+  `provider_code` varchar(32) NOT NULL DEFAULT 'alipay' COMMENT '渠道编码',
+  `provider_order_no` varchar(64) DEFAULT NULL COMMENT '渠道商户订单号',
+  `provider_trade_no` varchar(64) DEFAULT NULL COMMENT '渠道交易流水号',
+  `provider_metadata` json DEFAULT NULL COMMENT '渠道扩展信息',
+  `id_card_hash` varchar(64) DEFAULT NULL COMMENT '身份证哈希',
   `error_code` varchar(50) DEFAULT NULL COMMENT '错误码',
   `error_msg` varchar(500) DEFAULT NULL COMMENT '错误信息',
   `payment_time` datetime DEFAULT NULL COMMENT '实际支付时间',
@@ -140,8 +153,100 @@ CREATE TABLE `payment_record` (
   PRIMARY KEY (`id`),
   KEY `idx_batch_no` (`batch_no`),
   KEY `idx_employee` (`employee_id`),
+  KEY `idx_provider_order` (`provider_code`, `provider_order_no`),
+  KEY `idx_provider_trade` (`provider_code`, `provider_trade_no`),
   CONSTRAINT `fk_payment_employee` FOREIGN KEY (`employee_id`) REFERENCES `employee` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='支付记录表';
+
+-- Settlement Provider Config
+CREATE TABLE `settlement_provider_config` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `provider_code` varchar(32) NOT NULL COMMENT '渠道编码',
+  `provider_name` varchar(64) NOT NULL COMMENT '渠道名称',
+  `provider_type` varchar(32) DEFAULT NULL COMMENT '渠道类型',
+  `api_endpoint` varchar(255) DEFAULT NULL COMMENT 'API端点',
+  `api_key` varchar(255) DEFAULT NULL COMMENT 'API密钥',
+  `api_secret` varchar(255) DEFAULT NULL COMMENT 'API密钥',
+  `merchant_id` varchar(64) DEFAULT NULL COMMENT '商户ID',
+  `notify_url` varchar(255) DEFAULT NULL COMMENT '回调URL',
+  `return_url` varchar(255) DEFAULT NULL COMMENT '返回URL',
+  `priority` int NOT NULL DEFAULT '100' COMMENT '优先级(数字越小优先级越高)',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  `config_json` text COMMENT '渠道配置JSON',
+  `enabled` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否启用',
+  `supports_batch` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否支持批量',
+  `supports_query` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否支持查询',
+  `supports_callback` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否支持回调',
+  `single_max_amount` decimal(15,2) DEFAULT NULL COMMENT '单笔最大金额',
+  `daily_max_amount` decimal(15,2) DEFAULT NULL COMMENT '单日最大金额',
+  `callback_url` varchar(256) DEFAULT NULL COMMENT '回调地址',
+  `callback_ips` varchar(512) DEFAULT NULL COMMENT '回调IP白名单',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除(0:未删除,1:已删除)',
+  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_provider_code` (`provider_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='结算渠道配置表';
+
+INSERT INTO `settlement_provider_config`
+(`provider_code`, `provider_name`, `provider_type`, `enabled`, `priority`, `supports_batch`, `supports_query`, `supports_callback`)
+VALUES
+('alipay', '支付宝', 'alipay', 1, 100, 1, 1, 1),
+('yunzhanghu', '云账户', 'yunzhanghu', 0, 100, 1, 1, 1);
+
+-- Employee Type Provider Mapping
+CREATE TABLE `employee_type_provider_mapping` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `employment_type` varchar(32) NOT NULL COMMENT '员工类型：full_time/part_time/intern/contract',
+  `provider_code` varchar(32) NOT NULL COMMENT '结算渠道编码',
+  `priority` int NOT NULL DEFAULT '0' COMMENT '优先级（数字越大越高）',
+  `enabled` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否启用',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除(0:未删除,1:已删除)',
+  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_employment_provider` (`employment_type`, `provider_code`),
+  KEY `idx_employment_type` (`employment_type`),
+  KEY `idx_enabled` (`enabled`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工类型渠道映射表';
+
+INSERT INTO `employee_type_provider_mapping`
+(`employment_type`, `provider_code`, `priority`, `enabled`)
+VALUES
+('full_time', 'alipay', 10, 1),
+('part_time', 'alipay', 10, 1),
+('intern', 'alipay', 10, 1),
+('contract', 'alipay', 10, 1);
+
+-- Settlement Reconciliation
+CREATE TABLE `settlement_reconciliation` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `recon_date` date NOT NULL COMMENT '对账日期',
+  `provider_code` varchar(32) NOT NULL COMMENT '渠道编码',
+  `total_count` int NOT NULL DEFAULT '0' COMMENT '总笔数',
+  `total_amount` decimal(15,2) NOT NULL DEFAULT '0.00' COMMENT '总金额',
+  `match_count` int NOT NULL DEFAULT '0' COMMENT '匹配笔数',
+  `match_amount` decimal(15,2) NOT NULL DEFAULT '0.00' COMMENT '匹配金额',
+  `diff_count` int NOT NULL DEFAULT '0' COMMENT '差异笔数',
+  `diff_amount` decimal(15,2) NOT NULL DEFAULT '0.00' COMMENT '差异金额',
+  `unmatched_local` json DEFAULT NULL COMMENT '本地未匹配列表',
+  `unmatched_provider` json DEFAULT NULL COMMENT '渠道未匹配列表',
+  `status` varchar(32) NOT NULL DEFAULT 'INIT' COMMENT 'INIT/PROCESSING/COMPLETED',
+  `processed_by` bigint DEFAULT NULL COMMENT '处理人ID',
+  `processed_at` datetime DEFAULT NULL COMMENT '处理时间',
+  `remark` varchar(512) DEFAULT NULL COMMENT '备注',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_recon_date` (`recon_date`, `provider_code`),
+  KEY `idx_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='结算对账表';
 
 -- Approval Workflow
 CREATE TABLE `approval_workflow` (
@@ -154,6 +259,7 @@ CREATE TABLE `approval_workflow` (
   `total_steps` int DEFAULT 0 COMMENT '总步骤',
   `status` varchar(20) DEFAULT 'pending' COMMENT '流程状态',
   `initiator_id` bigint DEFAULT NULL COMMENT '发起人',
+  `employee_id` bigint DEFAULT NULL COMMENT '关联员工ID',
   `current_approver_id` bigint DEFAULT NULL COMMENT '当前审批人',
   `submit_time` datetime DEFAULT NULL COMMENT '提交时间',
   `complete_time` datetime DEFAULT NULL COMMENT '完成时间',
@@ -165,7 +271,8 @@ CREATE TABLE `approval_workflow` (
   `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
   `version` int DEFAULT '0' COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_business_key` (`business_key`, `business_type`)
+  UNIQUE KEY `uk_business_key` (`business_key`, `business_type`),
+  KEY `idx_employee` (`employee_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='审批流程表';
 
 -- Approval Step
@@ -295,7 +402,7 @@ CREATE TABLE `org_department` (
 -- Integration Config
 CREATE TABLE `integration_config` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
-  `platform_type` varchar(20) NOT NULL COMMENT '平台类型(wechat/dingtalk/feishu/alipay)',
+  `platform_type` varchar(20) NOT NULL COMMENT '平台类型(wechat/dingtalk/feishu/alipay/yunzhanghu)',
   `config_json` text COMMENT '配置JSON(加密或明文)',
   `enabled` tinyint(1) DEFAULT '1' COMMENT '是否启用',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',

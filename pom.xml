@@ -108,6 +108,23 @@
 			<version>4.40.461.ALL</version>
 		</dependency>
 
+		<!-- Yunzhanghu SDK -->
+		<dependency>
+			<groupId>com.yunzhanghu.openapi</groupId>
+			<artifactId>sdk</artifactId>
+			<version>1.4.38-RELEASE</version>
+			<exclusions>
+				<exclusion>
+					<groupId>org.apache.logging.log4j</groupId>
+					<artifactId>log4j-api</artifactId>
+				</exclusion>
+				<exclusion>
+					<groupId>org.apache.logging.log4j</groupId>
+					<artifactId>log4j-core</artifactId>
+				</exclusion>
+			</exclusions>
+		</dependency>
+
 		<!-- Aliyun SMS SDK -->
 		<dependency>
 			<groupId>com.aliyun</groupId>

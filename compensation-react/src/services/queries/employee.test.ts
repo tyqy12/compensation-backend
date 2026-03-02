@@ -14,6 +14,10 @@ import {
   useBatchImportEmployeesMutation,
   useEmployeeIdCardQuery,
   useEmployeeBankAccountQuery,
+  useEmployeeSettlementAccountQuery,
+  useEmployeeApprovalsQuery,
+  useEmployeePayslipsQuery,
+  useEmployeePaymentsQuery,
   type Employee,
   type EmployeeFormData,
 } from './employee';
@@ -222,6 +226,62 @@ describe('Employee Queries', () => {
       });
     });
   });
+
+  describe('employee detail record queries', () => {
+    it('should fetch employee approvals', async () => {
+      const mockResponse = { data: { records: [{ id: 1, workflowName: '平台绑定审批' }], total: 1 } };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(
+        () => useEmployeeApprovalsQuery(1, { current: 1, pageSize: 10 }),
+        { wrapper: createWrapper() },
+      );
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(mockApi.get).toHaveBeenCalledWith('/employee/1/approvals', {
+        params: { page: 1, size: 10 },
+      });
+    });
+
+    it('should fetch employee payslips', async () => {
+      const mockResponse = { data: { records: [{ lineId: 9, periodLabel: '2026-01' }], total: 1 } };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(
+        () => useEmployeePayslipsQuery(1, { current: 1, pageSize: 10 }),
+        { wrapper: createWrapper() },
+      );
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(mockApi.get).toHaveBeenCalledWith('/employee/1/payslips', {
+        params: { page: 1, size: 10 },
+      });
+    });
+
+    it('should fetch employee payments', async () => {
+      const mockResponse = { data: { records: [{ id: 1, batchNo: 'PB-1' }], total: 1 } };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(
+        () => useEmployeePaymentsQuery(1, { current: 1, pageSize: 10 }),
+        { wrapper: createWrapper() },
+      );
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(mockApi.get).toHaveBeenCalledWith('/employee/1/payments', {
+        params: { page: 1, size: 10 },
+      });
+    });
+  });
 });
 
 describe('Employee Mutations', () => {
@@ -381,6 +441,32 @@ describe('Employee Sensitive Data Queries', () => {
 
       // The query should be configured with staleTime: 0, gcTime: 0
       // This means data is immediately considered stale
+      expect(result.current.isStale).toBe(true);
+    });
+  });
+
+  describe('useEmployeeSettlementAccountQuery', () => {
+    it('should fetch employee settlement account when enabled', async () => {
+      const mockResponse = { data: 'zhangsan@example.com' };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(() => useEmployeeSettlementAccountQuery(1, { enabled: true }), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(mockApi.get).toHaveBeenCalledWith('/employee/1/settlement-account');
+      expect(result.current.data).toBe('zhangsan@example.com');
+    });
+
+    it('should have no cache for settlement account sensitive data', () => {
+      const { result } = renderHook(() => useEmployeeSettlementAccountQuery(1), {
+        wrapper: createWrapper(),
+      });
+
       expect(result.current.isStale).toBe(true);
     });
   });

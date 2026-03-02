@@ -51,6 +51,21 @@ public class PaymentRecord extends BaseEntity {
     @TableField("alipay_trade_no")
     private String alipayTradeNo;
 
+    @TableField("provider_code")
+    private String providerCode;
+
+    @TableField("provider_order_no")
+    private String providerOrderNo;
+
+    @TableField("provider_trade_no")
+    private String providerTradeNo;
+
+    @TableField("provider_metadata")
+    private String providerMetadata;
+
+    @TableField("id_card_hash")
+    private String idCardHash;
+
     @TableField("error_code")
     private String errorCode;
 
@@ -63,4 +78,3 @@ public class PaymentRecord extends BaseEntity {
     @TableField("notification_time")
     private LocalDateTime notificationTime;
 }
-

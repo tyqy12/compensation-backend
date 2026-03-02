@@ -10,6 +10,14 @@
 - **认证**: 需要 `ADMIN` 角色
 - **响应格式**: JSON
 
+## CRUD 对照
+
+- `CREATE/UPDATE`: `PUT /admin/integration-configs/{platformType}`
+- `READ(LIST)`: `GET /admin/integration-configs`
+- `READ(DETAIL)`: `GET /admin/integration-configs/{platformType}`
+- `DELETE(逻辑禁用)`: `DELETE /admin/integration-configs/{platformType}`
+- `连接检测`: `POST /admin/integration-configs/{platformType}/test-connection`
+
 ## 1. 获取所有配置列表
 
 获取所有支持的集成平台配置概览。
@@ -58,6 +66,14 @@ GET /admin/integration-configs
       "lastModified": "2024-01-14T15:20:00"
     },
     {
+      "platformType": "yunzhanghu",
+      "platformName": "云账户",
+      "enabled": true,
+      "configured": true,
+      "connectionStatus": "connected",
+      "lastModified": "2024-01-16T12:00:00"
+    },
+    {
       "platformType": "sms",
       "platformName": "短信服务",
       "enabled": true,
@@ -103,7 +119,7 @@ GET /admin/integration-configs/{platformType}
 ```
 
 **路径参数**
-- `platformType`: 平台类型 (`wechat`/`dingtalk`/`feishu`/`alipay`/`sms`/`email`/`encryption`)
+- `platformType`: 平台类型 (`wechat`/`dingtalk`/`feishu`/`alipay`/`yunzhanghu`/`sms`/`email`/`encryption`)
 
 **响应示例（企业微信）**
 ```json
@@ -276,6 +292,32 @@ POST /admin/integration-configs/{platformType}/test-connection
 
 **接口内容加密说明**:
 当配置了 `encryptKey` 时，系统会自动启用支付宝接口内容AES加密。这需要先在支付宝开放平台的应用详情页开启"接口内容加密方式"。加密后的请求会自动处理，无需前端额外操作。
+
+### 云账户 (`yunzhanghu`)
+```json
+{
+  "enabled": true,
+  "yunzhanghu": {
+    "dealerId": "25xxxx15",
+    "brokerId": "275xxxx44",
+    "appKey": "Isg2Wxxxxzx6iP",
+    "des3Key": "0gyU3Fxxxxk516E",
+    "rsaPrivateKey": "-----BEGIN PRIVATE KEY-----...-----END PRIVATE KEY-----",
+    "rsaPublicKey": "-----BEGIN PUBLIC KEY-----...-----END PUBLIC KEY-----",
+    "signType": "rsa",
+    "url": "https://api-service.yunzhanghu.com/sandbox",
+    "notifyUrl": "https://your-domain/api/v1/settlement/callback/yunzhanghu",
+    "projectId": "payroll",
+    "dealerPlatformName": "薪酬助手",
+    "checkName": "Check",
+    "isDebug": true
+  }
+}
+```
+
+**必填字段**: `dealerId`, `brokerId`, `appKey`, `des3Key`, `rsaPrivateKey`, `rsaPublicKey`, `signType`, `url`
+
+**沙箱地址**: `https://api-service.yunzhanghu.com/sandbox`
 
 ### 短信服务 (`sms`)
 ```json

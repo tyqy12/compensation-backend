@@ -76,7 +76,7 @@ export interface DepartmentNode {
 }
 
 // 平台枚举
-export type Platform = 'wechat' | 'dingtalk' | 'feishu' | 'alipay' | 'sms' | 'email' | 'encryption';
+export type Platform = 'wechat' | 'dingtalk' | 'feishu' | 'alipay' | 'yunzhanghu' | 'sms' | 'email' | 'encryption';
 
 // 认证与会话
 export interface LoginRequest {
@@ -148,6 +148,22 @@ export interface AlipayConfig {
   returnUrl?: string;
 }
 
+export interface YunzhanghuConfig {
+  dealerId: string;
+  brokerId: string;
+  appKey: string;
+  des3Key: string;
+  rsaPrivateKey: string;
+  rsaPublicKey: string;
+  signType: 'rsa' | 'sha256' | string;
+  url: string;
+  notifyUrl?: string;
+  projectId?: string;
+  checkName?: string;
+  dealerPlatformName?: string;
+  isDebug?: boolean;
+}
+
 export interface SmsConfig {
   provider: 'aliyun' | 'tencent' | 'huawei' | 'mock';
   accessKeyId?: string;
@@ -183,6 +199,7 @@ export type PlatformConfig =
   | DingtalkConfig
   | FeishuConfig
   | AlipayConfig
+  | YunzhanghuConfig
   | SmsConfig
   | EmailConfig
   | EncryptionConfig;
@@ -194,6 +211,7 @@ export interface SaveConfigRequest {
   dingtalk?: DingtalkConfig;
   feishu?: FeishuConfig;
   alipay?: AlipayConfig;
+  yunzhanghu?: YunzhanghuConfig;
   sms?: SmsConfig;
   email?: EmailConfig;
   encryption?: EncryptionConfig;
@@ -546,6 +564,9 @@ export const qk = {
   payrollTemplates: (params: Record<string, unknown>) => ['payroll', 'templates', params] as const,
   payrollTemplateDetail: (id: string | number) => ['payroll', 'templates', id] as const,
   payrollCycles: (params: Record<string, unknown>) => ['payroll', 'cycles', params] as const,
+  payrollConfirmationSummary: (batchId: string | number) => ['payroll', 'confirmations', 'summary', batchId] as const,
+  payrollPendingConfirmations: (params: Record<string, unknown>) =>
+    ['payroll', 'confirmations', 'pending', params] as const,
   ptBatches: (params: Record<string, unknown>) => ['pt', 'payroll', 'batches', params] as const,
   ptLines: (batchId: string | number, params: Record<string, unknown>) =>
     ['pt', 'payroll', 'batches', batchId, 'lines', params] as const,

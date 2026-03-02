@@ -2,6 +2,8 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.yiyundao.compensation.enums.PayrollConfirmationMode;
+import com.yiyundao.compensation.enums.PayrollConfirmationStatus;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollLedgerDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollManagerReviewDto;
@@ -23,9 +25,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDateTime;
 import java.util.Locale;
 
 @Slf4j
@@ -61,15 +65,35 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
         }
 
         LinesSummary summary = computeLines(ctx);
-        java.util.List<PayrollLine> entities = new java.util.ArrayList<>();
-        for (var entry : summary.linesByEmployee.entrySet()) {
-            entities.add(toPayrollLine(ctx, entry.getKey(), entry.getValue(), null));
+        java.util.List<PayrollLine> existingLines = payrollLineService.list(
+                new LambdaQueryWrapper<PayrollLine>().eq(PayrollLine::getBatchId, batchId)
+        );
+        java.util.Map<Long, PayrollLine> existingByEmployee = new java.util.HashMap<>();
+        for (PayrollLine existing : existingLines) {
+            if (existing != null && existing.getEmployeeId() != null) {
+                existingByEmployee.put(existing.getEmployeeId(), existing);
+            }
         }
 
-        payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>().eq(PayrollLine::getBatchId, batchId));
-        if (!entities.isEmpty()) {
-            payrollLineService.saveBatch(entities);
+        java.util.List<PayrollLine> entities = new java.util.ArrayList<>();
+        for (var entry : summary.linesByEmployee.entrySet()) {
+            entities.add(toPayrollLine(ctx, entry.getKey(), entry.getValue(), existingByEmployee.get(entry.getKey())));
         }
+
+        java.util.Set<Long> keepEmployeeIds = summary.linesByEmployee.keySet();
+        if (keepEmployeeIds.isEmpty()) {
+            payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>().eq(PayrollLine::getBatchId, batchId));
+        } else {
+            payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>()
+                    .eq(PayrollLine::getBatchId, batchId)
+                    .notIn(PayrollLine::getEmployeeId, keepEmployeeIds));
+        }
+
+        if (!entities.isEmpty()) {
+            payrollLineService.saveOrUpdateBatch(entities);
+        }
+
+        updateBatchToConfirming(ctx.batch);
         return true;
     }
 
@@ -111,6 +135,9 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
         PayrollBatchStatus status = batch.getStatus();
         return status == PayrollBatchStatus.DRAFT ||
                status == PayrollBatchStatus.LOCKED ||
+               status == PayrollBatchStatus.CONFIRMING ||
+               status == PayrollBatchStatus.DISPUTE_PROCESSING ||
+               status == PayrollBatchStatus.CONFIRMED ||
                status == PayrollBatchStatus.SUBMITTED ||
                status == PayrollBatchStatus.APPROVED ||
                status == PayrollBatchStatus.REJECTED;
@@ -623,7 +650,11 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
             return false;
         }
         PayrollBatchStatus status = batch.getStatus();
-        return status == PayrollBatchStatus.LOCKED || status == PayrollBatchStatus.APPROVED;
+        return status == PayrollBatchStatus.LOCKED
+                || status == PayrollBatchStatus.CONFIRMING
+                || status == PayrollBatchStatus.DISPUTE_PROCESSING
+                || status == PayrollBatchStatus.CONFIRMED
+                || status == PayrollBatchStatus.APPROVED;
     }
 
     private PayrollLine toPayrollLine(PreviewContext ctx,
@@ -646,6 +677,20 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
         } else {
             entity.setStatus("calculated");
         }
+        entity.setConfirmationAssigneeEmployeeId(resolveConfirmationAssigneeEmployeeId(existing, empId));
+        entity.setConfirmationStatus(PayrollConfirmationStatus.PENDING.getCode());
+        entity.setConfirmedByUserId(null);
+        entity.setConfirmedByEmployeeId(null);
+        entity.setConfirmedAt(null);
+        entity.setConfirmationComment(null);
+        entity.setObjectionReason(null);
+        entity.setObjectionAt(null);
+        entity.setDisputeWorkflowId(null);
+
+        if (existing != null) {
+            entity.setId(existing.getId());
+            entity.setVersion(existing.getVersion());
+        }
         try {
             entity.setItemsSnapshotJson(objectMapper.writeValueAsString(lineDto.getItems()));
         } catch (Exception e) {
@@ -653,6 +698,31 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
             entity.setItemsSnapshotJson("[]");
         }
         return entity;
+    }
+
+    private Long resolveConfirmationAssigneeEmployeeId(PayrollLine existing, Long employeeId) {
+        if (existing != null && existing.getConfirmationAssigneeEmployeeId() != null) {
+            return existing.getConfirmationAssigneeEmployeeId();
+        }
+        return employeeId;
+    }
+
+    private void updateBatchToConfirming(PayrollBatch batch) {
+        if (batch == null) {
+            return;
+        }
+        if (batch.getConfirmationRequired() == null) {
+            batch.setConfirmationRequired(Boolean.TRUE);
+        }
+        if (!StringUtils.hasText(batch.getConfirmationMode())) {
+            batch.setConfirmationMode(PayrollConfirmationMode.INDIVIDUAL.getCode());
+        }
+        batch.setConfirmationCompletedTime(null);
+        if (Boolean.TRUE.equals(batch.getConfirmationRequired())) {
+            batch.setStatus(PayrollBatchStatus.CONFIRMING);
+        }
+        batch.setUpdateTime(LocalDateTime.now());
+        payrollBatchService.updateById(batch);
     }
 
     private BigDecimal safe(BigDecimal value) {

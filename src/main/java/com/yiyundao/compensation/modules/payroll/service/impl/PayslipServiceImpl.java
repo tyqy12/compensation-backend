@@ -17,6 +17,7 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayslipService;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.security.SecurityConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
@@ -83,6 +84,10 @@ public class PayslipServiceImpl implements PayslipService {
             summary.setSocialAmount(safe(line.getSocialAmount()));
             summary.setNetAmount(safe(line.getNetAmount()));
             summary.setStatus(line.getStatus());
+            summary.setConfirmationStatus(line.getConfirmationStatus());
+            summary.setConfirmationAssigneeEmployeeId(line.getConfirmationAssigneeEmployeeId());
+            summary.setConfirmedAt(line.getConfirmedAt());
+            summary.setObjectionReason(line.getObjectionReason());
 
             PayrollBatch batch = batchMap.get(line.getBatchId());
             if (batch != null) {
@@ -124,6 +129,12 @@ public class PayslipServiceImpl implements PayslipService {
         detail.setTaxAmount(safe(line.getTaxAmount()));
         detail.setSocialAmount(safe(line.getSocialAmount()));
         detail.setNetAmount(safe(line.getNetAmount()));
+        detail.setConfirmationStatus(line.getConfirmationStatus());
+        detail.setConfirmationAssigneeEmployeeId(line.getConfirmationAssigneeEmployeeId());
+        detail.setConfirmedAt(line.getConfirmedAt());
+        detail.setConfirmationComment(line.getConfirmationComment());
+        detail.setObjectionReason(line.getObjectionReason());
+        detail.setDisputeWorkflowId(line.getDisputeWorkflowId());
         detail.setWarnings(Collections.emptyList());
 
         if (batch != null) {
@@ -205,7 +216,7 @@ public class PayslipServiceImpl implements PayslipService {
 
     private Long resolveTargetEmployee(SysUser currentUser, Long requestedEmployee) {
         if (requestedEmployee != null) {
-            if (hasAnyRole(currentUser, "ROLE_ADMIN", "ROLE_FINANCE")) {
+            if (hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
                 return requestedEmployee;
             }
             Long owned = currentUser.getEmployeeId();
@@ -217,7 +228,7 @@ public class PayslipServiceImpl implements PayslipService {
         if (currentUser.getEmployeeId() != null) {
             return currentUser.getEmployeeId();
         }
-        if (hasAnyRole(currentUser, "ROLE_ADMIN", "ROLE_FINANCE")) {
+        if (hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
             return null;
         }
         throw new AccessDeniedException("当前账号未绑定员工信息");
@@ -231,7 +242,11 @@ public class PayslipServiceImpl implements PayslipService {
         if (employeeId != null && employeeId.equals(line.getEmployeeId())) {
             return;
         }
-        if (hasAnyRole(currentUser, "ROLE_ADMIN", "ROLE_FINANCE")) {
+        if (employeeId != null && line.getConfirmationAssigneeEmployeeId() != null
+                && employeeId.equals(line.getConfirmationAssigneeEmployeeId())) {
+            return;
+        }
+        if (hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
             return;
         }
         throw new AccessDeniedException("无权查看该工资条");

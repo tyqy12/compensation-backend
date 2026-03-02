@@ -13,24 +13,32 @@ INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`paren
 VALUES ('MENU','employees','员工管理','/employees','employees/List','team',NULL,10,JSON_OBJECT('keepAlive', TRUE),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`component`=VALUES(`component`),`icon`=VALUES(`icon`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
+SET @menu_employees := (SELECT id FROM sys_resource WHERE code='employees' LIMIT 1);
+
 INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
 VALUES ('MENU','business','业务管理',NULL,NULL,'appstore',NULL,20,JSON_OBJECT('keepAlive', TRUE),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`icon`=VALUES(`icon`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
+SET @menu_business := (SELECT id FROM sys_resource WHERE code='business' LIMIT 1);
+
 INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
-VALUES ('MENU','payments','支付管理',NULL,NULL,'wallet',(SELECT id FROM sys_resource WHERE code='business' LIMIT 1),20,JSON_OBJECT('keepAlive', TRUE),'enabled',@now,@now)
+VALUES ('MENU','payments','支付管理',NULL,NULL,'wallet',@menu_business,20,JSON_OBJECT('keepAlive', TRUE),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`icon`=VALUES(`icon`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
-INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
-VALUES ('MENU','payments.batches','支付批次','/payments/batches','payments/Batches','wallet',(SELECT id FROM sys_resource WHERE code='payments' LIMIT 1),10,JSON_OBJECT('keepAlive', TRUE),'enabled',@now,@now)
-ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`component`=VALUES(`component`),`icon`=VALUES(`icon`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
+SET @menu_payments := (SELECT id FROM sys_resource WHERE code='payments' LIMIT 1);
 
 INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
-VALUES ('VIEW','payments.batch.detail','批次详情','/payments/batches/:batchNo','payments/BatchDetail',NULL,(SELECT id FROM sys_resource WHERE code='payments.batches' LIMIT 1),20,JSON_OBJECT(),'enabled',@now,@now)
+VALUES ('MENU','payments.batches','支付批次','/payments/batches','payments/Batches','wallet',@menu_payments,10,JSON_OBJECT('keepAlive', TRUE),'enabled',@now,@now)
+ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`component`=VALUES(`component`),`icon`=VALUES(`icon`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
+
+SET @menu_payments_batches := (SELECT id FROM sys_resource WHERE code='payments.batches' LIMIT 1);
+
+INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
+VALUES ('VIEW','payments.batch.detail','批次详情','/payments/batches/:batchNo','payments/BatchDetail',NULL,@menu_payments_batches,20,JSON_OBJECT(),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`component`=VALUES(`component`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
 INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
-VALUES ('MENU','payments.api','支付管理-接口',NULL,NULL,NULL,(SELECT id FROM sys_resource WHERE code='payments' LIMIT 1),95,JSON_OBJECT('hidden', TRUE),'enabled',@now,@now)
+VALUES ('MENU','payments.api','支付管理-接口',NULL,NULL,NULL,@menu_payments,95,JSON_OBJECT('hidden', TRUE),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
 INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
@@ -41,16 +49,18 @@ INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`paren
 VALUES ('MENU','system','系统配置',NULL,NULL,'control',NULL,90,JSON_OBJECT('keepAlive', TRUE),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`icon`=VALUES(`icon`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
+SET @menu_system := (SELECT id FROM sys_resource WHERE code='system' LIMIT 1);
+
 INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
-VALUES ('MENU','system.integration','集成配置','/system/integration','system/IntegrationConfig','global',(SELECT id FROM sys_resource WHERE code='system' LIMIT 1),10,JSON_OBJECT(),'enabled',@now,@now)
+VALUES ('MENU','system.integration','集成配置','/system/integration','system/IntegrationConfig','global',@menu_system,10,JSON_OBJECT(),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`component`=VALUES(`component`),`icon`=VALUES(`icon`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
 INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
-VALUES ('MENU','system.org-sync','组织同步','/system/org-sync','system/OrgSync','sync',(SELECT id FROM sys_resource WHERE code='system' LIMIT 1),20,JSON_OBJECT(),'enabled',@now,@now)
+VALUES ('MENU','system.org-sync','组织同步','/system/org-sync','system/OrgSync','sync',@menu_system,20,JSON_OBJECT(),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`component`=VALUES(`component`),`icon`=VALUES(`icon`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
 INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
-VALUES ('VIEW','employees.detail','员工详情','/employees/:id','employees/Detail',NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),20,JSON_OBJECT('keepAlive', TRUE),'enabled',@now,@now)
+VALUES ('VIEW','employees.detail','员工详情','/employees/:id','employees/Detail',NULL,@menu_employees,20,JSON_OBJECT('keepAlive', TRUE),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`component`=VALUES(`component`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
 -- Refresh key IDs

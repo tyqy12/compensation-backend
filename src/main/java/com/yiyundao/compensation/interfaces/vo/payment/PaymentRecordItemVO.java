@@ -16,6 +16,9 @@ public class PaymentRecordItemVO {
     private String status;
     private String alipayOrderNo;
     private String alipayTradeNo;
+    private String providerCode;
+    private String providerOrderNo;
+    private String providerTradeNo;
     private String errorCode;
     private String errorMsg;
     private LocalDateTime paymentTime;
@@ -31,6 +34,9 @@ public class PaymentRecordItemVO {
         vo.setStatus(r.getStatus() != null ? r.getStatus().getCode() : null);
         vo.setAlipayOrderNo(r.getAlipayOrderNo());
         vo.setAlipayTradeNo(r.getAlipayTradeNo());
+        vo.setProviderCode(r.getProviderCode() != null ? r.getProviderCode() : "alipay");
+        vo.setProviderOrderNo(r.getProviderOrderNo() != null ? r.getProviderOrderNo() : r.getAlipayOrderNo());
+        vo.setProviderTradeNo(r.getProviderTradeNo() != null ? r.getProviderTradeNo() : r.getAlipayTradeNo());
         vo.setErrorCode(r.getErrorCode());
         vo.setErrorMsg(r.getErrorMsg());
         vo.setPaymentTime(r.getPaymentTime());

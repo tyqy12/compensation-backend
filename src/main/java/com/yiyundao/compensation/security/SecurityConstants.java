@@ -142,6 +142,11 @@ public final class SecurityConstants {
      */
     public static final String CONFIG_PERMISSION_APPROVAL_FLOW = "permission.approval.flow";
 
+    /**
+     * 薪酬异议审批流程配置键
+     */
+    public static final String CONFIG_PAYROLL_DISPUTE_APPROVAL_FLOW = "payroll.dispute.approval.flow";
+
     // ==================== 审批角色映射 ====================
 
     /**
@@ -190,7 +195,8 @@ public final class SecurityConstants {
      */
     public static final String[] PATTERNS_PAYMENT_NOTIFY = {
             "/alipay/notify",
-            "/v1/oauth/token"
+            "/v1/oauth/token",
+            "/v1/settlement/callback/**"
     };
 
     // ==================== 辅助方法 ====================

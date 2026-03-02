@@ -1,10 +1,12 @@
 package com.yiyundao.compensation.common.utils;
 
+import com.yiyundao.compensation.enums.SettlementAccountType;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.service.EncryptionService;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeListItemVO;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 @Component
 public class VOConverter {
@@ -27,11 +29,26 @@ public class VOConverter {
         vo.setPosition(employee.getPosition());
         vo.setPlatformUserId(employee.getPlatformUserId());
         vo.setPlatformType(employee.getPlatformType());
+        vo.setEmploymentType(employee.getEmploymentType());
         vo.setManagerId(employee.getManagerId());
         vo.setHireDate(employee.getHireDate());
         vo.setStatus(employee.getStatus());
-        vo.setBankAccountMasked(encryptionService.maskBankAccount(employee.getBankAccount()));
+        String settlementType = resolveSettlementType(employee);
+        String settlementMasked = maskEncryptedSettlementAccount(employee.getSettlementAccount(), settlementType);
+        String bankMasked = maskEncryptedBankAccount(employee.getBankAccount());
+        if (!StringUtils.hasText(settlementMasked) && "bank_card".equals(settlementType)) {
+            settlementMasked = bankMasked;
+        }
+        if (!StringUtils.hasText(bankMasked) && "bank_card".equals(settlementType)) {
+            bankMasked = settlementMasked;
+        }
+        vo.setSettlementAccountType(settlementType);
+        vo.setSettlementAccountTypeName(resolveSettlementTypeName(settlementType));
+        vo.setSettlementAccountMasked(settlementMasked);
+        vo.setSettlementAccountName(employee.getSettlementAccountName());
+        vo.setBankAccountMasked(bankMasked);
         vo.setBankName(employee.getBankName());
+        vo.setBankBranchName(employee.getBankBranchName());
         vo.setOffline(employee.getOffline());
         vo.setCreateTime(employee.getCreateTime());
         vo.setUpdateTime(employee.getUpdateTime());
@@ -41,5 +58,87 @@ public class VOConverter {
     public EmployeeListItemVO toEmployeeListItemVO(Employee employee) {
         if (employee == null) return null;
         return EmployeeListItemVO.from(employee);
+    }
+
+    private String maskEncryptedBankAccount(String encryptedBankAccount) {
+        if (!StringUtils.hasText(encryptedBankAccount)) {
+            return null;
+        }
+        try {
+            return encryptionService.maskBankAccount(encryptionService.decrypt(encryptedBankAccount));
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String maskEncryptedSettlementAccount(String encryptedAccount, String settlementType) {
+        if (!StringUtils.hasText(encryptedAccount)) {
+            return null;
+        }
+        try {
+            String plain = encryptionService.decrypt(encryptedAccount);
+            if (!StringUtils.hasText(plain)) {
+                return null;
+            }
+            String type = normalizeType(settlementType);
+            if ("bank_card".equals(type)) {
+                return encryptionService.maskBankAccount(plain);
+            }
+            if ("alipay".equals(type)) {
+                return maskAlipayAccount(plain);
+            }
+            if ("wechat".equals(type)) {
+                return maskGenericAccount(plain, 3, 3);
+            }
+            return maskGenericAccount(plain, 2, 2);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String maskAlipayAccount(String account) {
+        int at = account.indexOf('@');
+        if (at > 1) {
+            String prefix = account.substring(0, at);
+            String suffix = account.substring(at);
+            if (prefix.length() <= 2) {
+                return prefix.charAt(0) + "***" + suffix;
+            }
+            return prefix.substring(0, 2) + "***" + suffix;
+        }
+        return maskGenericAccount(account, 3, 2);
+    }
+
+    private String maskGenericAccount(String account, int prefix, int suffix) {
+        if (!StringUtils.hasText(account)) {
+            return null;
+        }
+        String value = account.trim();
+        if (value.length() <= prefix + suffix) {
+            return "****";
+        }
+        return value.substring(0, prefix) + "****" + value.substring(value.length() - suffix);
+    }
+
+    private String resolveSettlementType(Employee employee) {
+        if (employee == null) {
+            return null;
+        }
+        if (StringUtils.hasText(employee.getSettlementAccountType())) {
+            return normalizeType(employee.getSettlementAccountType());
+        }
+        if (StringUtils.hasText(employee.getSettlementAccount()) || StringUtils.hasText(employee.getBankAccount())) {
+            return SettlementAccountType.BANK_CARD.getCode();
+        }
+        return null;
+    }
+
+    private String resolveSettlementTypeName(String type) {
+        SettlementAccountType settlementAccountType = SettlementAccountType.fromCode(type);
+        return settlementAccountType != null ? settlementAccountType.getName() : type;
+    }
+
+    private String normalizeType(String type) {
+        return type == null ? null : type.trim().toLowerCase();
     }
 }

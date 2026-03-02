@@ -8,6 +8,7 @@ public class PayrollBatchUpdateRequest {
     private String periodLabel;
     private String scopeJson;
     private String currency;
+    private Boolean confirmationRequired;
+    private String confirmationMode;
     private String remark;
 }
-

@@ -25,6 +25,8 @@ public class IntegrationConfigController {
     private final com.yiyundao.compensation.service.OrganizationSyncService organizationSyncService;
     private final com.yiyundao.compensation.service.EncryptionService encryptionService;
     private final com.yiyundao.compensation.service.AlipayService alipayService;
+    private final com.yiyundao.compensation.service.YunzhanghuClient yunzhanghuClient;
+    private final com.yiyundao.compensation.service.ConfigDecryptionService configDecryptionService;
     private final com.yiyundao.compensation.service.FileService fileService;
     private final com.yiyundao.compensation.config.FileStorageProperties fileStorageProperties;
 
@@ -37,7 +39,7 @@ public class IntegrationConfigController {
             java.util.List<IntegrationConfigListDto> configs = new java.util.ArrayList<>();
 
             // 支持的平台类型
-            String[] platforms = {"wechat", "dingtalk", "feishu", "alipay", "sms", "email", "encryption"};
+            String[] platforms = {"wechat", "dingtalk", "feishu", "alipay", "yunzhanghu", "sms", "email", "encryption"};
 
             for (String platform : platforms) {
                 IntegrationConfig rawConfig = integrationConfigService.getRawConfig(platform);
@@ -81,39 +83,7 @@ public class IntegrationConfigController {
                 return ApiResponse.success(emptyResult);
             }
 
-            Object configDto = null;
-            switch (platformType) {
-                case "wechat":
-                    WechatConfigDto wc = integrationConfigService.getWechatConfig();
-                    configDto = mask(wc);
-                    break;
-                case "dingtalk":
-                    DingTalkConfigDto dc = integrationConfigService.getDingTalkConfig();
-                    configDto = mask(dc);
-                    break;
-                case "feishu":
-                    FeishuConfigDto fc = integrationConfigService.getFeishuConfig();
-                    configDto = mask(fc);
-                    break;
-                case "alipay":
-                    AlipayConfigDto ac = integrationConfigService.getAlipayConfig();
-                    configDto = mask(ac);
-                    break;
-                case "sms":
-                    SmsConfigDto sc = integrationConfigService.getSmsConfig();
-                    configDto = mask(sc);
-                    break;
-                case "email":
-                    EmailConfigDto ec = integrationConfigService.getEmailConfig();
-                    configDto = mask(ec);
-                    break;
-                case "encryption":
-                    EncryptionConfigDto encc = integrationConfigService.getEncryptionConfig();
-                    configDto = mask(encc);
-                    break;
-                default:
-                    return ApiResponse.error("不支持的平台类型: " + platformType);
-            }
+            Object configDto = buildMaskedConfig(platformType, cfg);
 
             // 包装返回数据，包含平台状态信息
             IntegrationConfigDetailDto result = new IntegrationConfigDetailDto();
@@ -140,7 +110,10 @@ public class IntegrationConfigController {
         try {
             // 如果禁用配置，可以不传具体配置内容
             if (Boolean.FALSE.equals(req.getEnabled())) {
-                integrationConfigService.saveOrUpdate(platformType, "{}", false);
+                disablePlatform(platformType, true);
+                if ("encryption".equals(platformType)) {
+                    encryptionService.forceRefreshKeys();
+                }
                 auditSafe("INTEGRATION_CONFIG_DISABLE", platformType, request, true, null);
                 return ApiResponse.success("配置已禁用");
             }
@@ -201,6 +174,22 @@ public class IntegrationConfigController {
 
                     json = objectMapper.writeValueAsString(req.getAlipay());
                     break;
+                case "yunzhanghu":
+                    if (req.getYunzhanghu() == null) {
+                        return ApiResponse.error("启用云账户时配置不能为空");
+                    }
+                    if (!StringUtils.hasText(req.getYunzhanghu().getDealerId()) ||
+                            !StringUtils.hasText(req.getYunzhanghu().getBrokerId()) ||
+                            !StringUtils.hasText(req.getYunzhanghu().getAppKey()) ||
+                            !StringUtils.hasText(req.getYunzhanghu().getDes3Key()) ||
+                            !StringUtils.hasText(req.getYunzhanghu().getRsaPrivateKey()) ||
+                            !StringUtils.hasText(req.getYunzhanghu().getRsaPublicKey()) ||
+                            !StringUtils.hasText(req.getYunzhanghu().getUrl()) ||
+                            !StringUtils.hasText(req.getYunzhanghu().getSignType())) {
+                        return ApiResponse.error("云账户配置缺少必填字段：dealerId, brokerId, appKey, 3desKey, rsaPrivateKey, rsaPublicKey, url, signType");
+                    }
+                    json = objectMapper.writeValueAsString(req.getYunzhanghu());
+                    break;
                 case "sms":
                     if (req.getSms() == null) {
                         return ApiResponse.error("启用短信时配置不能为空");
@@ -256,13 +245,9 @@ public class IntegrationConfigController {
     @DeleteMapping("/{platformType}")
     public ApiResponse<String> deleteConfig(@PathVariable String platformType, jakarta.servlet.http.HttpServletRequest request) {
         try {
-            IntegrationConfig cfg = integrationConfigService.getRawConfig(platformType);
-            if (cfg == null) {
+            if (!disablePlatform(platformType, false)) {
                 return ApiResponse.error("配置不存在");
             }
-
-            // 禁用配置而不是真正删除
-            integrationConfigService.saveOrUpdate(platformType, cfg.getConfigJson(), false);
 
             auditSafe("INTEGRATION_CONFIG_DELETE", platformType, request, true, null);
             return ApiResponse.success("配置已禁用");
@@ -299,6 +284,7 @@ public class IntegrationConfigController {
         private DingTalkConfigDto dingtalk;
         private FeishuConfigDto feishu;
         private AlipayConfigDto alipay;
+        private YunzhanghuConfigDto yunzhanghu;
         private SmsConfigDto sms;
         private EmailConfigDto email;
         private EncryptionConfigDto encryption;
@@ -310,6 +296,84 @@ public class IntegrationConfigController {
                     "INTEGRATION", platform, req.getUserPrincipal() != null ? req.getUserPrincipal().getName() : null,
                     "platform=" + platform, success ? "OK" : "FAILED", err, 0L);
         } catch (Exception ignore) {}
+    }
+
+    private boolean disablePlatform(String platformType, boolean createIfMissing) {
+        IntegrationConfig cfg = integrationConfigService.getRawConfig(platformType);
+        if (cfg == null) {
+            if (!createIfMissing) {
+                return false;
+            }
+            integrationConfigService.saveOrUpdate(platformType, "{}", false);
+            return true;
+        }
+        cfg.setEnabled(false);
+        integrationConfigService.updateById(cfg);
+        return true;
+    }
+
+    private Object buildMaskedConfig(String platformType, IntegrationConfig cfg) throws Exception {
+        switch (platformType) {
+            case "wechat":
+                return mask(parseConfig(cfg, WechatConfigDto.class));
+            case "dingtalk":
+                return mask(parseConfig(cfg, DingTalkConfigDto.class));
+            case "feishu":
+                return mask(parseConfig(cfg, FeishuConfigDto.class));
+            case "alipay":
+                return mask(parseConfig(cfg, AlipayConfigDto.class));
+            case "yunzhanghu":
+                return mask(parseConfig(cfg, YunzhanghuConfigDto.class));
+            case "sms":
+                return mask(parseConfig(cfg, SmsConfigDto.class));
+            case "email":
+                return mask(parseConfig(cfg, EmailConfigDto.class));
+            case "encryption":
+                return mask(parseConfig(cfg, EncryptionConfigDto.class));
+            default:
+                throw new IllegalArgumentException("不支持的平台类型: " + platformType);
+        }
+    }
+
+    private <T> T parseConfig(IntegrationConfig cfg, Class<T> clazz) {
+        if (cfg == null || !StringUtils.hasText(cfg.getConfigJson())) {
+            return null;
+        }
+        String raw = cfg.getConfigJson().trim();
+        try {
+            String plain = configDecryptionService.decrypt(raw);
+            if (looksLikeJson(plain)) {
+                return objectMapper.readValue(plain, clazz);
+            }
+            // 兼容历史异常数据：曾出现过重复加密场景，这里做一次兜底解密
+            String twicePlain = configDecryptionService.decrypt(plain);
+            if (looksLikeJson(twicePlain)) {
+                log.warn("检测到{}存在历史重复加密，已按兼容逻辑解析", cfg.getPlatformType());
+                return objectMapper.readValue(twicePlain, clazz);
+            }
+            log.warn("解析{}配置失败(解密后非JSON)", cfg.getPlatformType());
+            return null;
+        } catch (Exception decryptEx) {
+            if (looksLikeJson(raw)) {
+                try {
+                    return objectMapper.readValue(raw, clazz);
+                } catch (Exception parseEx) {
+                    log.warn("解析{}配置失败(明文JSON解析异常): {}", cfg.getPlatformType(), parseEx.getMessage());
+                    return null;
+                }
+            }
+            log.warn("解析{}配置失败(解密/明文均失败): {}", cfg.getPlatformType(), decryptEx.getMessage());
+            return null;
+        }
+    }
+
+    private boolean looksLikeJson(String value) {
+        if (!StringUtils.hasText(value)) {
+            return false;
+        }
+        String trimmed = value.trim();
+        return (trimmed.startsWith("{") && trimmed.endsWith("}"))
+                || (trimmed.startsWith("[") && trimmed.endsWith("]"));
     }
 
     // 脱敏返回，避免在前端泄露敏感数据
@@ -381,6 +445,25 @@ public class IntegrationConfigController {
         return "***" + s.substring(len - 4);
     }
 
+    private YunzhanghuConfigDto mask(YunzhanghuConfigDto dto) {
+        if (dto == null) return null;
+        YunzhanghuConfigDto c = new YunzhanghuConfigDto();
+        c.setDealerId(maskKeepTail(dto.getDealerId()));
+        c.setBrokerId(maskKeepTail(dto.getBrokerId()));
+        c.setAppKey(maskKeepTail(dto.getAppKey()));
+        c.setDes3Key(maskAll(dto.getDes3Key()));
+        c.setRsaPrivateKey(maskAll(dto.getRsaPrivateKey()));
+        c.setRsaPublicKey(maskAll(dto.getRsaPublicKey()));
+        c.setSignType(dto.getSignType());
+        c.setUrl(dto.getUrl());
+        c.setNotifyUrl(dto.getNotifyUrl());
+        c.setProjectId(dto.getProjectId());
+        c.setCheckName(dto.getCheckName());
+        c.setDealerPlatformName(dto.getDealerPlatformName());
+        c.setIsDebug(dto.getIsDebug());
+        return c;
+    }
+
     // 新增的脱敏方法
     private SmsConfigDto mask(SmsConfigDto dto) {
         if (dto == null) return null;
@@ -441,6 +524,7 @@ public class IntegrationConfigController {
             case "dingtalk": return "钉钉";
             case "feishu": return "飞书";
             case "alipay": return "支付宝";
+            case "yunzhanghu": return "云账户";
             case "sms": return "短信服务";
             case "email": return "邮件服务";
             case "encryption": return "加密配置";
@@ -459,6 +543,9 @@ public class IntegrationConfigController {
                     break;
                 case "alipay":
                     connected = alipayService.checkAlipayConnection();
+                    break;
+                case "yunzhanghu":
+                    connected = yunzhanghuClient.healthCheck();
                     break;
                 case "sms":
                     // SMS通常不需要连接测试，检查配置是否完整即可

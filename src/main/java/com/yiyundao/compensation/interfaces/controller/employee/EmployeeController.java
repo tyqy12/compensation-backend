@@ -9,7 +9,10 @@ import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
+import com.yiyundao.compensation.interfaces.vo.employee.EmployeeApprovalRecordVO;
+import com.yiyundao.compensation.interfaces.vo.employee.EmployeePayslipRecordVO;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeListItemVO;
+import com.yiyundao.compensation.interfaces.vo.payment.PaymentRecordItemVO;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
 import io.swagger.v3.oas.annotations.Operation;
@@ -52,6 +55,36 @@ public class EmployeeController {
     @Operation(summary = "获取员工详情", description = "根据ID获取员工详细信息")
     public ApiResponse<EmployeeVO> detail(@PathVariable Long id) {
         return ApiResponse.success(employeeService.getEmployeeVO(id));
+    }
+
+    @GetMapping("/{id}/approvals")
+    @Operation(summary = "员工审批记录", description = "按员工维度分页查询审批记录")
+    public ApiResponse<PageResponse<EmployeeApprovalRecordVO>> approvals(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        return ApiResponse.success(employeeService.pageEmployeeApprovals(id, page, size));
+    }
+
+    @GetMapping("/{id}/payslips")
+    @Operation(summary = "员工发薪记录", description = "按员工维度分页查询工资条记录")
+    public ApiResponse<PageResponse<EmployeePayslipRecordVO>> payslips(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        return ApiResponse.success(employeeService.pageEmployeePayslips(id, page, size));
+    }
+
+    @GetMapping("/{id}/payments")
+    @Operation(summary = "员工支付记录", description = "按员工维度分页查询支付明细")
+    public ApiResponse<PageResponse<PaymentRecordItemVO>> payments(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int size
+    ) {
+        return ApiResponse.success(employeeService.pageEmployeePayments(id, page, size));
     }
 
     @GetMapping
@@ -128,6 +161,19 @@ public class EmployeeController {
         return ApiResponse.success(value);
     }
 
+    @SecurityAnnotations.IsAdmin
+    @GetMapping("/{id}/settlement-account")
+    @Operation(summary = "解密收款账户", description = "管理员权限解密员工收款账户(完整审计)")
+    public ApiResponse<String> decryptedSettlementAccount(@PathVariable Long id, HttpServletRequest request) {
+        long start = System.currentTimeMillis();
+        String value = employeeService.getDecryptedSettlementAccount(id);
+        auditLogService.record("DECRYPT_SETTLEMENT_ACCOUNT", request.getMethod(), request.getRequestURI(),
+                request.getRemoteAddr(), request.getHeader("User-Agent"), "EMPLOYEE",
+                String.valueOf(id), request.getUserPrincipal() != null ? request.getUserPrincipal().getName() : null,
+                null, value != null ? "OK" : "NOT_FOUND", null, System.currentTimeMillis() - start);
+        return ApiResponse.success(value);
+    }
+
     @PostMapping("/batch-import")
     @SecurityAnnotations.IsHrOrAdmin
     @Operation(summary = "批量导入员工", description = "批量导入员工信息，跳过重复工号")
@@ -152,8 +198,12 @@ public class EmployeeController {
         e.setManagerId(req.getManagerId());
         e.setHireDate(req.getHireDate());
         e.setStatus(req.getStatus());
+        e.setSettlementAccountType(req.getSettlementAccountType());
+        e.setSettlementAccount(req.getSettlementAccount());
+        e.setSettlementAccountName(req.getSettlementAccountName());
         e.setBankAccount(req.getBankAccount());
         e.setBankName(req.getBankName());
+        e.setBankBranchName(req.getBankBranchName());
         e.setOffline(req.getOffline());
         return e;
     }
@@ -166,9 +216,17 @@ public class EmployeeController {
         e.setEncryptedIdCard(req.getIdCard());
         e.setDepartment(req.getDepartment());
         e.setPosition(req.getPosition());
+        e.setEmploymentType(req.getEmploymentType());
+        e.setManagerId(req.getManagerId());
         e.setHireDate(req.getHireDate());
+        e.setStatus(req.getStatus());
+        e.setSettlementAccountType(req.getSettlementAccountType());
+        e.setSettlementAccount(req.getSettlementAccount());
+        e.setSettlementAccountName(req.getSettlementAccountName());
         e.setBankAccount(req.getBankAccount());
         e.setBankName(req.getBankName());
+        e.setBankBranchName(req.getBankBranchName());
+        e.setOffline(req.getOffline());
         return e;
     }
 }

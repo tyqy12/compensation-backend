@@ -3,6 +3,7 @@ package com.yiyundao.compensation.interfaces.controller.payroll;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.common.response.PageResponse;
+import com.yiyundao.compensation.enums.PayrollConfirmationMode;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.enums.PayrollType;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollBatchCreateRequest;
@@ -155,6 +156,10 @@ public class PayrollBatchController {
         b.setType(req.getType() != null ? req.getType() : PayrollType.FULL_TIME.getCode());
         b.setScopeJson(req.getScopeJson());
         b.setCurrency(req.getCurrency() != null ? req.getCurrency() : "CNY");
+        b.setConfirmationRequired(req.getConfirmationRequired() == null ? Boolean.TRUE : req.getConfirmationRequired());
+        b.setConfirmationMode(req.getConfirmationMode() != null
+                ? PayrollConfirmationMode.fromCode(req.getConfirmationMode()).getCode()
+                : PayrollConfirmationMode.INDIVIDUAL.getCode());
         b.setStatus(PayrollBatchStatus.DRAFT);
         b.setRemark(req.getRemark());
         return b;
@@ -165,6 +170,10 @@ public class PayrollBatchController {
         if (req.getPeriodLabel() != null) b.setPeriodLabel(req.getPeriodLabel());
         if (req.getScopeJson() != null) b.setScopeJson(req.getScopeJson());
         if (req.getCurrency() != null) b.setCurrency(req.getCurrency());
+        if (req.getConfirmationRequired() != null) b.setConfirmationRequired(req.getConfirmationRequired());
+        if (req.getConfirmationMode() != null) {
+            b.setConfirmationMode(PayrollConfirmationMode.fromCode(req.getConfirmationMode()).getCode());
+        }
         if (req.getRemark() != null) b.setRemark(req.getRemark());
     }
 }

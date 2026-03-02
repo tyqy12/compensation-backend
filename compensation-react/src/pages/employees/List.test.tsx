@@ -12,12 +12,16 @@ const mockUseEmployeesQuery = vi.fn();
 const mockUseCreateEmployeeMutation = vi.fn();
 const mockUseUpdateEmployeeStatusMutation = vi.fn();
 const mockUseBindPlatformMutation = vi.fn();
+const mockUseBatchImportEmployeesMutation = vi.fn();
+const mockFetchEmployees = vi.fn();
 
 vi.mock('@services/queries/employee', () => ({
   useEmployeesQuery: () => mockUseEmployeesQuery(),
   useCreateEmployeeMutation: () => mockUseCreateEmployeeMutation(),
   useUpdateEmployeeStatusMutation: () => mockUseUpdateEmployeeStatusMutation(),
   useBindPlatformMutation: () => mockUseBindPlatformMutation(),
+  useBatchImportEmployeesMutation: () => mockUseBatchImportEmployeesMutation(),
+  fetchEmployees: (...args: any[]) => mockFetchEmployees(...args),
 }));
 
 const TestWrapper = ({ children }: { children: React.ReactNode }) => {
@@ -53,6 +57,8 @@ beforeEach(() => {
   mockUseCreateEmployeeMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
   mockUseUpdateEmployeeStatusMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
   mockUseBindPlatformMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+  mockUseBatchImportEmployeesMutation.mockReturnValue({ mutateAsync: vi.fn(), isPending: false });
+  mockFetchEmployees.mockResolvedValue({ records: [], total: 0 });
 });
 
 describe('EmployeesList - Create Employee', () => {
@@ -102,4 +108,3 @@ describe('EmployeesList - Create Employee', () => {
     });
   });
 });
-

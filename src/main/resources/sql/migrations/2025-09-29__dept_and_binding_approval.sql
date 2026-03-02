@@ -66,19 +66,55 @@ CREATE TABLE IF NOT EXISTS `notification_record` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='通知发送记录表';
 
 -- 3) sys_config 兼容列（与实体 SysConfig 对齐）
-ALTER TABLE `sys_config`
-  ADD COLUMN IF NOT EXISTS `remark` varchar(500) DEFAULT NULL COMMENT '配置备注' AFTER `config_value`;
+SET @db := DATABASE();
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=@db AND TABLE_NAME='sys_config' AND COLUMN_NAME='remark'
+);
+SET @sql := IF(@exists=0,
+  'ALTER TABLE `sys_config` ADD COLUMN `remark` varchar(500) DEFAULT NULL COMMENT ''配置备注'' AFTER `config_value`',
+  'SELECT 1 AS noop');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 -- 4) audit_log 增量栏位（与 BaseEntity 对齐）
-ALTER TABLE `audit_log`
-  ADD COLUMN IF NOT EXISTS `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间' AFTER `create_time`,
-  ADD COLUMN IF NOT EXISTS `update_by` VARCHAR(50) DEFAULT NULL COMMENT '更新人' AFTER `create_by`,
-  ADD COLUMN IF NOT EXISTS `deleted` TINYINT(1) DEFAULT '0' COMMENT '逻辑删除(0:未删除,1:已删除)' AFTER `update_by`,
-  ADD COLUMN IF NOT EXISTS `version` INT DEFAULT '0' COMMENT '乐观锁版本号' AFTER `deleted`;
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=@db AND TABLE_NAME='audit_log' AND COLUMN_NAME='update_time'
+);
+SET @sql := IF(@exists=0,
+  'ALTER TABLE `audit_log` ADD COLUMN `update_time` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT ''更新时间'' AFTER `create_time`',
+  'SELECT 1 AS noop');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=@db AND TABLE_NAME='audit_log' AND COLUMN_NAME='update_by'
+);
+SET @sql := IF(@exists=0,
+  'ALTER TABLE `audit_log` ADD COLUMN `update_by` VARCHAR(50) DEFAULT NULL COMMENT ''更新人'' AFTER `create_by`',
+  'SELECT 1 AS noop');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=@db AND TABLE_NAME='audit_log' AND COLUMN_NAME='deleted'
+);
+SET @sql := IF(@exists=0,
+  'ALTER TABLE `audit_log` ADD COLUMN `deleted` TINYINT(1) DEFAULT ''0'' COMMENT ''逻辑删除(0:未删除,1:已删除)'' AFTER `update_by`',
+  'SELECT 1 AS noop');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @exists := (
+  SELECT COUNT(*) FROM information_schema.COLUMNS
+  WHERE TABLE_SCHEMA=@db AND TABLE_NAME='audit_log' AND COLUMN_NAME='version'
+);
+SET @sql := IF(@exists=0,
+  'ALTER TABLE `audit_log` ADD COLUMN `version` INT DEFAULT ''0'' COMMENT ''乐观锁版本号'' AFTER `deleted`',
+  'SELECT 1 AS noop');
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- 可选：为 sys_user.employee_id 增加外键（若业务允许强约束）
 -- ALTER TABLE `sys_user`
 --   ADD CONSTRAINT `fk_sys_user_employee` FOREIGN KEY (`employee_id`) REFERENCES `employee`(`id`);
-

@@ -22,6 +22,60 @@ export interface PayrollManagerReviewFilters {
   keyword?: string;
 }
 
+export interface PayrollConfirmationSummaryDto {
+  batchId: number;
+  batchStatus?: string;
+  confirmationMode?: string;
+  totalLines?: number;
+  pendingCount?: number;
+  confirmedCount?: number;
+  objectedCount?: number;
+  objectedApprovedCount?: number;
+  objectedRejectedCount?: number;
+}
+
+export interface PayrollPendingConfirmationDto {
+  lineId: number;
+  batchId?: number;
+  periodLabel?: string;
+  employeeId?: number;
+  employeeNo?: string;
+  employeeName?: string;
+  department?: string;
+  netAmount?: number;
+  currency?: string;
+  confirmationStatus?: string;
+}
+
+export interface PayrollPendingConfirmationQueryParams extends PageParams {
+  current?: number;
+  pageSize?: number;
+  batchId?: number;
+}
+
+export interface PayslipConfirmPayload {
+  signature: string;
+  comment?: string;
+}
+
+export interface PayslipObjectionPayload {
+  reason: string;
+  comment?: string;
+}
+
+export interface PayrollBatchConfirmPayload {
+  lineIds?: number[];
+  signature?: string;
+  comment?: string;
+}
+
+export interface PayrollAssignPayload {
+  assigneeEmployeeId: number;
+  lineIds?: number[];
+  employeeIds?: number[];
+  applyAll?: boolean;
+}
+
 export interface PartTimeBatchQueryParams {
   current?: number;
   size?: number;
@@ -459,6 +513,107 @@ export function usePayrollCyclesQuery(params: PayrollCycleListParams, options?: 
     queryKey: qk.payrollCycles(params),
     queryFn: () => fetchPayrollCycles(params),
     enabled: options?.enabled ?? true,
+  });
+}
+
+export async function fetchPayrollConfirmationSummary(batchId: string | number) {
+  const { data } = await api.get(`/payroll/confirmations/batches/${batchId}/summary`);
+  return unwrap<PayrollConfirmationSummaryDto>(data);
+}
+
+export function usePayrollConfirmationSummaryQuery(
+  batchId: string | number,
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: qk.payrollConfirmationSummary(batchId),
+    queryFn: () => fetchPayrollConfirmationSummary(batchId),
+    enabled: !!batchId && (options?.enabled ?? true),
+  });
+}
+
+export async function fetchPayrollPendingConfirmations(params: PayrollPendingConfirmationQueryParams) {
+  const query = cleanParams({
+    page: params.current ?? params.page ?? 1,
+    size: params.pageSize ?? params.size ?? 10,
+    batchId: params.batchId,
+  });
+  const { data } = await api.get('/payroll/confirmations/pending', { params: query });
+  const raw = unwrap<PagedResponse<PayrollPendingConfirmationDto>>(data);
+  return {
+    ...raw,
+    records: raw.records ?? raw.list ?? [],
+  } as PagedResponse<PayrollPendingConfirmationDto>;
+}
+
+export function usePayrollPendingConfirmationsQuery(
+  params: PayrollPendingConfirmationQueryParams,
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: qk.payrollPendingConfirmations(params),
+    queryFn: () => fetchPayrollPendingConfirmations(params),
+    enabled: options?.enabled ?? true,
+  });
+}
+
+export async function confirmPayrollPayslip(lineId: number, payload: PayslipConfirmPayload) {
+  const { data } = await api.post(`/payroll/confirmations/payslips/${lineId}/confirm`, payload);
+  return unwrap<boolean>(data);
+}
+
+export function useConfirmPayrollPayslipMutation() {
+  return useMutation({
+    mutationFn: ({ lineId, payload }: { lineId: number; payload: PayslipConfirmPayload }) =>
+      confirmPayrollPayslip(lineId, payload),
+  });
+}
+
+export async function objectPayrollPayslip(lineId: number, payload: PayslipObjectionPayload) {
+  const { data } = await api.post(`/payroll/confirmations/payslips/${lineId}/object`, payload);
+  const result = unwrap<Record<string, unknown>>(data);
+  return {
+    workflowId: Number(result?.workflowId ?? 0),
+  };
+}
+
+export function useObjectPayrollPayslipMutation() {
+  return useMutation({
+    mutationFn: ({ lineId, payload }: { lineId: number; payload: PayslipObjectionPayload }) =>
+      objectPayrollPayslip(lineId, payload),
+  });
+}
+
+export async function batchConfirmPayroll(
+  batchId: number,
+  payload?: PayrollBatchConfirmPayload,
+) {
+  const { data } = await api.post(`/payroll/confirmations/batches/${batchId}/batch-confirm`, payload ?? {});
+  const result = unwrap<Record<string, unknown>>(data);
+  return {
+    affected: Number(result?.affected ?? 0),
+  };
+}
+
+export function useBatchConfirmPayrollMutation() {
+  return useMutation({
+    mutationFn: ({ batchId, payload }: { batchId: number; payload?: PayrollBatchConfirmPayload }) =>
+      batchConfirmPayroll(batchId, payload),
+  });
+}
+
+export async function assignPayrollConfirmation(batchId: number, payload: PayrollAssignPayload) {
+  const { data } = await api.post(`/payroll/confirmations/batches/${batchId}/assign`, payload);
+  const result = unwrap<Record<string, unknown>>(data);
+  return {
+    affected: Number(result?.affected ?? 0),
+  };
+}
+
+export function useAssignPayrollConfirmationMutation() {
+  return useMutation({
+    mutationFn: ({ batchId, payload }: { batchId: number; payload: PayrollAssignPayload }) =>
+      assignPayrollConfirmation(batchId, payload),
   });
 }
 

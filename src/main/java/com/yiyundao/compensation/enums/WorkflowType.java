@@ -7,7 +7,8 @@ public enum WorkflowType {
     BATCH("BATCH", "批量支付"),
     ADHOC("ADHOC", "临时支付"),
     OFFLINE("OFFLINE", "离线员工"),
-    PERMISSION("PERMISSION", "权限授权");
+    PERMISSION("PERMISSION", "权限授权"),
+    PAYROLL_DISPUTE("PAYROLL_DISPUTE", "薪酬异议审批");
 
     private final String code;
     private final String name;

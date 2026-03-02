@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
  */
 @Data
 public class IntegrationConfigListDto {
-    private String platformType; // 平台类型: wechat, dingtalk, feishu, alipay, sms, email, encryption
+    private String platformType; // 平台类型: wechat, dingtalk, feishu, alipay, yunzhanghu, sms, email, encryption
     private String platformName; // 平台显示名称
     private Boolean enabled; // 是否启用
     private Boolean configured; // 是否已配置

@@ -2,7 +2,6 @@ package com.yiyundao.compensation.interfaces.vo.employee;
 
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.enums.EmployeeStatus;
-import com.yiyundao.compensation.enums.PlatformType;
 import lombok.Data;
 
 import java.time.LocalDate;
@@ -51,10 +50,11 @@ public class EmployeeListItemVO {
 
     private static String translatePlatform(String code) {
         if (code == null) return null;
-        try {
-            return PlatformType.fromCode(code).getName();
-        } catch (Exception ignored) {
-            return code;
-        }
+        return switch (code) {
+            case "wechat" -> "企业微信";
+            case "dingtalk" -> "钉钉";
+            case "feishu" -> "飞书";
+            default -> code;
+        };
     }
 }

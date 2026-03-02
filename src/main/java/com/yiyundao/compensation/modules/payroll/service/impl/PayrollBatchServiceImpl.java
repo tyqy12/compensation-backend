@@ -2,17 +2,21 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.yiyundao.compensation.enums.PayrollConfirmationStatus;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.modules.approval.service.ApprovalEngine;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentService;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.enums.WorkflowType;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
+import com.yiyundao.compensation.security.SecurityConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +30,7 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
 
     private final ApprovalEngine approvalEngine;
     private final SysUserService sysUserService;
+    private final PayrollLineService payrollLineService;
     private final PayrollPaymentService payrollPaymentService;
     private final UserRoleService userRoleService;
     private final AuditLogService auditLogService;
@@ -48,8 +53,12 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
         log.info("Submit payroll batch for approval: {}", batchId);
         PayrollBatch b = getById(batchId);
         if (b == null) return false;
-        PayrollBatchStatus st = b.getStatus();
-        if (st != PayrollBatchStatus.DRAFT && st != PayrollBatchStatus.LOCKED) return false;
+        if (!isReadyForApproval(b)) return false;
+        if (hasPendingOrRejectedConfirmations(batchId, b)) {
+            log.warn("批次存在未完成确认或异议未决，禁止提交审批: batchId={}", batchId);
+            return false;
+        }
+
         SysUser currentUser = resolveCurrentUser();
         Long initiatorId = currentUser != null ? currentUser.getId() : 1L;
 
@@ -132,7 +141,38 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
             return false;
         }
         // 使用 UserRoleService 检查角色（带缓存）
-        return userRoleService.hasRole(user.getId(), "ROLE_ADMIN");
+        return userRoleService.hasRole(user.getId(), SecurityConstants.ROLE_ADMIN);
+    }
+
+    private boolean isReadyForApproval(PayrollBatch batch) {
+        if (batch == null || batch.getStatus() == null) {
+            return false;
+        }
+        PayrollBatchStatus status = batch.getStatus();
+        if (status == PayrollBatchStatus.CONFIRMED) {
+            return true;
+        }
+        // 兼容历史数据：未启用确认机制时仍允许从 LOCKED 进入审批
+        return status == PayrollBatchStatus.LOCKED && Boolean.FALSE.equals(batch.getConfirmationRequired());
+    }
+
+    private boolean hasPendingOrRejectedConfirmations(Long batchId, PayrollBatch batch) {
+        if (batch == null || Boolean.FALSE.equals(batch.getConfirmationRequired())) {
+            return false;
+        }
+        long total = payrollLineService.count(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PayrollLine>()
+                .eq(PayrollLine::getBatchId, batchId));
+        if (total <= 0) {
+            return true;
+        }
+        long unresolved = payrollLineService.count(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PayrollLine>()
+                .eq(PayrollLine::getBatchId, batchId)
+                .and(w -> w
+                        .isNull(PayrollLine::getConfirmationStatus)
+                        .or().eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.PENDING.getCode())
+                        .or().eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.OBJECTED.getCode())
+                        .or().eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.OBJECTED_REJECTED.getCode())));
+        return unresolved > 0;
     }
 
     /**

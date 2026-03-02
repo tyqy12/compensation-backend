@@ -158,6 +158,20 @@ export function useDisableIntegrationMutation() {
   });
 }
 
+// 启用配置
+export function useEnableIntegrationMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (platformType: Platform) => {
+      const { data } = await api.post(`/admin/integration-configs/${platformType}/enable`);
+      return unwrap<string>(data);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: qk.integrationList });
+    },
+  });
+}
+
 // 测试连接
 export function useTestIntegrationMutation() {
   return useMutation({

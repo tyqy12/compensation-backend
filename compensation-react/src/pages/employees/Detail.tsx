@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { Button, Space, Tag, Typography, Descriptions, Modal, Form, Input, InputNumber, Select, DatePicker, Row, Col, Alert, App as AntdApp } from 'antd';
+import { Button, Space, Tag, Typography, Descriptions, Modal, Form, Input, InputNumber, Select, DatePicker, Row, Col, Alert, App as AntdApp, Table } from 'antd';
 import { PageContainer, ProCard } from '@ant-design/pro-components';
 import {
   EditOutlined,
@@ -21,11 +21,18 @@ import {
   useToggleEmployeeOfflineMutation,
   useAssignEmployeeManagerMutation,
   useEmployeeIdCardQuery,
-  useEmployeeBankAccountQuery,
+  useEmployeeSettlementAccountQuery,
+  useEmployeeApprovalsQuery,
+  useEmployeePayslipsQuery,
+  useEmployeePaymentsQuery,
   type Employee,
+  type EmployeeApprovalRecord,
+  type EmployeePayslipRecord,
   type EmployeeFormData,
   type PlatformBindData,
 } from '@services/queries/employee';
+import type { PaymentRecordItemVO } from '@types/openapi';
+import { getPagedRecords } from '@types/api';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -39,9 +46,12 @@ const EmployeeDetail: React.FC = () => {
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [bindModalVisible, setBindModalVisible] = useState(false);
   const [managerModalVisible, setManagerModalVisible] = useState(false);
+  const [approvalsPage, setApprovalsPage] = useState({ current: 1, pageSize: 10 });
+  const [payslipsPage, setPayslipsPage] = useState({ current: 1, pageSize: 10 });
+  const [paymentsPage, setPaymentsPage] = useState({ current: 1, pageSize: 10 });
   const [sensitiveDataVisible, setSensitiveDataVisible] = useState({
     idCard: false,
-    bankAccount: false,
+    settlementAccount: false,
   });
 
   const [editForm] = Form.useForm();
@@ -59,9 +69,27 @@ const EmployeeDetail: React.FC = () => {
     { enabled: sensitiveDataVisible.idCard && !!id }
   );
 
-  const bankAccountQuery = useEmployeeBankAccountQuery(
+  const settlementAccountQuery = useEmployeeSettlementAccountQuery(
     parseInt(id!),
-    { enabled: sensitiveDataVisible.bankAccount && !!id }
+    { enabled: sensitiveDataVisible.settlementAccount && !!id }
+  );
+
+  const approvalsQuery = useEmployeeApprovalsQuery(
+    parseInt(id!),
+    approvalsPage,
+    { enabled: !!id }
+  );
+
+  const payslipsQuery = useEmployeePayslipsQuery(
+    parseInt(id!),
+    payslipsPage,
+    { enabled: !!id }
+  );
+
+  const paymentsQuery = useEmployeePaymentsQuery(
+    parseInt(id!),
+    paymentsPage,
+    { enabled: !!id }
   );
 
   // 操作mutations
@@ -169,12 +197,12 @@ const EmployeeDetail: React.FC = () => {
   };
 
   // 查看敏感信息
-  const handleViewSensitiveData = (type: 'idCard' | 'bankAccount') => {
+  const handleViewSensitiveData = (type: 'idCard' | 'settlementAccount') => {
     modal.confirm({
       title: '查看敏感信息',
       content: (
         <div>
-          <p>您即将查看员工的{type === 'idCard' ? '身份证号' : '银行账号'}信息。</p>
+          <p>您即将查看员工的{type === 'idCard' ? '身份证号' : '收款账户'}信息。</p>
           <Alert
             message="此操作将被记录并审计"
             type="warning"
@@ -194,7 +222,7 @@ const EmployeeDetail: React.FC = () => {
   };
 
   // 隐藏敏感信息
-  const handleHideSensitiveData = (type: 'idCard' | 'bankAccount') => {
+  const handleHideSensitiveData = (type: 'idCard' | 'settlementAccount') => {
     setSensitiveDataVisible(prev => ({
       ...prev,
       [type]: false,
@@ -222,6 +250,239 @@ const EmployeeDetail: React.FC = () => {
     };
     return platformType ? platformMap[platformType] : '未绑定';
   };
+
+  const getSettlementAccountTypeName = (type?: Employee['settlementAccountType']) => {
+    if (!type) {
+      return '-';
+    }
+    const typeMap: Record<string, string> = {
+      bank_card: '银行卡',
+      alipay: '支付宝',
+      wechat: '微信',
+      other: '其他',
+    };
+    return typeMap[type] || type;
+  };
+
+  const approvalStatusColor = (status?: string) => {
+    switch ((status || '').toLowerCase()) {
+      case 'approved':
+        return 'success';
+      case 'rejected':
+      case 'cancelled':
+        return 'error';
+      case 'pending':
+      default:
+        return 'processing';
+    }
+  };
+
+  const payslipStatusColor = (status?: string) => {
+    switch ((status || '').toLowerCase()) {
+      case 'paid':
+      case 'success':
+        return 'success';
+      case 'failed':
+      case 'error':
+        return 'error';
+      case 'processing':
+        return 'processing';
+      default:
+        return 'default';
+    }
+  };
+
+  const paymentStatusColor = (status?: string) => {
+    switch ((status || '').toLowerCase()) {
+      case 'success':
+      case 'paid':
+        return 'success';
+      case 'failed':
+      case 'error':
+        return 'error';
+      case 'processing':
+      case 'pending':
+        return 'processing';
+      default:
+        return 'default';
+    }
+  };
+
+  const confirmationStatusColor = (status?: string) => {
+    switch ((status || '').toLowerCase()) {
+      case 'confirmed':
+      case 'objected_approved':
+        return 'success';
+      case 'objected':
+        return 'processing';
+      case 'objected_rejected':
+        return 'warning';
+      case 'pending':
+      default:
+        return 'default';
+    }
+  };
+
+  const confirmationStatusText = (status?: string) => {
+    const key = (status || '').toLowerCase();
+    const mapping: Record<string, string> = {
+      pending: '待确认',
+      confirmed: '已确认',
+      objected: '异议处理中',
+      objected_approved: '异议通过',
+      objected_rejected: '异议驳回',
+    };
+    return mapping[key] || status || '-';
+  };
+
+  const approvalColumns = [
+    {
+      title: '流程名称',
+      dataIndex: 'workflowName',
+      width: 180,
+      render: (value: string) => value || '-',
+    },
+    {
+      title: '类型',
+      dataIndex: 'workflowTypeName',
+      width: 120,
+      render: (_: string, record: EmployeeApprovalRecord) => record.workflowTypeName || record.workflowType || '-',
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 110,
+      render: (_: string, record: EmployeeApprovalRecord) => (
+        <Tag color={approvalStatusColor(record.status)}>{record.statusName || record.status || '-'}</Tag>
+      ),
+    },
+    {
+      title: '发起人',
+      dataIndex: 'initiatorName',
+      width: 120,
+      render: (_: string, record: EmployeeApprovalRecord) => record.initiatorName || record.initiatorId || '-',
+    },
+    {
+      title: '当前审批人',
+      dataIndex: 'currentApproverName',
+      width: 140,
+      render: (_: string, record: EmployeeApprovalRecord) =>
+        record.currentApproverName || record.currentApproverId || '-',
+    },
+    {
+      title: '提交时间',
+      dataIndex: 'submitTime',
+      width: 180,
+      render: (value: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'),
+    },
+  ];
+
+  const payslipColumns = [
+    {
+      title: '期间',
+      dataIndex: 'periodLabel',
+      width: 150,
+      render: (value: string) => value || '-',
+    },
+    {
+      title: '应发',
+      dataIndex: 'grossAmount',
+      width: 120,
+      render: (value: number) => (value != null ? value.toFixed(2) : '-'),
+    },
+    {
+      title: '个税',
+      dataIndex: 'taxAmount',
+      width: 120,
+      render: (value: number) => (value != null ? value.toFixed(2) : '-'),
+    },
+    {
+      title: '社保',
+      dataIndex: 'socialAmount',
+      width: 120,
+      render: (value: number) => (value != null ? value.toFixed(2) : '-'),
+    },
+    {
+      title: '实发',
+      dataIndex: 'netAmount',
+      width: 120,
+      render: (value: number) => (value != null ? value.toFixed(2) : '-'),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (value: string) => <Tag color={payslipStatusColor(value)}>{value || '-'}</Tag>,
+    },
+    {
+      title: '确认状态',
+      dataIndex: 'confirmationStatus',
+      width: 130,
+      render: (value: string) => <Tag color={confirmationStatusColor(value)}>{confirmationStatusText(value)}</Tag>,
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 120,
+      render: (_: unknown, record: EmployeePayslipRecord) =>
+        record.batchId ? (
+          <Button
+            type="link"
+            size="small"
+            onClick={() => navigate(`/payroll/confirmations?batchId=${record.batchId}`)}
+          >
+            去确认
+          </Button>
+        ) : (
+          '-'
+        ),
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'createTime',
+      width: 180,
+      render: (value: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'),
+    },
+  ];
+
+  const paymentColumns = [
+    {
+      title: '批次号',
+      dataIndex: 'batchNo',
+      width: 160,
+      render: (value: string) => value || '-',
+    },
+    {
+      title: '金额',
+      dataIndex: 'amount',
+      width: 120,
+      render: (value: number) => (value != null ? value.toFixed(2) : '-'),
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 100,
+      render: (value: string) => <Tag color={paymentStatusColor(value)}>{value || '-'}</Tag>,
+    },
+    {
+      title: '渠道',
+      dataIndex: 'providerCode',
+      width: 120,
+      render: (value: string) => value || 'alipay',
+    },
+    {
+      title: '渠道单号',
+      dataIndex: 'providerOrderNo',
+      width: 180,
+      render: (value: string) => value || '-',
+    },
+    {
+      title: '支付时间',
+      dataIndex: 'paymentTime',
+      width: 180,
+      render: (value: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'),
+    },
+  ];
 
   if (!id) {
     return (
@@ -262,6 +523,12 @@ const EmployeeDetail: React.FC = () => {
   }
 
   const statusInfo = getStatusInfo(employee.status);
+  const approvalRecords = getPagedRecords(approvalsQuery.data);
+  const payslipRecords = getPagedRecords(payslipsQuery.data);
+  const paymentRecords = getPagedRecords(paymentsQuery.data);
+  const settlementAccountMasked = employee.settlementAccountMasked || employee.bankAccountMasked;
+  const latestPayslip = payslipRecords[0];
+  const latestPayment = paymentRecords[0];
 
   return (
     <PageContainer
@@ -306,7 +573,12 @@ const EmployeeDetail: React.FC = () => {
         <Button
           key="refresh"
           icon={<ReloadOutlined />}
-          onClick={() => employeeQuery.refetch()}
+          onClick={() => {
+            employeeQuery.refetch();
+            approvalsQuery.refetch();
+            payslipsQuery.refetch();
+            paymentsQuery.refetch();
+          }}
           loading={employeeQuery.isLoading}
         >
           刷新
@@ -338,6 +610,14 @@ const EmployeeDetail: React.FC = () => {
 
               <Descriptions.Item label="职位">
                 {employee.position || <Text type="secondary">-</Text>}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="用工类型">
+                {employee.employmentType === 'part_time'
+                  ? '兼职'
+                  : employee.employmentType === 'full_time'
+                    ? '全职'
+                    : <Text type="secondary">-</Text>}
               </Descriptions.Item>
 
               <Descriptions.Item label="入职日期">
@@ -470,29 +750,33 @@ const EmployeeDetail: React.FC = () => {
         <Col xs={24} lg={12}>
           <ProCard title="财务信息" headerBordered>
             <Descriptions column={1} size="middle">
-              <Descriptions.Item label="银行账号">
+              <Descriptions.Item label="收款账户类型">
+                {employee.settlementAccountTypeName || getSettlementAccountTypeName(employee.settlementAccountType)}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="收款账户">
                 <Space>
-                  {sensitiveDataVisible.bankAccount ? (
-                    bankAccountQuery.data ? (
-                      <Text code>{bankAccountQuery.data}</Text>
-                    ) : bankAccountQuery.isLoading ? (
+                  {sensitiveDataVisible.settlementAccount ? (
+                    settlementAccountQuery.data ? (
+                      <Text code>{settlementAccountQuery.data}</Text>
+                    ) : settlementAccountQuery.isLoading ? (
                       <Text>加载中...</Text>
                     ) : (
                       <Text type="secondary">查询失败</Text>
                     )
-                  ) : employee.bankAccountMasked ? (
-                    <Text>{employee.bankAccountMasked}</Text>
+                  ) : settlementAccountMasked ? (
+                    <Text>{settlementAccountMasked}</Text>
                   ) : (
                     <Text type="secondary">未设置</Text>
                   )}
 
-                  {employee.bankAccountMasked && (
-                    sensitiveDataVisible.bankAccount ? (
+                  {settlementAccountMasked && (
+                    sensitiveDataVisible.settlementAccount ? (
                       <Button
                         type="link"
                         size="small"
                         icon={<EyeInvisibleOutlined />}
-                        onClick={() => handleHideSensitiveData('bankAccount')}
+                        onClick={() => handleHideSensitiveData('settlementAccount')}
                       >
                         隐藏
                       </Button>
@@ -501,13 +785,17 @@ const EmployeeDetail: React.FC = () => {
                         type="link"
                         size="small"
                         icon={<EyeOutlined />}
-                        onClick={() => handleViewSensitiveData('bankAccount')}
+                        onClick={() => handleViewSensitiveData('settlementAccount')}
                       >
                         查看完整
                       </Button>
                     )
                   )}
                 </Space>
+              </Descriptions.Item>
+
+              <Descriptions.Item label="收款账户实名">
+                {employee.settlementAccountName || <Text type="secondary">-</Text>}
               </Descriptions.Item>
 
               <Descriptions.Item label="开户银行">
@@ -519,6 +807,46 @@ const EmployeeDetail: React.FC = () => {
                 ) : (
                   <Text type="secondary">-</Text>
                 )}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="开户支行">
+                {employee.bankBranchName || <Text type="secondary">-</Text>}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="最近发薪期间">
+                {latestPayslip?.periodLabel || <Text type="secondary">-</Text>}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="最近确认状态">
+                {latestPayslip?.confirmationStatus ? (
+                  <Tag color={confirmationStatusColor(latestPayslip.confirmationStatus)}>
+                    {confirmationStatusText(latestPayslip.confirmationStatus)}
+                  </Tag>
+                ) : (
+                  <Text type="secondary">-</Text>
+                )}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="最近实发金额">
+                {latestPayslip?.netAmount != null ? (
+                  <Text>{Number(latestPayslip.netAmount).toFixed(2)}</Text>
+                ) : (
+                  <Text type="secondary">-</Text>
+                )}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="最近支付状态">
+                {latestPayment?.status ? (
+                  <Tag color={paymentStatusColor(latestPayment.status)}>{latestPayment.status}</Tag>
+                ) : (
+                  <Text type="secondary">-</Text>
+                )}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="最近支付时间">
+                {latestPayment?.paymentTime
+                  ? dayjs(latestPayment.paymentTime).format('YYYY-MM-DD HH:mm:ss')
+                  : <Text type="secondary">-</Text>}
               </Descriptions.Item>
             </Descriptions>
           </ProCard>
@@ -540,6 +868,72 @@ const EmployeeDetail: React.FC = () => {
                 <Text code>{employee.id}</Text>
               </Descriptions.Item>
             </Descriptions>
+          </ProCard>
+        </Col>
+
+        <Col xs={24}>
+          <ProCard title="审批记录" headerBordered>
+            <Table<EmployeeApprovalRecord>
+              size="small"
+              rowKey={(record) => record.id}
+              columns={approvalColumns}
+              dataSource={approvalRecords}
+              loading={approvalsQuery.isLoading}
+              pagination={{
+                current: approvalsPage.current,
+                pageSize: approvalsPage.pageSize,
+                total: approvalsQuery.data?.total || 0,
+                showSizeChanger: true,
+                showTotal: (total = 0) => `共 ${total} 条`,
+                onChange: (current, pageSize) =>
+                  setApprovalsPage({ current, pageSize: pageSize || approvalsPage.pageSize }),
+              }}
+              scroll={{ x: 980 }}
+            />
+          </ProCard>
+        </Col>
+
+        <Col xs={24}>
+          <ProCard title="发薪记录" headerBordered>
+            <Table<EmployeePayslipRecord>
+              size="small"
+              rowKey={(record) => record.lineId}
+              columns={payslipColumns}
+              dataSource={payslipRecords}
+              loading={payslipsQuery.isLoading}
+              pagination={{
+                current: payslipsPage.current,
+                pageSize: payslipsPage.pageSize,
+                total: payslipsQuery.data?.total || 0,
+                showSizeChanger: true,
+                showTotal: (total = 0) => `共 ${total} 条`,
+                onChange: (current, pageSize) =>
+                  setPayslipsPage({ current, pageSize: pageSize || payslipsPage.pageSize }),
+              }}
+              scroll={{ x: 1120 }}
+            />
+          </ProCard>
+        </Col>
+
+        <Col xs={24}>
+          <ProCard title="支付记录" headerBordered>
+            <Table<PaymentRecordItemVO>
+              size="small"
+              rowKey={(record) => String(record.id)}
+              columns={paymentColumns}
+              dataSource={paymentRecords}
+              loading={paymentsQuery.isLoading}
+              pagination={{
+                current: paymentsPage.current,
+                pageSize: paymentsPage.pageSize,
+                total: paymentsQuery.data?.total || 0,
+                showSizeChanger: true,
+                showTotal: (total = 0) => `共 ${total} 条`,
+                onChange: (current, pageSize) =>
+                  setPaymentsPage({ current, pageSize: pageSize || paymentsPage.pageSize }),
+              }}
+              scroll={{ x: 920 }}
+            />
           </ProCard>
         </Col>
       </Row>
@@ -592,12 +986,52 @@ const EmployeeDetail: React.FC = () => {
             <Input placeholder="请输入职位" />
           </Form.Item>
 
+          <Form.Item name="employmentType" label="用工类型">
+            <Select placeholder="请选择用工类型">
+              <Option value="full_time">全职</Option>
+              <Option value="part_time">兼职</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="status" label="员工状态">
+            <Select placeholder="请选择员工状态">
+              <Option value="active">在职</Option>
+              <Option value="suspended">暂停</Option>
+              <Option value="inactive">离职</Option>
+            </Select>
+          </Form.Item>
+
           <Form.Item name="hireDate" label="入职日期">
             <DatePicker placeholder="请选择入职日期" style={{ width: '100%' }} />
           </Form.Item>
 
+          <Form.Item name="settlementAccountType" label="收款账户类型">
+            <Select placeholder="请选择收款账户类型">
+              <Option value="bank_card">银行卡</Option>
+              <Option value="alipay">支付宝</Option>
+              <Option value="wechat">微信</Option>
+              <Option value="other">其他</Option>
+            </Select>
+          </Form.Item>
+
+          <Form.Item name="settlementAccount" label="收款账户">
+            <Input placeholder="请输入收款账户（银行卡号/支付宝账号等）" />
+          </Form.Item>
+
+          <Form.Item name="settlementAccountName" label="收款账户实名">
+            <Input placeholder="请输入收款账户实名（选填）" />
+          </Form.Item>
+
           <Form.Item name="bankName" label="开户银行">
-            <Input placeholder="请输入开户银行" />
+            <Input placeholder="请输入开户银行（银行卡场景）" />
+          </Form.Item>
+
+          <Form.Item name="bankBranchName" label="开户支行">
+            <Input placeholder="请输入开户支行（银行卡场景）" />
+          </Form.Item>
+
+          <Form.Item name="bankAccount" label="银行卡号（兼容字段）">
+            <Input placeholder="仅银行卡场景需要，通常可与收款账户保持一致" />
           </Form.Item>
         </Form>
       </Modal>
