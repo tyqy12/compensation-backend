@@ -32,6 +32,9 @@ java -jar target/compensation-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
 Access the API at http://localhost:8080/api/system/health. Ports: 8080 (app), 6379 (Redis).
 
 The compose file mounts `src/main/resources/sql/schema.sql` to initialize the DB on first startup.
+Important: `schema.sql` is a destructive bootstrap script (`DROP TABLE IF EXISTS` + recreate).
+Only use it with a brand-new DB/volume. For any existing database, run incremental scripts under
+`src/main/resources/sql/migrations/` instead of reapplying `schema.sql`.
 
 ## 4) Environment and Secrets
 The app service uses environment variables in `docker-compose.yml` to configure:

@@ -1,34 +1,94 @@
-HELP.md
+# ==================== 构建产物 ====================
+# Maven
 target/
-.mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
+.mvn/wrapper/maven-wrapper.jar
 
-### STS ###
-.apt_generated
-.classpath
-.factorypath
-.project
-.settings
-.springBeans
-.sts4-cache
+# Gradle
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+.gradle/
 
-### IntelliJ IDEA ###
-.idea
+# 前端构建产物
+compensation-react/dist/
+compensation-react/dist-ssr/
+*.local
+
+# ==================== 依赖目录 ====================
+compensation-react/node_modules/
+.m2/
+
+# ==================== 日志文件 ====================
+*.log
+startup*.log
+logs/
+
+# ==================== 环境配置文件（包含敏感信息）====================
+# 后端环境配置
+application-dev.yml
+application-prod.yml
+application-staging.yml
+application-test.yml
+!**/src/main/resources/application.yml
+!**/src/test/resources/application-test.yml
+
+# 前端环境配置
+.env
+.env.*
+!**/.env.example
+
+# ==================== IDE 配置文件 ====================
+# IntelliJ IDEA
+.idea/
 *.iws
 *.iml
 *.ipr
 
-### NetBeans ###
+# Eclipse/STS
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings/
+.springBeans
+.sts4-cache
+
+# VS Code
+.vscode/
+
+# NetBeans
 /nbproject/private/
 /nbbuild/
-/dist/
 /nbdist/
 /.nb-gradle/
-build/
-!**/src/main/**/build/
-!**/src/test/**/build/
 
-### VS Code ###
-.vscode/
-.m2/
+# ==================== 系统文件 ====================
+.DS_Store
+Thumbs.db
+
+# ==================== 数据库和缓存 ====================
+*.rdb
+dump.rdb
+*.db
+*.sqlite
+*.sqlite3
+
+# ==================== 临时文件 ====================
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# ==================== 测试相关 ====================
+HELP.md
+test-output/
+
+# ==================== 其他 ====================
+# SQL 文件（路径级规则，避免全局 *.sql 误伤）
+/*.sql
+
+# 软著申请材料
+软著申请材料/
