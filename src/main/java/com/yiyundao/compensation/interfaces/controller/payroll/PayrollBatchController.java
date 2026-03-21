@@ -5,6 +5,7 @@ import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.common.response.PageResponse;
 import com.yiyundao.compensation.enums.PayrollConfirmationMode;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
+import com.yiyundao.compensation.enums.PayrollCalculationStatus;
 import com.yiyundao.compensation.enums.PayrollType;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollBatchCreateRequest;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollBatchUpdateRequest;
@@ -12,10 +13,13 @@ import com.yiyundao.compensation.interfaces.dto.payroll.PayrollLedgerDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollManagerReviewDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollPreviewDto;
 import com.yiyundao.compensation.interfaces.vo.payroll.PayrollBatchSummaryVO;
+import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollCalculationService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollProcessManager;
 import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.security.SecurityAnnotations;
 import io.swagger.v3.oas.annotations.Operation;
@@ -38,10 +42,12 @@ public class PayrollBatchController {
     private final PayrollBatchService payrollBatchService;
     private final PayrollCalculationService calculationService;
     private final PayrollBatchMapper payrollBatchMapper;
+    private final PayrollPaymentService payrollPaymentService;
+    private final PayrollProcessManager payrollProcessManager;
 
     @PostMapping
-    @SecurityAnnotations.IsFinanceOrHrOrAdmin
-    @Operation(summary = "创建薪资批次", description = "创建新的薪资批次，默认为草稿状态")
+    @SecurityAnnotations.IsFinanceOrAdmin
+    @Operation(summary = "创建薪资批次", description = "创建新的薪资批次，默认为草稿状态，仅财务或管理员可操作")
     public ApiResponse<PayrollBatch> create(@Valid @RequestBody PayrollBatchCreateRequest req) {
         PayrollBatch b = mapToEntity(req);
         payrollBatchService.save(b);
@@ -49,8 +55,8 @@ public class PayrollBatchController {
     }
 
     @PutMapping("/{id}")
-    @SecurityAnnotations.IsFinanceOrHrOrAdmin
-    @Operation(summary = "更新薪资批次", description = "更新批次信息，仅草稿状态可修改")
+    @SecurityAnnotations.IsFinanceOrAdmin
+    @Operation(summary = "更新薪资批次", description = "更新批次信息，仅草稿状态可修改，仅财务或管理员可操作")
     public ApiResponse<PayrollBatch> update(@PathVariable Long id, @Valid @RequestBody PayrollBatchUpdateRequest req) {
         PayrollBatch b = payrollBatchService.getById(id);
         if (b == null) throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
@@ -106,7 +112,7 @@ public class PayrollBatchController {
         if (status == null || !status.canCompute()) {
             throw new BusinessException(ErrorCode.INVALID_STATUS, "当前状态不可计算，请锁定或审批通过后再试");
         }
-        boolean ok = calculationService.computeAndSave(id);
+        boolean ok = payrollProcessManager.computeAndInitialize(id);
         if (!ok) throw new BusinessException(ErrorCode.BUSINESS_ERROR, "计算落地失败，请确认批次状态及数据");
         return ApiResponse.success(true);
     }
@@ -149,6 +155,19 @@ public class PayrollBatchController {
         return ApiResponse.success(payrollBatchService.getById(id));
     }
 
+    @PostMapping("/{id}/retry-payment")
+    @SecurityAnnotations.IsFinanceOrAdmin
+    @Operation(summary = "重试支付", description = "对支付失败批次重置失败记录并重新发放")
+    public ApiResponse<PaymentBatch> retryPayment(@PathVariable Long id,
+                                                  @RequestParam(defaultValue = "true") boolean triggerTransfer) {
+        PayrollBatch batch = payrollBatchService.getById(id);
+        if (batch == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
+        }
+        PaymentBatch paymentBatch = payrollPaymentService.retryFailedPayment(id, triggerTransfer);
+        return ApiResponse.success(paymentBatch);
+    }
+
     private PayrollBatch mapToEntity(PayrollBatchCreateRequest req) {
         PayrollBatch b = new PayrollBatch();
         b.setPayCycleId(req.getPayCycleId());
@@ -161,6 +180,8 @@ public class PayrollBatchController {
                 ? PayrollConfirmationMode.fromCode(req.getConfirmationMode()).getCode()
                 : PayrollConfirmationMode.INDIVIDUAL.getCode());
         b.setStatus(PayrollBatchStatus.DRAFT);
+        b.setCalculationStatus(PayrollCalculationStatus.DRAFT);
+        b.setBatchRevision(1);
         b.setRemark(req.getRemark());
         return b;
     }

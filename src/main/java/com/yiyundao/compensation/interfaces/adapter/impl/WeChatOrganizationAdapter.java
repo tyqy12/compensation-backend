@@ -14,10 +14,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 
 /**
  * 企业微信组织同步适配器（配置优先从数据库读取）
@@ -37,6 +40,10 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
 
     private static final String PLATFORM_TYPE = "wechat";
     private static final String API_BASE_URL = "https://qyapi.weixin.qq.com/cgi-bin";
+    private static final List<String> EMPLOYEE_ID_EXTATTR_KEYS = List.of(
+            "员工工号", "工号", "employee_no", "employeeno", "employeeid", "employee_id"
+    );
+    private static final Set<Integer> INACTIVE_STATUS_CODES = Set.of(2, 4, 5);
 
     @Override
     public String getPlatformType() {
@@ -71,18 +78,20 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             List<Department> departments = getDepartmentList(accessToken);
             for (Department dept : departments) {
                 try {
-                    List<WeChatUser> users = getDepartmentUsers(accessToken, dept.getId());
+                    List<WeChatUser> users = getDepartmentUsers(accessToken, dept.getId(), false);
                     totalCount += users.size();
 
                     for (WeChatUser user : users) {
                         try {
-                            Employee existingEmployee = employeeServiceProvider.getObject().getByPlatformUserId(user.getUserid(), PLATFORM_TYPE);
+                            Employee existingEmployee = employeeServiceProvider.getObject()
+                                    .getByProviderAndSubjectId(PLATFORM_TYPE, user.getUserid());
 
                             if (existingEmployee == null) {
                                 Employee candidate = convertToEmployee(user, dept);
                                 // 按工号回填已有员工
-                                if (candidate.getEmployeeId() != null) {
-                                    Employee byEmpId = employeeServiceProvider.getObject().getByEmployeeId(candidate.getEmployeeId());
+                                String extEmployeeId = resolveEmployeeIdFromExtattr(user.getExtattr());
+                                if (StringUtils.hasText(extEmployeeId)) {
+                                    Employee byEmpId = employeeServiceProvider.getObject().getByEmployeeId(extEmployeeId);
                                     if (byEmpId != null) {
                                         Employee update = candidate;
                                         employeeServiceProvider.getObject().updateEmployee(byEmpId.getId(), update);
@@ -99,7 +108,9 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                             } else {
                                 Employee updateInfo = convertToEmployee(user, dept);
                                 employeeServiceProvider.getObject().updateEmployee(existingEmployee.getId(), updateInfo);
-                                userBindingServiceProvider.getObject().ensureUserForEmployee(updateInfo);
+                                Employee refreshed = employeeServiceProvider.getObject().getById(existingEmployee.getId());
+                                userBindingServiceProvider.getObject()
+                                        .ensureUserForEmployee(refreshed != null ? refreshed : existingEmployee);
                                 updateCount++;
                                 log.debug("更新企微员工: {}", user.getName());
                             }
@@ -150,7 +161,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             // 拉取所有部门成员（会有重复），但按用户聚合其部门IDs
             java.util.Map<String, java.util.LinkedHashSet<String>> userDeptNames = new java.util.HashMap<>();
             for (Department dept : departments) {
-                java.util.List<WeChatUser> users = getDepartmentUsers(accessToken, dept.getId());
+                java.util.List<WeChatUser> users = getDepartmentUsers(accessToken, dept.getId(), false);
                 for (WeChatUser user : users) {
                     String key = user.getUserid();
                     userDeptNames.computeIfAbsent(key, k -> new java.util.LinkedHashSet<>());
@@ -209,15 +220,16 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             // attach members per dept
             for (WeChatDepartment d : rawDepts) {
                 com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto node = map.get(d.getId());
-                java.util.List<WeChatUser> users = getDepartmentUsers(accessToken, String.valueOf(d.getId()));
+                java.util.List<WeChatUser> users = getDepartmentUsers(accessToken, String.valueOf(d.getId()), false);
                 if (users != null) {
                     for (WeChatUser u : users) {
                         com.yiyundao.compensation.interfaces.dto.org.OrgMemberPreviewDto m = new com.yiyundao.compensation.interfaces.dto.org.OrgMemberPreviewDto();
-                        m.setPlatformUserId(u.getUserid());
+                        m.setProvider(PLATFORM_TYPE);
+                        m.setSubjectId(u.getUserid());
                         m.setName(u.getName());
-                        m.setPhone(u.getMobile());
-                        m.setEmail(u.getEmail());
-                        m.setPosition(u.getPosition());
+                        m.setPhone(resolvePhone(u));
+                        m.setEmail(trimToNull(u.getEmail()));
+                        m.setPosition(resolvePosition(u));
                         node.getMembers().add(m);
                     }
                 }
@@ -247,8 +259,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                     .block();
 
             if (response != null && response.getErrcode() == 0) {
-                WeChatUser user = response.getUser();
-                return convertToEmployee(user, null);
+                return convertToEmployee(response, null);
             }
 
         } catch (Exception e) {
@@ -274,7 +285,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                 return new ArrayList<>();
             }
 
-            List<WeChatUser> users = getDepartmentUsers(accessToken, departmentId);
+            List<WeChatUser> users = getDepartmentUsers(accessToken, departmentId, false);
             List<Employee> employees = new ArrayList<>();
 
             for (WeChatUser user : users) {
@@ -428,9 +439,10 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         return new ArrayList<>();
     }
 
-    private List<WeChatUser> getDepartmentUsers(String accessToken, String departmentId) {
+    private List<WeChatUser> getDepartmentUsers(String accessToken, String departmentId, boolean fetchChild) {
         try {
-            String url = API_BASE_URL + "/user/list?access_token=" + accessToken + "&department_id=" + departmentId + "&fetch_child=1";
+            String url = API_BASE_URL + "/user/list?access_token=" + accessToken + "&department_id=" + departmentId
+                    + "&fetch_child=" + (fetchChild ? 1 : 0);
             WeChatUserListResponse resp = webClient.get()
                     .uri(url)
                     .retrieve()
@@ -439,27 +451,109 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             if (resp != null && resp.getErrcode() == 0 && resp.getUserlist() != null) {
                 return resp.getUserlist();
             }
-            log.warn("获取企微部门用户失败: departmentId={}, err={}", departmentId, resp != null ? resp.getErrmsg() : "null response");
+            log.warn("获取企微部门用户失败: departmentId={}, fetchChild={}, err={}",
+                    departmentId, fetchChild, resp != null ? resp.getErrmsg() : "null response");
         } catch (Exception e) {
-            log.error("获取企微部门用户异常: {}", departmentId, e);
+            log.error("获取企微部门用户异常: departmentId={}, fetchChild={}", departmentId, fetchChild, e);
         }
         return new ArrayList<>();
     }
 
     private Employee convertToEmployee(WeChatUser user, Department dept) {
         Employee employee = new Employee();
-        String empId = (user.getAlias() != null && !user.getAlias().isBlank()) ? user.getAlias() : user.getUserid();
-        employee.setEmployeeId(empId);
-        employee.setName(user.getName());
-        employee.setPhone(user.getMobile());
-        employee.setEmail(user.getEmail());
-        employee.setPlatformUserId(user.getUserid());
-        employee.setPlatformType(PLATFORM_TYPE);
+        employee.setEmployeeId(resolveEmployeeId(user));
+        employee.setName(trimToNull(user.getName()));
+        employee.setPhone(resolvePhone(user));
+        employee.setEmail(trimToNull(user.getEmail()));
+        employee.setSubjectId(trimToNull(user.getUserid()));
+        employee.setProvider(PLATFORM_TYPE);
         employee.setDepartment(dept != null ? dept.getName() : null);
-        employee.setPosition(user.getPosition());
-        employee.setStatus("active");
+        employee.setPosition(resolvePosition(user));
+        employee.setStatus(resolveStatus(user));
         employee.setOffline(false);
         return employee;
+    }
+
+    private String resolveEmployeeId(WeChatUser user) {
+        String fromExt = resolveEmployeeIdFromExtattr(user.getExtattr());
+        if (StringUtils.hasText(fromExt)) {
+            return fromExt;
+        }
+        return trimToNull(user.getUserid());
+    }
+
+    private String resolveEmployeeIdFromExtattr(WeChatExtAttr extattr) {
+        if (extattr == null || extattr.getAttrs() == null || extattr.getAttrs().isEmpty()) {
+            return null;
+        }
+        for (String key : EMPLOYEE_ID_EXTATTR_KEYS) {
+            String value = findExtattrValue(extattr, key);
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private String findExtattrValue(WeChatExtAttr extattr, String expectedKey) {
+        String normalizedExpected = normalizeExtattrKey(expectedKey);
+        for (WeChatExtAttrItem item : extattr.getAttrs()) {
+            if (item == null || !StringUtils.hasText(item.getName())) {
+                continue;
+            }
+            if (!normalizeExtattrKey(item.getName()).equals(normalizedExpected)) {
+                continue;
+            }
+            if (item.getText() != null && StringUtils.hasText(item.getText().getValue())) {
+                return item.getText().getValue();
+            }
+            if (item.getWeb() != null && StringUtils.hasText(item.getWeb().getTitle())) {
+                return item.getWeb().getTitle();
+            }
+        }
+        return null;
+    }
+
+    private String normalizeExtattrKey(String key) {
+        if (key == null) {
+            return "";
+        }
+        return key.replace("_", "")
+                .replace("-", "")
+                .replace(" ", "")
+                .trim()
+                .toLowerCase(Locale.ROOT);
+    }
+
+    private String resolvePhone(WeChatUser user) {
+        if (StringUtils.hasText(user.getMobile())) {
+            return user.getMobile().trim();
+        }
+        return trimToNull(user.getTelephone());
+    }
+
+    private String resolvePosition(WeChatUser user) {
+        if (StringUtils.hasText(user.getPosition())) {
+            return user.getPosition().trim();
+        }
+        return trimToNull(user.getExternal_position());
+    }
+
+    private String resolveStatus(WeChatUser user) {
+        if (user.getEnable() != null && user.getEnable() == 0) {
+            return "inactive";
+        }
+        if (user.getStatus() != null && INACTIVE_STATUS_CODES.contains(user.getStatus())) {
+            return "inactive";
+        }
+        return "active";
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
     }
 
     // 内部类定义
@@ -481,17 +575,14 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
     }
 
     @SuppressWarnings("unused")
-    private static class WeChatUserResponse {
+    private static class WeChatUserResponse extends WeChatUser {
         private int errcode;
         private String errmsg;
-        private WeChatUser user;
 
         public int getErrcode() { return errcode; }
         public void setErrcode(int errcode) { this.errcode = errcode; }
         public String getErrmsg() { return errmsg; }
         public void setErrmsg(String errmsg) { this.errmsg = errmsg; }
-        public WeChatUser getUser() { return user; }
-        public void setUser(WeChatUser user) { this.user = user; }
     }
 
     @SuppressWarnings("unused")
@@ -500,9 +591,19 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         private String name;
         private String mobile;
         private String email;
+        private String telephone;
         private String position;
+        private String external_position;
         private List<Integer> department;
         private String alias;
+        private Integer enable;
+        private Integer status;
+        private Integer hide_mobile;
+        private Integer isleader;
+        private List<Integer> is_leader_in_dept;
+        private List<String> direct_leader;
+        private WeChatExtAttr extattr;
+        private Object external_profile;
 
         public String getUserid() { return userid; }
         public void setUserid(String userid) { this.userid = userid; }
@@ -512,12 +613,72 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
         public void setMobile(String mobile) { this.mobile = mobile; }
         public String getEmail() { return email; }
         public void setEmail(String email) { this.email = email; }
+        public String getTelephone() { return telephone; }
+        public void setTelephone(String telephone) { this.telephone = telephone; }
         public String getPosition() { return position; }
         public void setPosition(String position) { this.position = position; }
+        public String getExternal_position() { return external_position; }
+        public void setExternal_position(String external_position) { this.external_position = external_position; }
         public List<Integer> getDepartment() { return department; }
         public void setDepartment(List<Integer> department) { this.department = department; }
         public String getAlias() { return alias; }
         public void setAlias(String alias) { this.alias = alias; }
+        public Integer getEnable() { return enable; }
+        public void setEnable(Integer enable) { this.enable = enable; }
+        public Integer getStatus() { return status; }
+        public void setStatus(Integer status) { this.status = status; }
+        public Integer getHide_mobile() { return hide_mobile; }
+        public void setHide_mobile(Integer hide_mobile) { this.hide_mobile = hide_mobile; }
+        public Integer getIsleader() { return isleader; }
+        public void setIsleader(Integer isleader) { this.isleader = isleader; }
+        public List<Integer> getIs_leader_in_dept() { return is_leader_in_dept; }
+        public void setIs_leader_in_dept(List<Integer> is_leader_in_dept) { this.is_leader_in_dept = is_leader_in_dept; }
+        public List<String> getDirect_leader() { return direct_leader; }
+        public void setDirect_leader(List<String> direct_leader) { this.direct_leader = direct_leader; }
+        public WeChatExtAttr getExtattr() { return extattr; }
+        public void setExtattr(WeChatExtAttr extattr) { this.extattr = extattr; }
+        public Object getExternal_profile() { return external_profile; }
+        public void setExternal_profile(Object external_profile) { this.external_profile = external_profile; }
+    }
+
+    @SuppressWarnings("unused")
+    private static class WeChatExtAttr {
+        private List<WeChatExtAttrItem> attrs;
+        public List<WeChatExtAttrItem> getAttrs() { return attrs; }
+        public void setAttrs(List<WeChatExtAttrItem> attrs) { this.attrs = attrs; }
+    }
+
+    @SuppressWarnings("unused")
+    private static class WeChatExtAttrItem {
+        private Integer type;
+        private String name;
+        private WeChatExtAttrText text;
+        private WeChatExtAttrWeb web;
+        public Integer getType() { return type; }
+        public void setType(Integer type) { this.type = type; }
+        public String getName() { return name; }
+        public void setName(String name) { this.name = name; }
+        public WeChatExtAttrText getText() { return text; }
+        public void setText(WeChatExtAttrText text) { this.text = text; }
+        public WeChatExtAttrWeb getWeb() { return web; }
+        public void setWeb(WeChatExtAttrWeb web) { this.web = web; }
+    }
+
+    @SuppressWarnings("unused")
+    private static class WeChatExtAttrText {
+        private String value;
+        public String getValue() { return value; }
+        public void setValue(String value) { this.value = value; }
+    }
+
+    @SuppressWarnings("unused")
+    private static class WeChatExtAttrWeb {
+        private String title;
+        private String url;
+        public String getTitle() { return title; }
+        public void setTitle(String title) { this.title = title; }
+        public String getUrl() { return url; }
+        public void setUrl(String url) { this.url = url; }
     }
 
     @SuppressWarnings("unused")

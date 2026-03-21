@@ -18,6 +18,7 @@ vi.mock('@ant-design/pro-components', () => ({
 }));
 
 const mockUsePendingQuery = vi.fn();
+const mockUseBatchDetailQuery = vi.fn();
 const mockUseSummaryQuery = vi.fn();
 const mockUseConfirmMutation = vi.fn();
 const mockUseObjectMutation = vi.fn();
@@ -26,6 +27,8 @@ const mockUseAssignMutation = vi.fn();
 
 vi.mock('@services/queries/payroll', () => ({
   usePayrollPendingConfirmationsQuery: (params: any) => mockUsePendingQuery(params),
+  usePayrollBatchDetailQuery: (batchId: number, options?: any) =>
+    mockUseBatchDetailQuery(batchId, options),
   usePayrollConfirmationSummaryQuery: (batchId: number, options?: any) =>
     mockUseSummaryQuery(batchId, options),
   useConfirmPayrollPayslipMutation: () => mockUseConfirmMutation(),
@@ -97,6 +100,21 @@ describe('PayrollConfirmations 确认工作台', () => {
       refetch: pendingRefetch,
     });
 
+    mockUseBatchDetailQuery.mockReturnValue({
+      data: {
+        batchId: 5001,
+        status: 'confirming',
+        calculationStatus: 'calculated',
+        batchRevision: 2,
+        confirmationRequired: true,
+        confirmationMode: 'individual',
+        approvalWorkflowId: 7001,
+      },
+      isLoading: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue(undefined),
+    });
+
     mockUseSummaryQuery.mockReturnValue({
       data: {
         batchId: 5001,
@@ -141,6 +159,8 @@ describe('PayrollConfirmations 确认工作台', () => {
         <Confirmations />
       </TestWrapper>,
     );
+
+    expect(await screen.findByText('R2')).toBeTruthy();
 
     fireEvent.click(await screen.findByRole('button', { name: /签字确认/ }));
 

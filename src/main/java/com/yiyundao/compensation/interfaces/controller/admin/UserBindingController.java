@@ -2,13 +2,19 @@ package com.yiyundao.compensation.interfaces.controller.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
+import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.modules.user.service.UserBindingService;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -17,9 +23,12 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @RestController
 @RequiredArgsConstructor
@@ -29,6 +38,8 @@ public class UserBindingController {
     private final SysUserService sysUserService;
     private final UserBindingService userBindingService;
     private final EmployeeService employeeService;
+    private final ExternalIdentityService externalIdentityService;
+    private final LegacyPlatformFieldPolicy legacyPlatformFieldPolicy;
 
     // 用户绑定列表接口（分页）
     @GetMapping("/admin/user-bindings")
@@ -36,7 +47,8 @@ public class UserBindingController {
             @RequestParam(defaultValue = "1") int current,
             @RequestParam(defaultValue = "10") int pageSize,
             @RequestParam(required = false) String keyword,
-            @RequestParam(required = false) String platformType
+            @RequestParam(required = false) String provider,
+            HttpServletRequest request
     ) {
         Page<SysUser> page = new Page<>(current, pageSize);
         LambdaQueryWrapper<SysUser> queryWrapper = new LambdaQueryWrapper<>();
@@ -47,36 +59,60 @@ public class UserBindingController {
         }
 
         // 平台类型筛选
-        if (StringUtils.hasText(platformType)) {
-            queryWrapper.eq(SysUser::getPlatformType, platformType);
+        String legacyPlatformType = request.getParameter("platformType");
+        legacyPlatformFieldPolicy.handleLegacyInput(
+                "admin_user_bindings_query",
+                legacyPlatformType,
+                null
+        );
+        String platformFilter = StringUtils.hasText(provider) ? provider : null;
+        if (StringUtils.hasText(platformFilter)) {
+            String normalizedPlatform = normalizePlatform(platformFilter);
+            List<Long> userIds = externalIdentityService.list(new LambdaQueryWrapper<ExternalIdentity>()
+                            .select(ExternalIdentity::getUserId)
+                            .eq(ExternalIdentity::getProvider, normalizedPlatform)
+                            .eq(ExternalIdentity::getStatus, ExternalIdentityService.STATUS_ACTIVE)
+                            .isNotNull(ExternalIdentity::getUserId))
+                    .stream()
+                    .map(ExternalIdentity::getUserId)
+                    .distinct()
+                    .toList();
+            if (userIds.isEmpty()) {
+                return ApiResponse.success(emptyPageResponse(current, pageSize));
+            }
+            queryWrapper.in(SysUser::getId, userIds);
         }
 
         // 排序
         queryWrapper.orderByDesc(SysUser::getCreateTime);
 
         Page<SysUser> result = sysUserService.page(page, queryWrapper);
+        Map<Long, ExternalIdentity> userIdentityMap = loadPrimaryIdentityByUserIds(result.getRecords());
+        Map<Long, ExternalIdentity> employeeIdentityMap = loadPrimaryIdentityByEmployeeIds(result.getRecords());
+        Map<Long, Employee> employeeMap = loadEmployees(result.getRecords());
 
         Map<String, Object> response = new HashMap<>();
         response.put("records", result.getRecords().stream().map(user -> {
             UserBindingListVO vo = new UserBindingListVO();
             vo.setId(user.getId());
             vo.setUsername(user.getUsername());
-            vo.setPlatformType(user.getPlatformType());
-            vo.setPlatformUserId(user.getPlatformUserId());
             vo.setEmail(user.getEmail());
             vo.setPhone(user.getPhone());
             vo.setCreateTime(user.getCreateTime());
             vo.setUpdateTime(user.getUpdateTime());
-            vo.setBound((StringUtils.hasText(user.getPlatformType()) && StringUtils.hasText(user.getPlatformUserId())) || user.getEmployeeId() != null);
             vo.setEmployeeId(user.getEmployeeId());
-            if (user.getEmployeeId() != null) {
-                Employee e = employeeService.getById(user.getEmployeeId());
-                if (e != null) {
-                    vo.setEmployeeName(e.getName());
-                    if (!StringUtils.hasText(vo.getPlatformType())) vo.setPlatformType(e.getPlatformType());
-                    if (!StringUtils.hasText(vo.getPlatformUserId())) vo.setPlatformUserId(e.getPlatformUserId());
-                }
+            Employee employee = user.getEmployeeId() != null ? employeeMap.get(user.getEmployeeId()) : null;
+            if (employee != null) vo.setEmployeeName(employee.getName());
+
+            ExternalIdentity identity = userIdentityMap.get(user.getId());
+            if (identity == null && user.getEmployeeId() != null) {
+                identity = employeeIdentityMap.get(user.getEmployeeId());
             }
+            if (identity != null) {
+                vo.setProvider(identity.getProvider());
+                vo.setSubjectId(identity.getSubjectId());
+            }
+            vo.setBound(identity != null || user.getEmployeeId() != null);
             return vo;
         }).toList());
         response.put("total", result.getTotal());
@@ -91,13 +127,21 @@ public class UserBindingController {
         SysUser user = sysUserService.getById(id);
         if (user == null) return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "用户不存在");
         BindingVO vo = new BindingVO();
-        vo.setPlatformType(user.getPlatformType());
-        vo.setPlatformUserId(user.getPlatformUserId());
         vo.setUsername(user.getUsername());
         vo.setEmployeeId(user.getEmployeeId());
+        ExternalIdentity identity = externalIdentityService.findPrimaryByUserId(user.getId());
         if (user.getEmployeeId() != null) {
             Employee e = employeeService.getById(user.getEmployeeId());
-            if (e != null) vo.setEmployeeName(e.getName());
+            if (e != null) {
+                vo.setEmployeeName(e.getName());
+                if (identity == null) {
+                    identity = externalIdentityService.findPrimaryByEmployeeId(e.getId());
+                }
+            }
+        }
+        if (identity != null) {
+            vo.setProvider(identity.getProvider());
+            vo.setSubjectId(identity.getSubjectId());
         }
         return ApiResponse.success(vo);
     }
@@ -106,11 +150,16 @@ public class UserBindingController {
     public ApiResponse<Void> bind(@PathVariable Long id, @RequestBody BindingForm form) {
         SysUser user = sysUserService.getById(id);
         if (user == null) return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "用户不存在");
-        if (!StringUtils.hasText(form.getPlatformType()) || !StringUtils.hasText(form.getPlatformUserId())) {
+        legacyPlatformFieldPolicy.handleLegacyInput(
+                "admin_user_binding_bind",
+                form.getLegacyPlatformType(),
+                form.getLegacyPlatformUserId()
+        );
+        if (!StringUtils.hasText(form.getProvider()) || !StringUtils.hasText(form.getSubjectId())) {
             return ApiResponse.error(ErrorCode.PARAM_MISSING, "平台类型与平台用户ID不能为空");
         }
         try {
-            userBindingService.bindPlatform(id, form.getPlatformType(), form.getPlatformUserId());
+            userBindingService.bindPlatform(id, form.getProvider(), form.getSubjectId());
             return ApiResponse.success(null);
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(ErrorCode.PARAM_INVALID, e.getMessage());
@@ -130,9 +179,27 @@ public class UserBindingController {
     @Data
     public static class BindingForm {
         @NotBlank
-        private String platformType; // wechat/dingtalk/feishu
+        private String provider; // wechat/dingtalk/feishu
         @NotBlank
-        private String platformUserId;
+        private String subjectId;
+        @JsonIgnore
+        private String legacyPlatformType;
+        @JsonIgnore
+        private String legacyPlatformUserId;
+
+        @JsonAnySetter
+        public void captureLegacyPlatformFields(String key, Object value) {
+            if (value == null || key == null) {
+                return;
+            }
+            if ("platformType".equals(key)) {
+                this.legacyPlatformType = String.valueOf(value);
+                return;
+            }
+            if ("platformUserId".equals(key)) {
+                this.legacyPlatformUserId = String.valueOf(value);
+            }
+        }
     }
 
     // 绑定到指定员工
@@ -165,8 +232,8 @@ public class UserBindingController {
     @Data
     public static class BindingVO {
         private String username;
-        private String platformType;
-        private String platformUserId;
+        private String provider;
+        private String subjectId;
         private Long employeeId;
         private String employeeName;
     }
@@ -175,8 +242,8 @@ public class UserBindingController {
     public static class UserBindingListVO {
         private Long id;
         private String username;
-        private String platformType;
-        private String platformUserId;
+        private String provider;
+        private String subjectId;
         private String email;
         private String phone;
         private LocalDateTime createTime;
@@ -184,5 +251,114 @@ public class UserBindingController {
         private Boolean bound; // 是否已绑定平台
         private Long employeeId;
         private String employeeName;
+    }
+
+    private String normalizePlatform(String platformType) {
+        if (!StringUtils.hasText(platformType)) {
+            return platformType;
+        }
+        String normalized = platformType.trim().toLowerCase();
+        return switch (normalized) {
+            case "wecom", "qywx", "wx" -> "wechat";
+            case "dingding", "dd" -> "dingtalk";
+            case "lark" -> "feishu";
+            default -> normalized;
+        };
+    }
+
+    private Map<String, Object> emptyPageResponse(int current, int pageSize) {
+        Map<String, Object> response = new HashMap<>();
+        response.put("records", List.of());
+        response.put("total", 0L);
+        response.put("current", current);
+        response.put("size", pageSize);
+        return response;
+    }
+
+    private Map<Long, ExternalIdentity> loadPrimaryIdentityByUserIds(List<SysUser> users) {
+        if (users == null || users.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> userIds = users.stream()
+                .map(SysUser::getId)
+                .filter(id -> id != null)
+                .collect(java.util.stream.Collectors.toSet());
+        if (userIds.isEmpty()) {
+            return Map.of();
+        }
+        List<ExternalIdentity> identities = externalIdentityService.list(new LambdaQueryWrapper<ExternalIdentity>()
+                .select(
+                        ExternalIdentity::getId,
+                        ExternalIdentity::getUserId,
+                        ExternalIdentity::getProvider,
+                        ExternalIdentity::getSubjectId,
+                        ExternalIdentity::getLastSeenAt
+                )
+                .in(ExternalIdentity::getUserId, userIds)
+                .eq(ExternalIdentity::getStatus, ExternalIdentityService.STATUS_ACTIVE)
+                .orderByDesc(ExternalIdentity::getPrimaryFlag)
+                .orderByDesc(ExternalIdentity::getLastSeenAt)
+                .orderByDesc(ExternalIdentity::getId));
+        Map<Long, ExternalIdentity> map = new HashMap<>();
+        for (ExternalIdentity identity : identities) {
+            if (identity.getUserId() != null) {
+                map.putIfAbsent(identity.getUserId(), identity);
+            }
+        }
+        return map;
+    }
+
+    private Map<Long, ExternalIdentity> loadPrimaryIdentityByEmployeeIds(List<SysUser> users) {
+        if (users == null || users.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> employeeIds = users.stream()
+                .map(SysUser::getEmployeeId)
+                .filter(id -> id != null)
+                .collect(java.util.stream.Collectors.toSet());
+        if (employeeIds.isEmpty()) {
+            return Map.of();
+        }
+        List<ExternalIdentity> identities = externalIdentityService.list(new LambdaQueryWrapper<ExternalIdentity>()
+                .select(
+                        ExternalIdentity::getId,
+                        ExternalIdentity::getEmployeeId,
+                        ExternalIdentity::getProvider,
+                        ExternalIdentity::getSubjectId,
+                        ExternalIdentity::getLastSeenAt
+                )
+                .in(ExternalIdentity::getEmployeeId, employeeIds)
+                .eq(ExternalIdentity::getStatus, ExternalIdentityService.STATUS_ACTIVE)
+                .orderByDesc(ExternalIdentity::getPrimaryFlag)
+                .orderByDesc(ExternalIdentity::getLastSeenAt)
+                .orderByDesc(ExternalIdentity::getId));
+        Map<Long, ExternalIdentity> map = new HashMap<>();
+        for (ExternalIdentity identity : identities) {
+            if (identity.getEmployeeId() != null) {
+                map.putIfAbsent(identity.getEmployeeId(), identity);
+            }
+        }
+        return map;
+    }
+
+    private Map<Long, Employee> loadEmployees(List<SysUser> users) {
+        if (users == null || users.isEmpty()) {
+            return Map.of();
+        }
+        Set<Long> employeeIds = new HashSet<>();
+        for (SysUser user : users) {
+            if (user.getEmployeeId() != null) {
+                employeeIds.add(user.getEmployeeId());
+            }
+        }
+        if (employeeIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Employee> employees = employeeService.listByIds(new ArrayList<>(employeeIds));
+        Map<Long, Employee> employeeMap = new HashMap<>();
+        for (Employee employee : employees) {
+            employeeMap.put(employee.getId(), employee);
+        }
+        return employeeMap;
     }
 }

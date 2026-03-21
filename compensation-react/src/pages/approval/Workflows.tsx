@@ -64,7 +64,7 @@ const statusEnum: Record<string, { text: string; color: string }> = {
 const workflowTypeEnum: Record<string, { text: string; color: string }> = {
   BATCH: { text: '批量支付', color: 'blue' },
   ADHOC: { text: '临时支付', color: 'orange' },
-  OFFLINE: { text: '离线员工', color: 'purple' },
+  OFFLINE: { text: '架构外员工', color: 'purple' },
 };
 
 // ==================== 工具函数 ====================
@@ -248,7 +248,7 @@ const ApprovalWorkflows: React.FC = () => {
       render: (_, record) => {
         const typeMap: Record<string, string> = {
           payroll: '薪资发放',
-          offline: '离线员工',
+          offline: '架构外员工',
         };
         return typeMap[record.businessType] || record.businessType || '—';
       },

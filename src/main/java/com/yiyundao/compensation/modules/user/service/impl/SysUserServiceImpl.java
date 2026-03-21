@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.infrastructure.dao.SysUserMapper;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +23,7 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
 
     private final JdbcTemplate jdbcTemplate;
     private final UserRoleService userRoleService;
+    private final ExternalIdentityService externalIdentityService;
 
     @Override
     public SysUser findByUsername(String username) {
@@ -29,11 +31,14 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     }
 
     @Override
-    public SysUser findByPlatform(String platformType, String platformUserId) {
-        return getOne(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getPlatformType, platformType)
-                .eq(SysUser::getPlatformUserId, platformUserId)
-                .last("limit 1"));
+    public SysUser findByPlatform(String provider, String subjectId) {
+        Long userId = externalIdentityService.findBoundUserId(
+                provider,
+                ExternalIdentityService.DEFAULT_TENANT_KEY,
+                ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
+                subjectId
+        );
+        return userId != null ? getById(userId) : null;
     }
 
     @Override

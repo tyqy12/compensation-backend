@@ -83,7 +83,7 @@ grant_type=client_credentials&scope=payroll:read payslip:read
 
 ### 4.2 工资行
 - `GET /api/v1/payroll/batches/{batchId}/lines`
-  - 支持 `employeeRef` 过滤：`emp:<employeeNo>` 或 `<platformType>:<platformUserId>`。
+  - 支持 `employeeRef` 过滤：`emp:<employeeNo>` 或 `<provider>:<subjectId>`。
   - 返回 `OpenApiPayrollLineDto`：金额字段、`employeeRef`、部门数组、脱敏姓名/手机号、更新时间。
 
 ### 4.3 工资条

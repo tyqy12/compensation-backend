@@ -10,7 +10,7 @@ const OAuthCallback: React.FC = () => {
   const [sp] = useSearchParams();
   const code = sp.get('code') || '';
   const state = sp.get('state') || undefined;
-  const mutation = useOAuthCallbackMutation((platform as Platform) || 'wecom');
+  const mutation = useOAuthCallbackMutation((platform as Platform) || 'wechat');
   const { message } = AntdApp.useApp();
 
   useEffect(() => {

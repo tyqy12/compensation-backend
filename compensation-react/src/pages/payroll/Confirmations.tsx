@@ -25,10 +25,17 @@ import {
   TeamOutlined,
 } from '@ant-design/icons';
 import {
+  getBatchRevisionText,
+  getCalculationStatusMeta,
+  getConfirmationModeText,
+  getFlowStatusMeta,
+} from './components/payrollFlow';
+import {
   useAssignPayrollConfirmationMutation,
   useBatchConfirmPayrollMutation,
   useConfirmPayrollPayslipMutation,
   useObjectPayrollPayslipMutation,
+  usePayrollBatchDetailQuery,
   usePayrollConfirmationSummaryQuery,
   usePayrollPendingConfirmationsQuery,
   type PayrollPendingConfirmationDto,
@@ -39,6 +46,10 @@ const { Text } = Typography;
 const confirmationStatusMeta: Record<string, { text: string; color: string }> = {
   pending: { text: '待确认', color: 'default' },
   confirmed: { text: '已确认', color: 'success' },
+  skipped: { text: '已跳过', color: 'default' },
+  timeout: { text: '已超时', color: 'warning' },
+  rejected: { text: '已拒绝', color: 'error' },
+  superseded: { text: '已作废', color: 'default' },
   objected: { text: '异议处理中', color: 'processing' },
   objected_approved: { text: '异议通过', color: 'success' },
   objected_rejected: { text: '异议驳回待重提', color: 'warning' },
@@ -77,6 +88,9 @@ const PayrollConfirmations: React.FC = () => {
   const [assignForm] = Form.useForm<{ assigneeEmployeeId: number; scope: 'selected' | 'all' }>();
 
   const pendingQuery = usePayrollPendingConfirmationsQuery(filters);
+  const batchDetailQuery = usePayrollBatchDetailQuery(filters.batchId ?? 0, {
+    enabled: Boolean(filters.batchId),
+  });
   const summaryQuery = usePayrollConfirmationSummaryQuery(filters.batchId ?? 0, {
     enabled: Boolean(filters.batchId),
   });
@@ -91,7 +105,7 @@ const PayrollConfirmations: React.FC = () => {
   const refreshAll = async () => {
     await pendingQuery.refetch();
     if (filters.batchId) {
-      await summaryQuery.refetch();
+      await Promise.all([batchDetailQuery.refetch(), summaryQuery.refetch()]);
     }
   };
 
@@ -302,6 +316,7 @@ const PayrollConfirmations: React.FC = () => {
   ];
 
   const summary = summaryQuery.data;
+  const batchDetail = batchDetailQuery.data;
 
   return (
     <PageContainer
@@ -384,11 +399,29 @@ const PayrollConfirmations: React.FC = () => {
         {filters.batchId && summary && (
           <Card title={`批次 ${filters.batchId} 确认汇总`}>
             <div style={{ display: 'flex', gap: 12, overflowX: 'auto' }}>
-              <Card size="small" style={{ minWidth: 140 }}>
-                <Statistic title="批次状态" value={summary.batchStatus || '-'} />
+              <Card size="small" style={{ minWidth: 150 }}>
+                <Statistic
+                  title="流转状态"
+                  value={getFlowStatusMeta(batchDetail?.status)?.text ?? summary.batchStatus ?? '-'}
+                />
+              </Card>
+              <Card size="small" style={{ minWidth: 150 }}>
+                <Statistic
+                  title="核算状态"
+                  value={
+                    getCalculationStatusMeta(batchDetail?.calculationStatus ?? batchDetail?.computeStatus)
+                      ?.text ?? '-'
+                  }
+                />
+              </Card>
+              <Card size="small" style={{ minWidth: 130 }}>
+                <Statistic title="批次版本" value={getBatchRevisionText(batchDetail?.batchRevision)} />
               </Card>
               <Card size="small" style={{ minWidth: 140 }}>
-                <Statistic title="确认模式" value={summary.confirmationMode || '-'} />
+                <Statistic
+                  title="确认策略"
+                  value={getConfirmationModeText(batchDetail?.confirmationMode, batchDetail?.confirmationRequired)}
+                />
               </Card>
               <Card size="small" style={{ minWidth: 120 }}>
                 <Statistic title="总行数" value={summary.totalLines ?? 0} />
@@ -409,6 +442,15 @@ const PayrollConfirmations: React.FC = () => {
                 <Statistic title="异议驳回" value={summary.objectedRejectedCount ?? 0} />
               </Card>
             </div>
+            {batchDetail?.approvalWorkflowId && (
+              <Alert
+                style={{ marginTop: 12 }}
+                type="info"
+                showIcon
+                message={`当前版本已关联审批流 #${batchDetail.approvalWorkflowId}`}
+                description="若确认已完成但尚未提审，请返回批次工作台继续推进审批与发放。"
+              />
+            )}
           </Card>
         )}
 

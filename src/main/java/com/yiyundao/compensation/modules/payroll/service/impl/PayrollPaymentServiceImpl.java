@@ -2,6 +2,8 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.yiyundao.compensation.common.exception.BusinessException;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.common.utils.ValidationUtils;
 import com.yiyundao.compensation.enums.EmploymentType;
 import com.yiyundao.compensation.enums.SettlementAccountType;
@@ -15,10 +17,12 @@ import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.modules.payment.service.SettlementService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
+import com.yiyundao.compensation.modules.payroll.service.PayrollCalculationService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.enums.BatchStatus;
+import com.yiyundao.compensation.enums.PaymentBatchProcessStatus;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.enums.PaymentStatus;
 import com.yiyundao.compensation.enums.PaymentType;
@@ -48,6 +52,7 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
     private final PaymentBatchService paymentBatchService;
     private final PaymentRecordService paymentRecordService;
     private final PayrollLineService payrollLineService;
+    private final ObjectProvider<PayrollCalculationService> payrollCalculationServiceProvider;
     private final ObjectProvider<EmployeeService> employeeServiceProvider;
     private final SettlementService settlementService;
     private final EncryptionService encryptionService;
@@ -74,6 +79,13 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
 
         List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, payrollBatch.getId()));
+        if (lines.isEmpty()) {
+            boolean computed = computePayrollLinesIfNeeded(payrollBatch);
+            if (computed) {
+                lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
+                        .eq(PayrollLine::getBatchId, payrollBatch.getId()));
+            }
+        }
         if (lines.isEmpty()) {
             log.warn("Payroll batch {} has no computed lines, skip payment creation", payrollBatch.getId());
             return null;
@@ -139,6 +151,7 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
         paymentBatch.setFailedCount((int) failedCount);
         paymentBatch.setSuccessCount(0);
         paymentBatch.setStatus(payableCount > 0 ? BatchStatus.SUBMITTED : BatchStatus.FAILED);
+        paymentBatch.setPaymentStatus(payableCount > 0 ? PaymentBatchProcessStatus.SUBMITTED : PaymentBatchProcessStatus.FAILED);
         paymentBatch.setSubmitTime(LocalDateTime.now());
         paymentBatch.setApproverId(approver != null ? approver.getId() : null);
         if (paymentBatch.getStatus() == BatchStatus.SUBMITTED) {
@@ -169,6 +182,92 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
         return paymentBatch;
     }
 
+    @Override
+    @Transactional
+    public PaymentBatch retryFailedPayment(Long payrollBatchId, boolean triggerTransfer) {
+        if (payrollBatchId == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "薪酬批次ID不能为空");
+        }
+
+        PayrollBatch payrollBatch = payrollBatchMapper.selectById(payrollBatchId);
+        if (payrollBatch == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "薪酬批次不存在");
+        }
+        if (payrollBatch.getStatus() != PayrollBatchStatus.PAY_FAILED) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "仅支付失败批次支持重试");
+        }
+        if (!StringUtils.hasText(payrollBatch.getPaymentBatchNo())) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "当前批次未关联支付批次，不能重试");
+        }
+
+        String batchNo = payrollBatch.getPaymentBatchNo();
+        PaymentBatch paymentBatch = paymentBatchService.getByBatchNo(batchNo);
+        if (paymentBatch == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "支付批次不存在");
+        }
+        if (paymentBatch.getStatus() == BatchStatus.PROCESSING) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "支付批次正在处理中，请稍后查看结果");
+        }
+        if (paymentBatch.getStatus() == BatchStatus.COMPLETED) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "支付批次已完成，不能重试");
+        }
+
+        long retryableCount = paymentRecordService.count(new LambdaQueryWrapper<PaymentRecord>()
+                .eq(PaymentRecord::getBatchNo, batchNo)
+                .in(PaymentRecord::getStatus, PaymentStatus.FAILED, PaymentStatus.CANCELLED));
+        if (retryableCount <= 0) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "当前批次无可重试的失败记录");
+        }
+
+        boolean resetRecords = paymentRecordService.update(new LambdaUpdateWrapper<PaymentRecord>()
+                .eq(PaymentRecord::getBatchNo, batchNo)
+                .in(PaymentRecord::getStatus, PaymentStatus.FAILED, PaymentStatus.CANCELLED)
+                .set(PaymentRecord::getStatus, PaymentStatus.PENDING)
+                .set(PaymentRecord::getErrorCode, null)
+                .set(PaymentRecord::getErrorMsg, null)
+                .set(PaymentRecord::getPaymentTime, null)
+                .set(PaymentRecord::getNotificationTime, null)
+                .set(PaymentRecord::getProviderOrderNo, null)
+                .set(PaymentRecord::getProviderTradeNo, null)
+                .set(PaymentRecord::getAlipayOrderNo, null)
+                .set(PaymentRecord::getAlipayTradeNo, null));
+        if (!resetRecords) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "重置失败记录状态失败");
+        }
+
+        long successCount = paymentRecordService.count(new LambdaQueryWrapper<PaymentRecord>()
+                .eq(PaymentRecord::getBatchNo, batchNo)
+                .eq(PaymentRecord::getStatus, PaymentStatus.SUCCESS));
+        long failedCount = paymentRecordService.count(new LambdaQueryWrapper<PaymentRecord>()
+                .eq(PaymentRecord::getBatchNo, batchNo)
+                .in(PaymentRecord::getStatus, PaymentStatus.FAILED, PaymentStatus.CANCELLED));
+
+        boolean updatePaymentBatch = paymentBatchService.update(new LambdaUpdateWrapper<PaymentBatch>()
+                .eq(PaymentBatch::getBatchNo, batchNo)
+                .set(PaymentBatch::getStatus, BatchStatus.SUBMITTED)
+                .set(PaymentBatch::getPaymentStatus, PaymentBatchProcessStatus.SUBMITTED)
+                .set(PaymentBatch::getSuccessCount, (int) successCount)
+                .set(PaymentBatch::getFailedCount, (int) failedCount)
+                .set(PaymentBatch::getProcessStartTime, null)
+                .set(PaymentBatch::getProcessEndTime, null));
+        if (!updatePaymentBatch) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "更新支付批次状态失败");
+        }
+
+        payrollBatchMapper.update(null, new LambdaUpdateWrapper<PayrollBatch>()
+                .eq(PayrollBatch::getId, payrollBatchId)
+                .set(PayrollBatch::getStatus, PayrollBatchStatus.PAY_PROCESSING));
+
+        if (triggerTransfer) {
+            settlementService.batchTransfer(batchNo);
+        }
+
+        log.info("支付失败批次重试已触发: payrollBatchId={}, paymentBatchNo={}, retryableCount={}, triggerTransfer={}",
+                payrollBatchId, batchNo, retryableCount, triggerTransfer);
+
+        return paymentBatchService.getByBatchNo(batchNo);
+    }
+
     private String buildBatchNo(PayrollBatch payrollBatch) {
         String prefix = "PAYROLL-" + payrollBatch.getId();
         return prefix + "-" + BATCH_NO_FORMAT.format(LocalDateTime.now());
@@ -180,6 +279,27 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
             throw new IllegalStateException("EmployeeService 不可用，无法创建支付批次");
         }
         return employeeService;
+    }
+
+    private boolean computePayrollLinesIfNeeded(PayrollBatch payrollBatch) {
+        if (payrollBatch == null || payrollBatch.getId() == null) {
+            return false;
+        }
+        PayrollCalculationService payrollCalculationService = payrollCalculationServiceProvider.getIfAvailable();
+        if (payrollCalculationService == null) {
+            log.warn("PayrollCalculationService 不可用，无法自动补算 payroll_line: batchId={}", payrollBatch.getId());
+            return false;
+        }
+        try {
+            boolean computed = payrollCalculationService.computeAndSave(payrollBatch.getId());
+            if (!computed) {
+                log.warn("自动补算 payroll_line 失败: batchId={}", payrollBatch.getId());
+            }
+            return computed;
+        } catch (Exception ex) {
+            log.warn("自动补算 payroll_line 异常: batchId={}, msg={}", payrollBatch.getId(), ex.getMessage());
+            return false;
+        }
     }
 
     private String buildBatchName(PayrollBatch payrollBatch) {
@@ -225,7 +345,7 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
         }
 
         if (!StringUtils.hasText(settlementAccount)) {
-            return RecipientRouteResult.failed("ACCOUNT_MISSING", "缺少收款账号");
+            return RecipientRouteResult.failed("ACCOUNT_MISSING", "缺少收款账号（结算账户/银行卡/手机号/邮箱）");
         }
 
         String accountType = StringUtils.hasText(settlementType) ? settlementType : SettlementAccountType.BANK_CARD.getCode();
@@ -299,9 +419,7 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
         if (employee == null) {
             return null;
         }
-        if (StringUtils.hasText(employee.getPlatformUserId())) {
-            return employee.getPlatformUserId().trim();
-        }
+        // 仅使用员工联系方式兜底，避免误将第三方平台账号（如企业微信subject_id）当作支付宝收款账号。
         if (StringUtils.hasText(employee.getPhone())) {
             return employee.getPhone().trim();
         }

@@ -143,9 +143,10 @@ public class OrganizationSyncService {
      */
     public com.yiyundao.compensation.modules.employee.entity.Employee importOne(com.yiyundao.compensation.modules.employee.entity.Employee employee, String preferredUsername) {
         com.yiyundao.compensation.modules.employee.entity.Employee target = null;
-        if (employee.getPlatformUserId() != null && employee.getPlatformType() != null) {
+        if (employee.getSubjectId() != null && employee.getProvider() != null) {
             try {
-                com.yiyundao.compensation.modules.employee.entity.Employee exist = employeeService.getByPlatformUserId(employee.getPlatformUserId(), employee.getPlatformType());
+                com.yiyundao.compensation.modules.employee.entity.Employee exist =
+                        employeeService.getByProviderAndSubjectId(employee.getProvider(), employee.getSubjectId());
                 if (exist != null) {
                     // 更新已有记录
                     com.yiyundao.compensation.modules.employee.entity.Employee update = new com.yiyundao.compensation.modules.employee.entity.Employee();
@@ -177,28 +178,28 @@ public class OrganizationSyncService {
     /**
      * 发送平台通知
      */
-    public void sendNotification(String platformType, String userId, String message) {
-        OrganizationAdapter adapter = adapters.get(platformType);
+    public void sendNotification(String provider, String subjectId, String message) {
+        OrganizationAdapter adapter = adapters.get(provider);
         if (adapter == null) {
-            log.warn("未找到平台适配器: {}，使用回退通知", platformType);
-            notificationService.sendFallbackNotification(platformType, userId, message);
+            log.warn("未找到平台适配器: {}，使用回退通知", provider);
+            notificationService.sendFallbackNotification(provider, subjectId, message);
             return;
         }
         Exception last = null;
         for (int i = 1; i <= Math.max(1, notifyRetryMax); i++) {
             try {
-                adapter.sendApprovalNotification(userId, message);
+                adapter.sendApprovalNotification(subjectId, message);
                 if (i > 1) {
-                    log.info("通知重试第{}次成功: platform={}, userId={}", i - 1, platformType, userId);
+                    log.info("通知重试第{}次成功: provider={}, subjectId={}", i - 1, provider, subjectId);
                 }
                 return;
             } catch (Exception e) {
                 last = e;
-                log.warn("发送平台通知失败(第{}次): platform={}, userId={}, err={}", i, platformType, userId, e.getMessage());
+                log.warn("发送平台通知失败(第{}次): provider={}, subjectId={}, err={}", i, provider, subjectId, e.getMessage());
                 try { Thread.sleep(Math.max(0, notifyBackoffMs)); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             }
         }
-        log.error("通知重试耗尽，使用回退策略: platform={}, userId={}", platformType, userId, last);
-        notificationService.sendFallbackNotification(platformType, userId, message);
+        log.error("通知重试耗尽，使用回退策略: provider={}, subjectId={}", provider, subjectId, last);
+        notificationService.sendFallbackNotification(provider, subjectId, message);
     }
 }

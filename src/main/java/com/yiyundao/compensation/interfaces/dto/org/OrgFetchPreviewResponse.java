@@ -5,8 +5,9 @@ import java.util.List;
 
 @Data
 public class OrgFetchPreviewResponse {
-    private String platformType;
+    private String provider;
     private int totalEmployees;
+    private int newEmployees;
+    private int existingEmployees;
     private List<EmployeePreviewDto> employees;
 }
-

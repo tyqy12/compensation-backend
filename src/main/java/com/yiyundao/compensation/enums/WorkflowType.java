@@ -5,8 +5,9 @@ import lombok.Getter;
 @Getter
 public enum WorkflowType {
     BATCH("BATCH", "批量支付"),
+    PAYROLL_DISTRIBUTION("PAYROLL_DISTRIBUTION", "薪资发放"),
     ADHOC("ADHOC", "临时支付"),
-    OFFLINE("OFFLINE", "离线员工"),
+    OFFLINE("OFFLINE", "架构外员工"),
     PERMISSION("PERMISSION", "权限授权"),
     PAYROLL_DISPUTE("PAYROLL_DISPUTE", "薪酬异议审批");
 

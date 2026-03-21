@@ -12,6 +12,8 @@ import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.payroll.service.PayCycleService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
+import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
+import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -41,6 +43,10 @@ class PayslipServiceImplTest {
     private EmployeeService employeeService;
     @Mock
     private ObjectMapper objectMapper;
+    @Mock
+    private PayrollValidationIssueSupport validationIssueSupport;
+    @Mock
+    private UserRoleService userRoleService;
 
     @InjectMocks
     private PayslipServiceImpl payslipService;
@@ -137,6 +143,11 @@ class PayslipServiceImplTest {
         Mockito.when(employeeService.getById(99L)).thenReturn(employee);
         Mockito.when(objectMapper.readValue(Mockito.eq("[]"), ArgumentMatchers.<TypeReference<List<PayrollPreviewDto.PayrollPreviewItemDto>>>any()))
                 .thenReturn(List.of());
+        Mockito.when(validationIssueSupport.deserialize(ArgumentMatchers.isNull())).thenReturn(List.of());
+        Mockito.when(validationIssueSupport.toMessages(List.of())).thenReturn(List.of());
+        Mockito.when(validationIssueSupport.countBlocking(List.of())).thenReturn(0);
+        Mockito.when(validationIssueSupport.countReview(List.of())).thenReturn(0);
+        Mockito.when(validationIssueSupport.hasBlocking(List.of())).thenReturn(false);
 
         var detail = payslipService.getPayslipDetail(employeeUser, 11L);
 

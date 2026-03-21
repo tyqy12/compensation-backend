@@ -22,7 +22,7 @@ import {
   usePayrollManagerReviewQuery,
   type PayrollManagerReviewFilters,
 } from '@services/queries/payroll';
-import type { PayrollPreviewLineDto } from '@types/openapi';
+import type { PayrollPreviewLineDto, PayrollValidationIssueDto } from '@types/openapi';
 
 const { Text, Title } = Typography;
 
@@ -33,6 +33,54 @@ const formatCurrency = (value?: number, currency = 'CNY') => {
     currency,
     minimumFractionDigits: 2,
   }).format(value);
+};
+
+const getIssueSeverity = (issue?: PayrollValidationIssueDto) => {
+  const severity = String(issue?.severity ?? '').toLowerCase();
+  if (severity === 'blocking' || issue?.blocking) {
+    return 'blocking';
+  }
+  if (severity === 'info') {
+    return 'info';
+  }
+  return 'review';
+};
+
+const getIssueColor = (issue?: PayrollValidationIssueDto) => {
+  const severity = getIssueSeverity(issue);
+  if (severity === 'blocking') {
+    return 'error';
+  }
+  if (severity === 'info') {
+    return 'processing';
+  }
+  return 'warning';
+};
+
+const renderIssueTags = (issues?: PayrollValidationIssueDto[], warnings?: string[]) => {
+  if (issues && issues.length > 0) {
+    return (
+      <Space wrap size={4}>
+        {issues.map((issue, idx) => (
+          <Tag color={getIssueColor(issue)} key={`${issue.code ?? issue.message ?? 'issue'}-${idx}`}>
+            {issue.message}
+          </Tag>
+        ))}
+      </Space>
+    );
+  }
+  if (warnings && warnings.length > 0) {
+    return (
+      <Space wrap size={4}>
+        {warnings.map((warning, idx) => (
+          <Tag color="warning" key={`${warning}-${idx}`}>
+            {warning}
+          </Tag>
+        ))}
+      </Space>
+    );
+  }
+  return <Text type="secondary">正常</Text>;
 };
 
 const columns: ProColumns<PayrollPreviewLineDto>[] = [
@@ -66,37 +114,40 @@ const columns: ProColumns<PayrollPreviewLineDto>[] = [
   },
   {
     title: '差异提示',
-    dataIndex: 'differences',
+    dataIndex: 'diff',
     ellipsis: true,
-    render: (_, record) =>
-      (record.differences && record.differences.length > 0)
-        ? (
-            <Space wrap size={4}>
-              {record.differences.map((diff, idx) => (
-                <Tag color="purple" key={`${diff}-${idx}`}>
-                  {diff}
-                </Tag>
-              ))}
-            </Space>
-          )
-        : <Text type="secondary">无差异</Text>,
+    render: (_, record) => {
+      if (record.diff?.netDeltaAmount !== undefined || record.diff?.netDeltaPercent !== undefined) {
+        return (
+          <Space wrap size={4}>
+            {record.diff?.netDeltaAmount !== undefined && (
+              <Tag color="purple">净额差异：{formatCurrency(record.diff.netDeltaAmount, record.currency as any)}</Tag>
+            )}
+            {record.diff?.netDeltaPercent !== undefined && (
+              <Tag color="geekblue">变动比例：{`${(record.diff.netDeltaPercent * 100).toFixed(2)}%`}</Tag>
+            )}
+          </Space>
+        );
+      }
+      if (record.differences && record.differences.length > 0) {
+        return (
+          <Space wrap size={4}>
+            {record.differences.map((diff, idx) => (
+              <Tag color="purple" key={`${diff}-${idx}`}>
+                {diff}
+              </Tag>
+            ))}
+          </Space>
+        );
+      }
+      return <Text type="secondary">无差异</Text>;
+    },
   },
   {
-    title: '预警',
-    dataIndex: 'warnings',
+    title: '校验问题',
+    dataIndex: 'issues',
     ellipsis: true,
-    render: (_, record) =>
-      (record.warnings && record.warnings.length > 0)
-        ? (
-            <Space wrap size={4}>
-              {record.warnings.map((warning, idx) => (
-                <Tag color="orange" key={`${warning}-${idx}`}>
-                  {warning}
-                </Tag>
-              ))}
-            </Space>
-          )
-        : <Text type="secondary">正常</Text>,
+    render: (_, record) => renderIssueTags(record.issues, record.warnings),
   },
 ];
 
@@ -125,12 +176,16 @@ const ManagerReview: React.FC = () => {
       value: formatCurrency(review?.netTotal, currency),
     },
     {
-      title: '预警行数',
-      value: review?.linesWithWarnings ?? 0,
+      title: '阻塞员工行',
+      value: review?.linesWithBlockingIssues ?? 0,
     },
     {
-      title: '预警总数',
-      value: review?.totalWarnings ?? 0,
+      title: '阻塞问题',
+      value: review?.blockingIssueCount ?? 0,
+    },
+    {
+      title: '复核提醒',
+      value: review?.reviewIssueCount ?? 0,
     },
   ], [review, currency]);
 
@@ -216,13 +271,21 @@ const ManagerReview: React.FC = () => {
               ))}
             </div>
 
-            {review?.warnings && review.warnings.length > 0 && (
+            {review?.issues && review.issues.length > 0 && (
+              <Alert
+                type={review.hasBlockingIssues ? 'error' : 'warning'}
+                showIcon
+                message={review.hasBlockingIssues ? '批次阻塞问题' : '批次复核提醒'}
+                description={renderIssueTags(review.issues, review.warnings)}
+              />
+            )}
+            {!review?.issues?.length && review?.warnings && review.warnings.length > 0 && (
               <Alert
                 type="warning"
                 showIcon
-                message="批次预警"
+                message="批次复核提醒"
                 description={
-                  <Space orientation="vertical" size={4} style={{ width: '100%' }}>
+                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
                     {review.warnings.map((warning, idx) => (
                       <Text key={`${warning}-${idx}`}>{warning}</Text>
                     ))}

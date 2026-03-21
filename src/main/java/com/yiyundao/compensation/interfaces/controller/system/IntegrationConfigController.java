@@ -562,7 +562,9 @@ public class IntegrationConfigController {
                     return "unknown";
             }
             return connected ? "connected" : "disconnected";
-        } catch (Exception e) {
+        } catch (VirtualMachineError e) {
+            throw e;
+        } catch (Throwable e) {
             log.warn("测试{}连接时发生异常", platformType, e);
             return "unknown";
         }

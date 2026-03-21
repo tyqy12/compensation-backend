@@ -12,7 +12,9 @@ import com.yiyundao.compensation.modules.approval.config.ApprovalFlowConfigManag
 import com.yiyundao.compensation.modules.approval.entity.ApprovalStep;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.event.ApprovalCompletedEvent;
+import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.security.SecurityConstants;
 import com.yiyundao.compensation.service.OrganizationSyncService;
@@ -53,6 +55,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     private final SysConfigService sysConfigService;
     private final ApprovalFlowConfigManager approvalFlowConfigManager;
     private final ApplicationEventPublisher eventPublisher;
+    private final ExternalIdentityService externalIdentityService;
 
     // ==================== 流程启动 ====================
 
@@ -165,6 +168,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
                                                       Map<String, Object> workflowData) {
         return switch (workflowType) {
             case BATCH -> generateBatchPaymentSteps();
+            case PAYROLL_DISTRIBUTION -> generatePayrollDistributionSteps();
             case ADHOC -> generateAdhocPaymentSteps();
             case OFFLINE -> generateOfflineEmployeeSteps();
             case PERMISSION -> generatePermissionSteps();
@@ -184,6 +188,17 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     }
 
     /**
+     * 生成薪资发放审批步骤
+     */
+    private List<ApprovalStep> generatePayrollDistributionSteps() {
+        List<ApprovalFlowConfigManager.ApprovalStepConfig> configured = loadPayrollApprovalConfig();
+        if (configured.isEmpty()) {
+            configured = approvalFlowConfigManager.getDefaultSteps(WorkflowType.PAYROLL_DISTRIBUTION);
+        }
+        return buildStepsFromConfig(configured);
+    }
+
+    /**
      * 生成临时支付审批步骤
      */
     private List<ApprovalStep> generateAdhocPaymentSteps() {
@@ -195,7 +210,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     }
 
     /**
-     * 生成离线员工审批步骤
+     * 生成架构外员工审批步骤
      */
     private List<ApprovalStep> generateOfflineEmployeeSteps() {
         List<ApprovalFlowConfigManager.ApprovalStepConfig> config = loadOfflineApprovalConfig();
@@ -321,7 +336,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     }
 
     /**
-     * 从数据库加载离线员工审批配置
+     * 从数据库加载架构外员工审批配置
      */
     private List<ApprovalFlowConfigManager.ApprovalStepConfig> loadOfflineApprovalConfig() {
         return loadApprovalConfig(SecurityConstants.CONFIG_OFFLINE_APPROVAL_FLOW);
@@ -422,11 +437,13 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     private void sendApprovalNotification(ApprovalStep step) {
         try {
             SysUser approver = sysUserService.getById(step.getApproverId());
-            if (approver == null || approver.getPlatformUserId() == null) return;
+            if (approver == null) return;
+            ExternalIdentity identity = externalIdentityService.findPrimaryByUserId(approver.getId());
+            if (identity == null || !StringUtils.hasText(identity.getSubjectId())) return;
             String message = String.format("您有新的审批任务：%s，请及时处理。", step.getStepName());
             sendPlatformNotification(
-                    approver.getPlatformType(),
-                    approver.getPlatformUserId(),
+                    identity.getProvider(),
+                    identity.getSubjectId(),
                     message
             );
         } catch (Exception ignored) { }
@@ -435,26 +452,28 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     private void sendWorkflowCompleteNotification(ApprovalWorkflow workflow, ApprovalStatus finalStatus) {
         try {
             SysUser initiator = sysUserService.getById(workflow.getInitiatorId());
-            if (initiator == null || initiator.getPlatformUserId() == null) return;
+            if (initiator == null) return;
+            ExternalIdentity identity = externalIdentityService.findPrimaryByUserId(initiator.getId());
+            if (identity == null || !StringUtils.hasText(identity.getSubjectId())) return;
             String statusText = finalStatus == ApprovalStatus.APPROVED ? "审批通过" :
                               finalStatus == ApprovalStatus.REJECTED ? "审批拒绝" : "已取消";
             String message = String.format("您的审批流程 %s 已%s。", workflow.getWorkflowName(), statusText);
             sendPlatformNotification(
-                    initiator.getPlatformType(),
-                    initiator.getPlatformUserId(),
+                    identity.getProvider(),
+                    identity.getSubjectId(),
                     message
             );
         } catch (Exception ignored) { }
     }
 
-    private void sendPlatformNotification(String platformType, String platformUserId, String message) {
+    private void sendPlatformNotification(String provider, String subjectId, String message) {
         OrganizationSyncService organizationSyncService = organizationSyncServiceProvider.getIfAvailable();
         if (organizationSyncService == null) {
-            log.debug("OrganizationSyncService 未就绪，跳过通知: platformType={}, platformUserId={}",
-                    platformType, platformUserId);
+            log.debug("OrganizationSyncService 未就绪，跳过通知: provider={}, subjectId={}",
+                    provider, subjectId);
             return;
         }
-        organizationSyncService.sendNotification(platformType, platformUserId, message);
+        organizationSyncService.sendNotification(provider, subjectId, message);
     }
 
     // ==================== 其他 ====================
@@ -462,8 +481,9 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     private String generateWorkflowName(WorkflowType workflowType, String businessKey) {
         String prefix = switch (workflowType) {
             case BATCH -> "批量支付审批";
+            case PAYROLL_DISTRIBUTION -> "薪资发放审批";
             case ADHOC -> "临时支付审批";
-            case OFFLINE -> "离线员工审批";
+            case OFFLINE -> "架构外员工审批";
             case PERMISSION -> "权限授权审批";
             case PAYROLL_DISPUTE -> "薪酬异议审批";
         };

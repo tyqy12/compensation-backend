@@ -56,7 +56,7 @@
 
 支付记录的收款账号从以下字段依次取值：
 
-1. `employee.platformUserId`
+1. `employee.subjectId`
 2. `employee.phone`
 3. `employee.email`
 4. `employee.bankAccount`

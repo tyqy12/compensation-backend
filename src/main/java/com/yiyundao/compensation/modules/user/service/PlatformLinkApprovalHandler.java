@@ -11,6 +11,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.util.StringUtils;
 
 import java.util.Map;
 
@@ -30,6 +31,7 @@ public class PlatformLinkApprovalHandler {
 
     private final UserBindingService userBindingService;
     private final ObjectMapper objectMapper;
+    private final LegacyPlatformFieldPolicy legacyPlatformFieldPolicy;
 
     /**
      * 监听审批完成事件
@@ -73,8 +75,10 @@ public class PlatformLinkApprovalHandler {
 
                 Long userId = toLong(data.get("userId"));
                 Long employeeId = toLong(data.get("employeeId"));
-                String platformType = (String) data.get("proposedPlatformType");
-                String platformUserId = (String) data.get("proposedPlatformUserId");
+                String provider = resolveFieldWithLegacyFallback(
+                        data, workflow.getId(), "proposedProvider", "proposedPlatformType");
+                String subjectId = resolveFieldWithLegacyFallback(
+                        data, workflow.getId(), "proposedSubjectId", "proposedPlatformUserId");
 
                 // 关键字段验证
                 if (userId == null) {
@@ -83,10 +87,10 @@ public class PlatformLinkApprovalHandler {
                 }
 
                 // 执行绑定操作
-                if (platformType != null && platformUserId != null) {
-                    log.info("执行平台绑定: workflowId={}, userId={}, platformType={}, platformUserId={}",
-                            workflow.getId(), userId, platformType, platformUserId);
-                    userBindingService.bindPlatform(userId, platformType, platformUserId);
+                if (provider != null && subjectId != null) {
+                    log.info("执行平台绑定: workflowId={}, userId={}, provider={}, subjectId={}",
+                            workflow.getId(), userId, provider, subjectId);
+                    userBindingService.bindPlatform(userId, provider, subjectId);
                 }
                 if (employeeId != null) {
                     log.info("执行员工关联: workflowId={}, userId={}, employeeId={}",
@@ -114,5 +118,34 @@ public class PlatformLinkApprovalHandler {
         if (o == null) return null;
         if (o instanceof Number) return ((Number) o).longValue();
         try { return Long.parseLong(String.valueOf(o)); } catch (Exception e) { return null; }
+    }
+
+    private String resolveFieldWithLegacyFallback(Map<String, Object> data,
+                                                  Long workflowId,
+                                                  String preferredKey,
+                                                  String legacyKey) {
+        String preferred = toTrimmedString(data.get(preferredKey));
+        String legacy = toTrimmedString(data.get(legacyKey));
+        if (!StringUtils.hasText(preferred) && StringUtils.hasText(legacy)) {
+            legacyPlatformFieldPolicy.handleLegacyWorkflowFallback(
+                    "user_platform_link_approval",
+                    workflowId,
+                    preferredKey,
+                    legacyKey,
+                    legacy
+            );
+        }
+        if (StringUtils.hasText(preferred)) {
+            return preferred;
+        }
+        return StringUtils.hasText(legacy) ? legacy : null;
+    }
+
+    private String toTrimmedString(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value).trim();
+        return text.isEmpty() ? null : text;
     }
 }

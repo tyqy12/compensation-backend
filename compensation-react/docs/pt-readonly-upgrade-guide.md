@@ -57,7 +57,7 @@
 
 ### 4.2 工资行
 - `GET /api/v1/payroll/batches/{id}/lines`
-  - Query：`employeeRef`（支持 `emp:<employeeNo>` 或 `<platformType>:<platformUserId>`）、`page`、`size`
+  - Query：`employeeRef`（支持 `emp:<employeeNo>` 或 `<provider>:<subjectId>`）、`page`、`size`
   - 响应：`Page<OpenApiPayrollLineDto>`，关键字段：
     - `employeeRef`：已根据平台 ID 或员工号拼接
     - `employeeNameMasked` / `phoneMasked`：脱敏显示

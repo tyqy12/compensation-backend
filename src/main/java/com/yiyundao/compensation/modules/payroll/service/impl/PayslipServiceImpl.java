@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.interfaces.dto.payroll.EmployeePayslipDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollPreviewDto;
+import com.yiyundao.compensation.interfaces.dto.payroll.PayrollValidationIssueDto;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.payroll.entity.PayCycle;
@@ -15,6 +16,7 @@ import com.yiyundao.compensation.modules.payroll.service.PayCycleService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayslipService;
+import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.security.SecurityConstants;
@@ -44,6 +46,7 @@ public class PayslipServiceImpl implements PayslipService {
     private final PayCycleService payCycleService;
     private final EmployeeService employeeService;
     private final ObjectMapper objectMapper;
+    private final PayrollValidationIssueSupport validationIssueSupport;
     private final UserRoleService userRoleService;
 
     @Override
@@ -135,7 +138,12 @@ public class PayslipServiceImpl implements PayslipService {
         detail.setConfirmationComment(line.getConfirmationComment());
         detail.setObjectionReason(line.getObjectionReason());
         detail.setDisputeWorkflowId(line.getDisputeWorkflowId());
-        detail.setWarnings(Collections.emptyList());
+        List<PayrollValidationIssueDto> issues = validationIssueSupport.deserialize(line.getWarning());
+        detail.setIssues(issues);
+        detail.setWarnings(validationIssueSupport.toMessages(issues));
+        detail.setBlockingIssueCount(validationIssueSupport.countBlocking(issues));
+        detail.setReviewIssueCount(validationIssueSupport.countReview(issues));
+        detail.setHasBlockingIssues(validationIssueSupport.hasBlocking(issues));
 
         if (batch != null) {
             detail.setPeriodLabel(batch.getPeriodLabel());

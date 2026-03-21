@@ -11,8 +11,13 @@ public class PayrollPreviewDto {
     private String currency;
     private Integer totalEmployees;
     private Integer linesWithWarnings;
+    private Integer linesWithBlockingIssues;
     private Integer totalWarnings;
+    private Integer blockingIssueCount;
+    private Integer reviewIssueCount;
+    private Boolean hasBlockingIssues;
     private List<String> warnings;
+    private List<PayrollValidationIssueDto> issues;
     private BigDecimal earningsTotal;
     private BigDecimal deductionsTotal;
     private BigDecimal grossTotal;
@@ -35,6 +40,10 @@ public class PayrollPreviewDto {
         private BigDecimal netAmount;
         // warnings and diffs
         private List<String> warnings; // 缺失项/阈值/异常提示
+        private List<PayrollValidationIssueDto> issues;
+        private Integer blockingIssueCount;
+        private Integer reviewIssueCount;
+        private Boolean hasBlockingIssues;
         private List<String> missingItems; // 模板要求但缺失的项编码
         private DiffSummaryDto diff; // 与上期对比
         private String department;

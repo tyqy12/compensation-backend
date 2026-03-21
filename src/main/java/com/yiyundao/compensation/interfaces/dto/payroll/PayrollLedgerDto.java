@@ -19,8 +19,13 @@ public class PayrollLedgerDto {
     private BigDecimal socialTotal;
     private BigDecimal netTotal;
     private Integer linesWithWarnings;
+    private Integer linesWithBlockingIssues;
     private Integer totalWarnings;
+    private Integer blockingIssueCount;
+    private Integer reviewIssueCount;
+    private Boolean hasBlockingIssues;
     private List<String> warnings;
+    private List<PayrollValidationIssueDto> issues;
     private List<PayrollPreviewDto.PayrollPreviewLineDto> lines;
 }
 

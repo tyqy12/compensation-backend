@@ -19,12 +19,15 @@ const PayrollTemplatesPage = React.lazy(() => import('@pages/payroll/Templates')
 const PayrollCyclesPage = React.lazy(() => import('@pages/payroll/Cycles'));
 const AppRegistryPage = React.lazy(() => import('@pages/admin/AppRegistry'));
 const EmployeesList = React.lazy(() => import('@pages/employees/List'));
+const EmployeeProfile = React.lazy(() => import('@pages/employees/Profile'));
 const EmployeeDetail = React.lazy(() => import('@pages/employees/Detail'));
 const Batches = React.lazy(() => import('@pages/payments/Batches'));
 const BatchDetail = React.lazy(() => import('@pages/payments/BatchDetail'));
 const PayrollBatchLedgerPage = React.lazy(() => import('@pages/payroll/BatchLedger'));
 const PayrollManagerReviewPage = React.lazy(() => import('@pages/payroll/ManagerReview'));
 const PayrollConfirmationsPage = React.lazy(() => import('@pages/payroll/Confirmations'));
+const PayrollDistributionsPage = React.lazy(() => import('@pages/payroll/Distributions'));
+const PayrollReconciliationsPage = React.lazy(() => import('@pages/payroll/Reconciliations'));
 const PartTimeReadonlyPage = React.lazy(() => import('@pages/payroll/PartTimeReadonly'));
 const ApprovalWorkflowsPage = React.lazy(() => import('@pages/approval/Workflows'));
 const AuditLogsPage = React.lazy(() => import('@pages/admin/AuditLogs'));
@@ -88,12 +91,15 @@ export const router = createBrowserRouter([
       { path: 'payroll/cycles', element: withGuard(<Suspense fallback={<Loading />}><PayrollCyclesPage /></Suspense>) },
       { path: 'approval/workflows', element: withGuard(<Suspense fallback={<Loading />}><ApprovalWorkflowsPage /></Suspense>) },
       { path: 'employees', element: withGuard(<Suspense fallback={<Loading />}><EmployeesList /></Suspense>) },
+      { path: 'employees/me', element: withGuard(<Suspense fallback={<Loading />}><EmployeeProfile /></Suspense>) },
       { path: 'employees/:id', element: withGuard(<Suspense fallback={<Loading />}><EmployeeDetail /></Suspense>) },
       { path: 'payments/batches', element: withGuard(<Suspense fallback={<Loading />}><Batches /></Suspense>) },
       { path: 'payments/batches/:batchNo', element: withGuard(<Suspense fallback={<Loading />}><BatchDetail /></Suspense>) },
       { path: 'payroll/batches/:batchId/ledger', element: withGuard(<Suspense fallback={<Loading />}><PayrollBatchLedgerPage /></Suspense>) },
       { path: 'payroll/batches/:batchId/manager-review', element: withGuard(<Suspense fallback={<Loading />}><PayrollManagerReviewPage /></Suspense>) },
       { path: 'payroll/confirmations', element: withGuard(<Suspense fallback={<Loading />}><PayrollConfirmationsPage /></Suspense>) },
+      { path: 'payroll/distributions', element: withGuard(<Suspense fallback={<Loading />}><PayrollDistributionsPage /></Suspense>) },
+      { path: 'payroll/reconciliations', element: withGuard(<Suspense fallback={<Loading />}><PayrollReconciliationsPage /></Suspense>) },
       { path: 'payroll/pt-readonly', element: withGuard(<Suspense fallback={<Loading />}><PartTimeReadonlyPage /></Suspense>) },
       // 动态路由渲染：当后端下发了新 VIEW/MENU 资源且前端未静态注册时，由此兜底加载对应组件
       { path: '*', element: withGuard(<Suspense fallback={<Loading />}><DynamicPageRenderer /></Suspense>) },

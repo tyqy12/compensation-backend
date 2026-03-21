@@ -67,14 +67,19 @@ VALUES
 ('API','api.employee.update','员工管理-更新','/api/employee/{id}',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),130,JSON_OBJECT('method','PUT'),'enabled',@now,@now),
 ('API','api.employee.status','员工管理-状态更新','/api/employee/{id}/status',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),140,JSON_OBJECT('method','PATCH'),'enabled',@now,@now),
 ('API','api.employee.bind-platform','员工管理-绑定平台','/api/employee/{id}/bind-platform',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),150,JSON_OBJECT('method','POST'),'enabled',@now,@now),
-('API','api.employee.offline-list','员工管理-离线列表','/api/employee/offline',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),160,JSON_OBJECT('method','GET'),'enabled',@now,@now),
+('API','api.employee.offline-list','员工管理-架构外员工列表','/api/employee/offline',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),160,JSON_OBJECT('method','GET'),'enabled',@now,@now),
+('API','api.employee.resigned-list','员工管理-离职员工列表','/api/employee/resigned',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),165,JSON_OBJECT('method','GET'),'enabled',@now,@now),
 ('API','api.employee.batch-import','员工管理-批量导入','/api/employee/batch-import',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),170,JSON_OBJECT('method','POST'),'enabled',@now,@now),
 ('API','api.employee.approvals','员工管理-审批记录','/api/employee/{id}/approvals',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),175,JSON_OBJECT('method','GET'),'enabled',@now,@now),
 ('API','api.employee.payslips','员工管理-发薪记录','/api/employee/{id}/payslips',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),176,JSON_OBJECT('method','GET'),'enabled',@now,@now),
 ('API','api.employee.payments','员工管理-支付记录','/api/employee/{id}/payments',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),177,JSON_OBJECT('method','GET'),'enabled',@now,@now),
 ('API','api.employee.decrypt-id-card','员工管理-身份证解密','/api/employee/{id}/id-card',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),180,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now),
 ('API','api.employee.decrypt-bank','员工管理-银行卡解密','/api/employee/{id}/bank-account',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),190,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now),
-('API','api.employee.decrypt-settlement','员工管理-收款账户解密','/api/employee/{id}/settlement-account',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),191,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now)
+('API','api.employee.decrypt-settlement','员工管理-收款账户解密','/api/employee/{id}/settlement-account',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),191,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now),
+('API','api.employee.me.detail','员工自助-本人资料','/api/employee/me',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),192,JSON_OBJECT('method','GET'),'enabled',@now,@now),
+('API','api.employee.me.contact-update','员工自助-联系方式更新','/api/employee/me/contact',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),193,JSON_OBJECT('method','PATCH'),'enabled',@now,@now),
+('API','api.employee.me.change-request-create','员工自助-提交敏感信息变更','/api/employee/me/change-requests',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),194,JSON_OBJECT('method','POST'),'enabled',@now,@now),
+('API','api.employee.me.change-request-list','员工自助-查询敏感信息变更','/api/employee/me/change-requests',NULL,NULL,(SELECT id FROM sys_resource WHERE code='employees' LIMIT 1),195,JSON_OBJECT('method','GET'),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
 -- 支付模块 API

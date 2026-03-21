@@ -17,7 +17,7 @@ export const api: AxiosInstance = axios.create({
 export type ApiResponse<T> = {
   code: number;
   message: string;
-  data: T;
+  data?: T;
   traceId?: string;
   timestamp?: string;
   success?: boolean;
@@ -98,12 +98,11 @@ export function unwrap<T>(res: ApiResponse<T>): T {
   if (res.code !== 0) {
     throw new ApiResponseError(res.code, res.message || '请求失败', res.traceId);
   }
-  // 防御性编程：data 字段可能不存在（如后端返回 null 被 @JsonInclude(NON_NULL) 省略）
-  if (!('data' in res)) {
-    console.warn('[API] 响应缺少 data 字段:', res);
+  // 后端在 code=0 且无业务载荷时可能省略 data（如 @JsonInclude(NON_NULL)）
+  if (!Object.prototype.hasOwnProperty.call(res, 'data')) {
     return undefined as T;
   }
-  return res.data;
+  return res.data as T;
 }
 
 // 重新导出类型以供使用

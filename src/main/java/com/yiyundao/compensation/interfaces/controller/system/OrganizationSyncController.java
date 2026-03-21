@@ -8,7 +8,9 @@ import jakarta.servlet.http.HttpServletRequest;
 import com.yiyundao.compensation.service.OrganizationSyncService;
 import com.yiyundao.compensation.modules.system.service.OrgSyncTaskService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
+import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -28,6 +30,8 @@ public class OrganizationSyncController {
     private final AuditLogService auditLogService;
     private final OrgSyncTaskService orgSyncTaskService;
     private final com.yiyundao.compensation.modules.employee.service.EmployeeDepartmentService employeeDepartmentService;
+    private final com.yiyundao.compensation.modules.employee.service.EmployeeService employeeService;
+    private final LegacyPlatformFieldPolicy legacyPlatformFieldPolicy;
 
     // 触发单平台或全平台同步，platform=wechat|dingtalk|feishu|all
     @PostMapping("/sync")
@@ -84,13 +88,15 @@ public class OrganizationSyncController {
         // 聚合：按平台用户聚合多部门
         java.util.Map<String, com.yiyundao.compensation.interfaces.dto.org.EmployeePreviewDto> map = new java.util.LinkedHashMap<>();
         for (com.yiyundao.compensation.modules.employee.entity.Employee e : raw) {
-            String key = e.getPlatformType() + ":" + e.getPlatformUserId();
+            String normalizedPlatform = firstNonBlank(normalizePlatform(e.getProvider()), e.getProvider());
+            String key = normalizedPlatform + ":" + e.getSubjectId();
             com.yiyundao.compensation.interfaces.dto.org.EmployeePreviewDto dto = map.get(key);
             if (dto == null) {
+                String subjectId = e.getSubjectId();
                 dto = new com.yiyundao.compensation.interfaces.dto.org.EmployeePreviewDto();
                 dto.setGroupKey(key);
-                dto.setPlatformType(e.getPlatformType());
-                dto.setPlatformUserId(e.getPlatformUserId());
+                dto.setProvider(normalizedPlatform);
+                dto.setSubjectId(subjectId);
                 dto.setEmployeeId(null); // 工号由前端填写
                 dto.setName(e.getName());
                 dto.setPhone(e.getPhone());
@@ -98,6 +104,15 @@ public class OrganizationSyncController {
                 dto.setDepartments(new java.util.ArrayList<>());
                 dto.setPosition(e.getPosition());
                 dto.setEmploymentType(e.getEmploymentType());
+                com.yiyundao.compensation.modules.employee.entity.Employee existing = null;
+                if (StringUtils.hasText(normalizedPlatform) && StringUtils.hasText(subjectId)) {
+                    existing = employeeService.getByProviderAndSubjectId(normalizedPlatform, subjectId);
+                }
+                boolean alreadyImported = existing != null;
+                dto.setAlreadyImported(alreadyImported);
+                dto.setExistingEmployeeDbId(alreadyImported ? existing.getId() : null);
+                dto.setExistingEmployeeNo(alreadyImported ? existing.getEmployeeId() : null);
+                dto.setImportAction(alreadyImported ? "UPDATE" : "CREATE");
                 map.put(key, dto);
             }
             if (e.getDepartment() != null && !e.getDepartment().isBlank()) {
@@ -113,8 +128,11 @@ public class OrganizationSyncController {
             }
         }
         com.yiyundao.compensation.interfaces.dto.org.OrgFetchPreviewResponse resp = new com.yiyundao.compensation.interfaces.dto.org.OrgFetchPreviewResponse();
-        resp.setPlatformType(p);
+        resp.setProvider(p);
         resp.setTotalEmployees(map.size());
+        int existingEmployees = (int) map.values().stream().filter(i -> Boolean.TRUE.equals(i.getAlreadyImported())).count();
+        resp.setExistingEmployees(existingEmployees);
+        resp.setNewEmployees(Math.max(0, map.size() - existingEmployees));
         resp.setEmployees(new java.util.ArrayList<>(map.values()));
         return ApiResponse.success(resp);
     }
@@ -132,7 +150,7 @@ public class OrganizationSyncController {
         if (p == null || "all".equals(p)) return ApiResponse.error(ErrorCode.PARAM_INVALID, "请指定单个平台：wechat|dingtalk|feishu");
         java.util.List<com.yiyundao.compensation.interfaces.dto.org.OrgDeptNodeDto> roots = organizationSyncService.fetchDepartmentTree(p);
         com.yiyundao.compensation.interfaces.dto.org.OrgDeptTreeResponse resp = new com.yiyundao.compensation.interfaces.dto.org.OrgDeptTreeResponse();
-        resp.setPlatformType(p);
+        resp.setProvider(p);
         resp.setRoots(roots);
         return ApiResponse.success(resp);
     }
@@ -142,10 +160,43 @@ public class OrganizationSyncController {
     @SecurityAnnotations.HasOrgSyncPermission
     public ApiResponse<java.util.Map<String, Object>> importEmployees(@RequestBody com.yiyundao.compensation.interfaces.dto.org.OrgImportRequest req) {
         if (req == null || req.getItems() == null || req.getItems().isEmpty()) return ApiResponse.error(ErrorCode.PARAM_INVALID, "导入内容为空");
-        int ok = 0; int fail = 0;
+        legacyPlatformFieldPolicy.handleLegacyInput(
+                "org_import_request",
+                req.getLegacyPlatformType(),
+                null
+        );
+        String requestPlatform = normalizePlatform(req.getProvider());
+        String importMode = resolveImportMode(req);
+        boolean upsertMode = "upsert".equalsIgnoreCase(importMode);
+        int ok = 0;
+        int fail = 0;
+        int skipped = 0;
+        int created = 0;
+        int updated = 0;
         java.util.List<String> errors = new java.util.ArrayList<>();
+        java.util.List<String> skippedItems = new java.util.ArrayList<>();
         for (com.yiyundao.compensation.interfaces.dto.org.OrgImportRequest.EmployeeItem it : req.getItems()) {
             try {
+                legacyPlatformFieldPolicy.handleLegacyInput(
+                        "org_import_item",
+                        it.getLegacyPlatformType(),
+                        it.getLegacyPlatformUserId()
+                );
+                String itemPlatform = firstNonBlank(normalizePlatform(it.getProvider()), requestPlatform);
+                String subjectId = trimToNull(it.getSubjectId());
+                com.yiyundao.compensation.modules.employee.entity.Employee existing = null;
+                if (StringUtils.hasText(itemPlatform) && StringUtils.hasText(subjectId)) {
+                    existing = employeeService.getByProviderAndSubjectId(itemPlatform, subjectId);
+                }
+                if (existing != null && !upsertMode) {
+                    skipped++;
+                    skippedItems.add(String.format("已跳过：%s(%s) 已存在，员工工号=%s",
+                            firstNonBlank(it.getName(), "未命名"),
+                            subjectId,
+                            firstNonBlank(existing.getEmployeeId(), "未知")));
+                    continue;
+                }
+
                 com.yiyundao.compensation.modules.employee.entity.Employee e = new com.yiyundao.compensation.modules.employee.entity.Employee();
                 e.setEmployeeId(it.getEmployeeId());
                 e.setName(it.getName());
@@ -157,8 +208,8 @@ public class OrganizationSyncController {
                 }
                 e.setPosition(it.getPosition());
                 e.setEmploymentType(it.getEmploymentType());
-                e.setPlatformUserId(it.getPlatformUserId());
-                e.setPlatformType(it.getPlatformType());
+                e.setSubjectId(subjectId);
+                e.setProvider(itemPlatform);
                 e.setStatus(it.getStatus());
                 e.setOffline(it.getOffline());
                 e.setManagerId(it.getManagerId());
@@ -166,19 +217,40 @@ public class OrganizationSyncController {
                 e.setBankName(it.getBankName());
                 e.setHireDate(it.getHireDate());
                 com.yiyundao.compensation.modules.employee.entity.Employee saved = organizationSyncService.importOne(e, it.getUsername());
+                if (saved == null) {
+                    fail++;
+                    errors.add(String.format("导入失败：%s(%s) 未返回结果",
+                            firstNonBlank(it.getName(), "未命名"),
+                            firstNonBlank(subjectId, "无平台ID")));
+                    continue;
+                }
                 // 维护多部门关联
                 if (it.getDepartments() != null && !it.getDepartments().isEmpty()) {
-                    employeeDepartmentService.replaceDepartments(saved.getId(), saved.getPlatformType(), it.getDepartments());
+                    employeeDepartmentService.replaceDepartments(saved.getId(), itemPlatform, it.getDepartments());
                 }
-                if (saved != null) ok++; else fail++;
+                ok++;
+                if (existing != null) {
+                    updated++;
+                } else {
+                    created++;
+                }
             } catch (Exception ex) {
                 fail++;
-                errors.add(ex.getMessage());
+                errors.add(String.format("导入失败：%s(%s)，原因：%s",
+                        firstNonBlank(it.getName(), "未命名"),
+                        firstNonBlank(it.getSubjectId(), "无平台ID"),
+                        ex.getMessage()));
             }
         }
         java.util.Map<String, Object> result = new java.util.HashMap<>();
         result.put("success", ok);
+        result.put("created", created);
+        result.put("updated", updated);
+        result.put("skipped", skipped);
         result.put("failed", fail);
+        result.put("importMode", importMode);
+        result.put("upsertMode", upsertMode);
+        result.put("skippedItems", skippedItems);
         result.put("errors", errors);
         return ApiResponse.success(result);
     }
@@ -205,6 +277,47 @@ public class OrganizationSyncController {
             default:
                 return null;
         }
+    }
+
+    private String resolveImportMode(com.yiyundao.compensation.interfaces.dto.org.OrgImportRequest req) {
+        if (req == null) {
+            return "new_only";
+        }
+        if (StringUtils.hasText(req.getImportMode())) {
+            return req.getImportMode().trim().toLowerCase();
+        }
+        Map<String, Object> metadata = req.getMetadata();
+        if (metadata != null && !metadata.isEmpty()) {
+            Object mode = metadata.get("importMode");
+            if (mode instanceof String modeText && StringUtils.hasText(modeText)) {
+                return modeText.trim().toLowerCase();
+            }
+            Object includeImported = metadata.get("includeImported");
+            if (includeImported instanceof Boolean boolValue && boolValue) {
+                return "upsert";
+            }
+        }
+        return "new_only";
+    }
+
+    private String trimToNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        String trimmed = value.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String firstNonBlank(String... values) {
+        if (values == null || values.length == 0) {
+            return null;
+        }
+        for (String value : values) {
+            if (StringUtils.hasText(value)) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     // 异步任务查询

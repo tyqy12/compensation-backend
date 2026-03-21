@@ -5,6 +5,7 @@ import com.yiyundao.compensation.enums.ApprovalStatus;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.event.ApprovalCompletedEvent;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult;
+import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -12,6 +13,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
+import org.springframework.util.StringUtils;
 
 /**
  * 员工平台绑定审批处理器
@@ -29,6 +31,7 @@ public class PlatformBindApprovalHandler {
 
     private final EmployeeService employeeService;
     private final ObjectMapper objectMapper;
+    private final LegacyPlatformFieldPolicy legacyPlatformFieldPolicy;
 
     /**
      * 监听审批完成事件
@@ -90,17 +93,17 @@ public class PlatformBindApprovalHandler {
             }
 
             Long employeeId = toLong(data.get("employeeId"));
-            String platformType = (String) data.get("platformType");
-            String platformUserId = (String) data.get("platformUserId");
+            String provider = resolveFieldWithLegacyFallback(data, workflow.getId(), "provider", "platformType");
+            String subjectId = resolveFieldWithLegacyFallback(data, workflow.getId(), "subjectId", "platformUserId");
 
-            if (employeeId == null || platformType == null || platformUserId == null) {
-                log.warn("审批数据不完整: workflowId={}, employeeId={}, platformType={}, platformUserId={}",
-                        workflow.getId(), employeeId, platformType, platformUserId);
+            if (employeeId == null || provider == null || subjectId == null) {
+                log.warn("审批数据不完整: workflowId={}, employeeId={}, provider={}, subjectId={}",
+                        workflow.getId(), employeeId, provider, subjectId);
                 return;
             }
 
             BindPlatformResult result = employeeService.executeApprovedBinding(
-                    workflow.getId(), employeeId, platformType, platformUserId);
+                    workflow.getId(), employeeId, provider, subjectId);
 
             if (result.getResult().isSuccess()) {
                 log.info("员工平台绑定审批执行成功: workflowId={}, employeeId={}, userId={}",
@@ -143,5 +146,34 @@ public class PlatformBindApprovalHandler {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private String resolveFieldWithLegacyFallback(java.util.Map<String, Object> data,
+                                                  Long workflowId,
+                                                  String preferredKey,
+                                                  String legacyKey) {
+        String preferred = toTrimmedString(data.get(preferredKey));
+        String legacy = toTrimmedString(data.get(legacyKey));
+        if (!StringUtils.hasText(preferred) && StringUtils.hasText(legacy)) {
+            legacyPlatformFieldPolicy.handleLegacyWorkflowFallback(
+                    "employee_platform_bind_approval",
+                    workflowId,
+                    preferredKey,
+                    legacyKey,
+                    legacy
+            );
+        }
+        if (StringUtils.hasText(preferred)) {
+            return preferred;
+        }
+        return StringUtils.hasText(legacy) ? legacy : null;
+    }
+
+    private String toTrimmedString(Object value) {
+        if (value == null) {
+            return null;
+        }
+        String text = String.valueOf(value).trim();
+        return text.isEmpty() ? null : text;
     }
 }

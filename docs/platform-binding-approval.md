@@ -10,8 +10,8 @@
 
 ## 一、触发时机
 
-- 绑定平台账号 `bindPlatform(userId, platformType, platformUserId)`：
-  - 冲突1：同一平台 `platformUserId` 已被其他用户绑定
+- 绑定平台账号 `bindPlatform(userId, provider, subjectId)`：
+  - 冲突1：同一平台 `subjectId` 已被其他用户绑定
   - 冲突2：根据平台账号定位到员工后，该员工已被其他用户绑定
 - 人工绑定员工 `bindEmployee(userId, employeeId)`：
   - 冲突：该员工已被其他用户绑定
@@ -24,8 +24,8 @@
 {
   "userId": 123,
   "employeeId": 456, // 可选
-  "proposedPlatformType": "wechat",
-  "proposedPlatformUserId": "wx_abc",
+  "proposedProvider": "wechat",
+  "proposedSubjectId": "wx_abc",
   "snapshotUser": { ... SysUser 快照 ... },
   "snapshotEmployee": { ... Employee 快照 ... }
 }
@@ -33,6 +33,8 @@
 
 - `proposed*`：本次拟生效的变更
 - `snapshot*`：冲突发生时的原始数据快照（JSON），用于审计与必要时回滚
+- 兼容说明：历史流程数据中的 `proposedPlatformType/proposedPlatformUserId` 仍可识别，
+  但已进入下线窗口（由 `LegacyPlatformFieldPolicy.workflow-data-mode` 控制告警或拒绝）。
 
 ## 三、流程与回调
 
@@ -49,7 +51,7 @@ sequenceDiagram
   participant HD as PlatformLinkApprovalHandler
 
   FE->>API: PUT /admin/users/{id}/platform-binding
-  API->>SVC: bindPlatform(userId, type, uid)
+  API->>SVC: bindPlatform(userId, provider, subjectId)
   alt 冲突
     SVC->>FLOW: startWorkflow(PLATFORM_LINK, workflowData)
     FLOW-->>API: workflowId
@@ -83,7 +85,7 @@ sequenceDiagram
 ## 五、管理员配置建议
 
 - 审批人选择策略：当前默认管理员固定审批，后续可按 `department`、`roles` 或 `sys_config` 动态决定 approver；
-- 通知渠道：依赖已绑定的 `platformType/platformUserId`，可扩展邮件/SMS 兜底；
+- 通知渠道：依赖已绑定的 `provider/subjectId`，可扩展邮件/SMS 兜底；
 - 回滚：如需“按快照恢复”的能力，可在管理员端新增“按 workflowId 恢复”的接口（需要快照数据与差异合并策略）。
 
 ---

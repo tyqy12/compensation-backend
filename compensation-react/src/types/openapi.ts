@@ -18,8 +18,8 @@ export interface EmployeeVO {
   department?: string; // 展示用主部门
   departments?: string[]; // 多部门名称数组
   position?: string;
-  platformUserId?: string;
-  platformType?: string; // wechat | dingtalk | feishu
+  provider?: string;
+  subjectId?: string;
   managerId?: number;
   managerName?: string;
   hireDate?: string; // date
@@ -31,7 +31,7 @@ export interface EmployeeVO {
   bankAccountMasked?: string;
   bankName?: string;
   bankBranchName?: string;
-  offline?: boolean;
+  offline?: boolean; // 是否架构外员工
   employmentType?: 'full_time' | 'part_time';
   createTime?: string; // date-time
   updateTime?: string; // date-time
@@ -46,8 +46,8 @@ export interface EmployeeCreateRequest {
   department?: string; // 展示用主部门
   departments?: string[]; // 多部门数组
   position?: string;
-  platformUserId?: string;
-  platformType?: string;
+  provider?: string; // 推荐字段：平台类型（wechat|dingtalk|feishu）
+  subjectId?: string; // 推荐字段：平台主体ID
   managerId?: number;
   hireDate?: string; // date
   status?: string;
@@ -57,7 +57,7 @@ export interface EmployeeCreateRequest {
   bankAccount?: string;
   bankName?: string;
   bankBranchName?: string;
-  offline?: boolean;
+  offline?: boolean; // 是否架构外员工
   // New optional fields after backend upgrade
   employmentType?: 'full_time' | 'part_time';
   username?: string;
@@ -81,7 +81,7 @@ export interface EmployeeUpdateRequest {
   bankName?: string;
   bankBranchName?: string;
   employmentType?: 'full_time' | 'part_time';
-  offline?: boolean;
+  offline?: boolean; // 是否架构外员工
 }
 
 export interface UpdateStatusRequest {
@@ -89,8 +89,9 @@ export interface UpdateStatusRequest {
 }
 
 export interface BindPlatformRequest {
-  platformUserId: string;
-  platformType: string;
+  provider?: string;
+  subjectId?: string;
+  forceBind?: boolean;
 }
 
 export interface BatchImportRequest {
@@ -118,9 +119,15 @@ export interface PaymentBatchVO {
 export interface PaymentRecordItemVO {
   id?: number;
   batchNo?: string;
+  employeeId?: number;
+  employeeNo?: string;
+  employeeName?: string;
   paymentType?: string;
+  paymentMethod?: string;
   amount?: number;
   currency?: string;
+  recipientName?: string;
+  recipientAccountMasked?: string;
   status?: string;
   alipayOrderNo?: string;
   alipayTradeNo?: string;
@@ -131,6 +138,8 @@ export interface PaymentRecordItemVO {
   errorMsg?: string;
   paymentTime?: string; // date-time
   notificationTime?: string; // date-time
+  createTime?: string; // date-time
+  updateTime?: string; // date-time
 }
 
 // Common helpers for paged structures used in code
@@ -158,6 +167,20 @@ export interface PayrollPreviewItemDto {
   category?: 'earning' | 'deduction' | 'tax' | 'social';
   showOnPayslip?: boolean;
   order?: number;
+  code?: string;
+  name?: string;
+  type?: 'earning' | 'deduction' | string;
+  taxable?: boolean;
+}
+
+export interface PayrollValidationIssueDto {
+  code?: string;
+  severity?: 'blocking' | 'review' | 'info' | string;
+  blocking?: boolean;
+  message?: string;
+  itemCode?: string;
+  currentValue?: string;
+  expectedValue?: string;
 }
 
 export interface PayrollPreviewLineDto {
@@ -173,13 +196,26 @@ export interface PayrollPreviewLineDto {
   currency?: string;
   grossAmount?: number;
   earningsAmount?: number;
+  earningsTotal?: number;
   deductionsAmount?: number;
+  deductionsTotal?: number;
   taxAmount?: number;
   socialAmount?: number;
   netAmount?: number;
   adjustmentsTotal?: number;
   warnings?: string[];
+  issues?: PayrollValidationIssueDto[];
+  blockingIssueCount?: number;
+  reviewIssueCount?: number;
+  hasBlockingIssues?: boolean;
+  missingItems?: string[];
   differences?: string[];
+  diff?: {
+    lastGrossAmount?: number;
+    lastNetAmount?: number;
+    netDeltaAmount?: number;
+    netDeltaPercent?: number;
+  };
   items?: PayrollPreviewItemDto[];
   lastUpdatedAt?: string;
 }
@@ -197,8 +233,13 @@ interface PayrollSummaryBase {
   socialTotal?: number;
   netTotal?: number;
   linesWithWarnings?: number;
+  linesWithBlockingIssues?: number;
   totalWarnings?: number;
+  blockingIssueCount?: number;
+  reviewIssueCount?: number;
+  hasBlockingIssues?: boolean;
   warnings?: string[];
+  issues?: PayrollValidationIssueDto[];
 }
 
 export interface PayrollPreviewDto extends PayrollSummaryBase {
@@ -225,8 +266,16 @@ export interface PayrollBatchSummaryDto {
   periodLabel?: string;
   status?: string;
   computeStatus?: string;
+  calculationStatus?: string;
   approvalStatus?: string;
+  approvalWorkflowId?: number;
   paymentStatus?: string;
+  paymentBatchNo?: string;
+  batchRevision?: number;
+  confirmationRequired?: boolean;
+  confirmationMode?: string;
+  confirmationCompletedTime?: string;
+  settlementProviderCode?: string;
   totalEmployees?: number;
   totalLines?: number;
   grossTotal?: number;
@@ -239,6 +288,83 @@ export interface PayrollBatchSummaryDto {
   approvedAt?: string;
   paidAt?: string;
   remark?: string;
+}
+
+export interface PayrollDistributionDto {
+  id?: number;
+  distributionNo?: string;
+  batchId?: number;
+  batchRevision?: number;
+  periodLabel?: string;
+  payrollType?: string;
+  distributionStatus?: string;
+  totalAmount?: number;
+  totalCount?: number;
+  scheduledDate?: string;
+  retryLimit?: number;
+  allowPartial?: boolean;
+  actualAmount?: number;
+  successCount?: number;
+  failedCount?: number;
+  currentAttempt?: number;
+  approvalWorkflowId?: number;
+  approvalStatus?: string;
+  approvalResult?: string;
+  approvalSubmittedAt?: string;
+  approvalCompletedAt?: string;
+  paymentBatchNo?: string;
+  settlementProviderCode?: string;
+  reconciliationTaskId?: number;
+  reconciliationTaskStatus?: string;
+  reconciliationResult?: string;
+  reconciliationDifference?: number;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface PayrollDistributionItemDto {
+  id?: number;
+  distributionId?: number;
+  employeeId?: number;
+  lineId?: number;
+  employeeName?: string;
+  recipientName?: string;
+  accountNoMasked?: string;
+  accountType?: string;
+  paymentMethod?: string;
+  providerCode?: string;
+  amount?: number;
+  itemStatus?: string;
+  paymentRecordId?: number;
+  retryCount?: number;
+  failureReason?: string;
+  paymentRecordStatus?: string;
+  providerOrderNo?: string;
+  providerTradeNo?: string;
+  errorCode?: string;
+  errorMsg?: string;
+  paymentTime?: string;
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface PayrollReconciliationTaskDto {
+  id?: number;
+  distributionId?: number;
+  distributionNo?: string;
+  distributionStatus?: string;
+  batchId?: number;
+  batchRevision?: number;
+  periodLabel?: string;
+  payrollType?: string;
+  taskStatus?: string;
+  expectedAmount?: number;
+  actualAmount?: number;
+  difference?: number;
+  result?: string;
+  differenceDetail?: string;
+  createTime?: string;
+  updateTime?: string;
 }
 
 export interface PayrollTemplateDto {
@@ -282,6 +408,7 @@ export interface PayrollTemplateDetailDto extends PayrollTemplateDto {
 
 export interface PayrollCycleDto {
   id?: number;
+  type?: string;
   cycleCode?: string;
   cycleName?: string;
   payrollType?: string;

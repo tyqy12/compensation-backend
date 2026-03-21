@@ -1,11 +1,11 @@
-import React, { useMemo, useRef, useState, useCallback } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useSelector } from 'react-redux';
 import {
   PageContainer,
   ProTable,
-  type ProColumns,
   type ActionType,
-  type ProFormInstance,
+  type ProColumns,
 } from '@ant-design/pro-components';
 import {
   Alert,
@@ -15,15 +15,16 @@ import {
   Dropdown,
   Form,
   Input,
-  MenuProps,
   Modal,
   Select,
   Space,
   Statistic,
   Tag,
-  Tooltip,
+  Typography,
+  type MenuProps,
 } from 'antd';
 import {
+  AuditOutlined,
   CalendarOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
@@ -32,21 +33,34 @@ import {
   FileSearchOutlined,
   MoreOutlined,
   PlusOutlined,
-  ReloadOutlined,
+  SendOutlined,
   TeamOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { getPagedRecords } from '@services/api';
 import {
   fetchPayrollBatches,
   useCreatePayrollBatchMutation,
   useUpdatePayrollBatchMutation,
   type PayrollBatchListParams,
 } from '@services/queries/payroll';
-import type { PagedResponse, PayrollBatchSummaryDto } from '../../types/openapi';
-import { getPagedRecords } from '@services/api';
+import type { RootState } from '@services/stores/authSlice';
+import type { PayrollBatchSummaryDto } from '@types/openapi';
+import type { PagedResponse } from '@types/api';
+import { hasAnyRole } from '@utils/rbac';
+import { BatchWorkspaceDrawer } from './components/BatchWorkspaceDrawer';
+import {
+  getBatchRevisionText,
+  getCalculationStatusMeta,
+  getDistributionStatusMeta,
+  getFlowStatusMeta,
+} from './components/payrollFlow';
 
-// ==================== 枚举定义 ====================
+const { Text } = Typography;
+
+type WorkspaceTabKey = 'overview' | 'entry' | 'items';
+
 const payrollTypeEnum: Record<string, { text: string; color: string }> = {
   full_time: { text: '全职', color: 'blue' },
   part_time: { text: '兼职', color: 'gold' },
@@ -57,34 +71,29 @@ const statusEnum: Record<string, { text: string; color: string }> = {
   draft: { text: '草稿', color: 'default' },
   locked: { text: '已锁定', color: 'warning' },
   confirming: { text: '待确认', color: 'processing' },
-  dispute_processing: { text: '异议处理中', color: 'processing' },
+  dispute_processing: { text: '异议处理中', color: 'warning' },
   confirmed: { text: '确认完成', color: 'success' },
   submitted: { text: '已提交审批', color: 'processing' },
-  computed: { text: '已计算', color: 'processing' },
-  approved: { text: '已审批', color: 'success' },
-  released: { text: '已发薪', color: 'success' },
+  approved: { text: '审批通过', color: 'success' },
+  rejected: { text: '审批驳回', color: 'error' },
+  pay_processing: { text: '发放处理中', color: 'processing' },
+  pay_failed: { text: '发放失败', color: 'error' },
+  paid: { text: '已发放', color: 'success' },
   archived: { text: '已归档', color: 'default' },
-  pay_pending: { text: '待发薪', color: 'default' },
-  pay_processing: { text: '发薪中', color: 'processing' },
-  pay_success: { text: '发薪成功', color: 'success' },
-  pay_completed: { text: '发薪完成', color: 'success' },
-  pay_failed: { text: '发薪失败', color: 'error' },
 };
 
-const computeEnum: Record<string, { text: string; color: string }> = {
-  pending: { text: '待计算', color: 'default' },
-  running: { text: '计算中', color: 'processing' },
-  completed: { text: '已完成', color: 'success' },
-  failed: { text: '失败', color: 'error' },
-  confirming: { text: '确认中', color: 'processing' },
-  dispute_processing: { text: '异议处理中', color: 'processing' },
-  confirmed: { text: '确认完成', color: 'success' },
-  pay_processing: { text: '发薪中', color: 'processing' },
+const calculationStatusEnum: Record<string, { text: string; color: string }> = {
+  draft: { text: '未计算', color: 'default' },
+  locked: { text: '已锁定', color: 'warning' },
+  calculating: { text: '计算中', color: 'processing' },
+  calculated: { text: '计算完成', color: 'success' },
+  failed: { text: '计算失败', color: 'error' },
 };
 
-// ==================== 工具函数 ====================
-const formatCurrency = (value?: number, currency = 'CNY'): string => {
-  if (value === undefined || value === null) return '—';
+const formatCurrency = (value?: number, currency = 'CNY') => {
+  if (value === undefined || value === null) {
+    return '—';
+  }
   return new Intl.NumberFormat('zh-CN', {
     style: 'currency',
     currency,
@@ -92,130 +101,184 @@ const formatCurrency = (value?: number, currency = 'CNY'): string => {
   }).format(value);
 };
 
-const formatDateTime = (value?: string): string =>
-  value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—';
+const formatDateTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—');
 
-const getBatchId = (record: PayrollBatchSummaryDto): string | undefined =>
-  record.batchId ?? record.batchNo ?? (record as any).id?.toString();
+const normalizeStatus = (status?: string) => (status ?? '').toLowerCase();
 
-// ==================== 主组件 ====================
+const toNumber = (value: unknown): number | undefined => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const next = Number(value);
+    return Number.isFinite(next) ? next : undefined;
+  }
+  return undefined;
+};
+
+const getBatchId = (record: PayrollBatchSummaryDto): number | undefined => toNumber(record.batchId ?? (record as any).id);
+
+const getPaymentBatchNo = (record: PayrollBatchSummaryDto): string | undefined => {
+  if (typeof record.paymentBatchNo === 'string' && record.paymentBatchNo.trim()) {
+    return record.paymentBatchNo.trim();
+  }
+  return undefined;
+};
+
+const canImportBatch = (status: string) => ['draft', 'locked'].includes(status);
+
 const PayrollBatches: React.FC = () => {
-  const { message } = AntdApp.useApp();
+  const { message, modal } = AntdApp.useApp();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const userRoles = useSelector((state: RootState) => state.auth.user?.roles ?? state.auth.roles ?? []);
+  const canManageBatch = useMemo(() => hasAnyRole(userRoles, ['ADMIN', 'FINANCE']), [userRoles]);
 
-  // URL 参数状态
+  const actionRef = useRef<ActionType>();
+
   const [queryParams, setQueryParams] = useState<PayrollBatchListParams>(() => ({
     current: Number(searchParams.get('page') || '1'),
     pageSize: Number(searchParams.get('size') || '10'),
     payrollType: searchParams.get('payrollType') || undefined,
-    cycleType: searchParams.get('cycleType') || undefined,
     status: searchParams.get('status') || undefined,
-    computeStatus: searchParams.get('computeStatus') || undefined,
-    keyword: searchParams.get('keyword') || undefined,
     period: searchParams.get('period') || undefined,
-    sortBy: searchParams.get('sortBy') || undefined,
-    order: (searchParams.get('order') as 'asc' | 'desc' | null) || undefined,
   }));
-
-  // 核心引用
-  const actionRef = useRef<ActionType>();
-  const formRef = useRef<ProFormInstance>();
-
-  // 数据状态
   const [latestData, setLatestData] = useState<PagedResponse<PayrollBatchSummaryDto>>();
 
-  // Modal 状态
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<PayrollBatchSummaryDto | null>(null);
+  const [workspaceRecord, setWorkspaceRecord] = useState<PayrollBatchSummaryDto | null>(null);
+  const [workspaceDefaultTab, setWorkspaceDefaultTab] = useState<WorkspaceTabKey>('overview');
+
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
 
-  // Mutations
   const createMutation = useCreatePayrollBatchMutation();
   const updateMutation = useUpdatePayrollBatchMutation();
 
-  // ==================== URL 同步 ====================
-  const updateUrlParams = useCallback((params: PayrollBatchListParams) => {
-    const next = new URLSearchParams();
-    if (params.current) next.set('page', String(params.current));
-    if (params.pageSize) next.set('size', String(params.pageSize));
-    if (params.payrollType) next.set('payrollType', params.payrollType);
-    if (params.cycleType) next.set('cycleType', params.cycleType);
-    if (params.status) next.set('status', params.status);
-    if (params.computeStatus) next.set('computeStatus', params.computeStatus);
-    if (params.keyword) next.set('keyword', params.keyword);
-    if (params.period) next.set('period', params.period);
-    if (params.sortBy) next.set('sortBy', params.sortBy);
-    if (params.order) next.set('order', params.order);
-    setSearchParams(next);
-  }, [setSearchParams]);
+  const updateUrlParams = useCallback(
+    (params: PayrollBatchListParams) => {
+      const next = new URLSearchParams();
+      if (params.current) next.set('page', String(params.current));
+      if (params.pageSize) next.set('size', String(params.pageSize));
+      if (params.payrollType) next.set('payrollType', params.payrollType);
+      if (params.status) next.set('status', params.status);
+      if (params.period) next.set('period', params.period);
+      setSearchParams(next);
+    },
+    [setSearchParams],
+  );
 
-  // ==================== 统计数据 ====================
   const summary = useMemo(() => {
     const records = getPagedRecords(latestData);
-    const total = latestData?.total ?? 0;
-    const draft = records.filter((item) => (item.status ?? '').toLowerCase() === 'draft').length;
-    const awaitingCompute = records.filter((item) => {
-      const state = (item.computeStatus ?? item.status ?? '').toLowerCase();
-      return state.includes('pending') || state === 'locked';
-    }).length;
-    const payProcessing = records.filter((item) => (item.status ?? '').toLowerCase().includes('processing')).length;
-    const withWarnings = records.filter((item) => (item.warnings?.length ?? 0) > 0).length;
-    const totalEmployees = records.reduce((acc, item) => acc + (item.totalEmployees ?? 0), 0);
-    const totalNet = records.reduce((acc, item) => acc + (item.netTotal ?? 0), 0);
-    return { total, draft, awaitingCompute, payProcessing, withWarnings, totalEmployees, totalNet };
+    return {
+      total: latestData?.total ?? 0,
+      draft: records.filter((item) => normalizeStatus(item.status) === 'draft').length,
+      calculating: records.filter((item) => normalizeStatus(item.calculationStatus ?? item.computeStatus) === 'calculating').length,
+      calculated: records.filter((item) => normalizeStatus(item.calculationStatus ?? item.computeStatus) === 'calculated').length,
+      confirming: records.filter((item) => ['confirming', 'dispute_processing'].includes(normalizeStatus(item.status))).length,
+      distributing: records.filter((item) => ['processing', 'submitted', 'created', 'planned', 'pay_processing'].includes(normalizeStatus(item.paymentStatus))).length,
+      withWarnings: records.filter((item) => (item.warnings?.length ?? 0) > 0).length,
+      totalEmployees: records.reduce((acc, item) => acc + (item.totalEmployees ?? 0), 0),
+      totalNet: records.reduce((acc, item) => acc + (item.netTotal ?? 0), 0),
+    };
   }, [latestData]);
 
-  // ==================== 操作处理 ====================
+  const summaryCards = useMemo(
+    () => [
+      { key: 'total', title: '批次数', value: summary.total, prefix: <CalendarOutlined /> },
+      { key: 'draft', title: '草稿', value: summary.draft, valueStyle: { color: '#faad14' } },
+      { key: 'calculating', title: '计算中', value: summary.calculating, prefix: <ClockCircleOutlined /> },
+      { key: 'calculated', title: '已核算', value: summary.calculated, prefix: <CheckCircleOutlined />, valueStyle: { color: '#52c41a' } },
+      { key: 'confirming', title: '待确认', value: summary.confirming, prefix: <TeamOutlined />, valueStyle: { color: '#1677ff' } },
+      { key: 'distributing', title: '发放中', value: summary.distributing, prefix: <ThunderboltOutlined />, valueStyle: { color: '#1890ff' } },
+      { key: 'withWarnings', title: '存在预警', value: summary.withWarnings, prefix: <ExclamationCircleOutlined />, valueStyle: { color: '#fa541c' } },
+      { key: 'totalEmployees', title: '员工总数', value: summary.totalEmployees, prefix: <TeamOutlined /> },
+      { key: 'totalNet', title: '实发金额', value: formatCurrency(summary.totalNet) },
+    ],
+    [summary],
+  );
+
+  const openWorkspace = useCallback((record: PayrollBatchSummaryDto, tab: WorkspaceTabKey = 'overview') => {
+    setWorkspaceRecord(record);
+    setWorkspaceDefaultTab(tab);
+  }, []);
+
   const handleCreate = useCallback(() => {
+    if (!canManageBatch) {
+      message.warning('仅财务或管理员可新建批次');
+      return;
+    }
     createForm.resetFields();
     createForm.setFieldsValue({ type: 'full_time', currency: 'CNY' });
     setIsCreateModalOpen(true);
-  }, [createForm]);
+  }, [canManageBatch, createForm, message]);
 
   const handleCreateSubmit = useCallback(async () => {
     try {
       const values = await createForm.validateFields();
-      await createMutation.mutateAsync({
+      const created = await createMutation.mutateAsync({
         periodLabel: values.periodLabel,
         type: values.type,
         remark: values.remark,
         currency: values.currency || 'CNY',
       });
-      message.success('创建成功');
+      const createdRecord: PayrollBatchSummaryDto = {
+        batchId: toNumber(created?.id ?? created?.batchId),
+        periodLabel: values.periodLabel,
+        payrollType: values.type,
+        currency: values.currency || 'CNY',
+        remark: values.remark,
+        status: 'draft',
+        calculationStatus: 'draft',
+        batchRevision: 1,
+      };
+      message.success('创建成功，已打开批次工作台，请继续录入数据');
       setIsCreateModalOpen(false);
       actionRef.current?.reload();
+      if (createdRecord.batchId) {
+        openWorkspace(createdRecord, 'entry');
+      }
     } catch (error: any) {
       if (error?.errorFields) return;
       const msg = error?.response?.data?.message || error?.message || '创建失败';
       message.error(msg);
     }
-  }, [createForm, createMutation, message]);
+  }, [createForm, createMutation, message, openWorkspace]);
 
-  const handleEdit = useCallback((record: PayrollBatchSummaryDto) => {
-    // 只有草稿状态才能编辑
-    if ((record.status ?? '').toLowerCase() !== 'draft') {
-      message.warning('只有草稿状态的批次可以编辑');
-      return;
-    }
-    setEditingRecord(record);
-    editForm.setFieldsValue({
-      periodLabel: record.periodLabel,
-      type: record.payrollType,
-      currency: record.currency || 'CNY',
-      remark: record.remark,
-    });
-    setIsEditModalOpen(true);
-  }, [editForm, message]);
+  const handleEdit = useCallback(
+    (record: PayrollBatchSummaryDto) => {
+      if (!canManageBatch) {
+        message.warning('仅财务或管理员可编辑批次');
+        return;
+      }
+      if (normalizeStatus(record.status) !== 'draft') {
+        message.warning('只有草稿状态的批次可以编辑');
+        return;
+      }
+      setEditingRecord(record);
+      editForm.setFieldsValue({
+        periodLabel: record.periodLabel,
+        type: record.payrollType,
+        currency: record.currency || 'CNY',
+        remark: record.remark,
+      });
+      setIsEditModalOpen(true);
+    },
+    [canManageBatch, editForm, message],
+  );
 
   const handleEditSubmit = useCallback(async () => {
-    if (!editingRecord?.batchId) return;
+    const batchId = editingRecord ? getBatchId(editingRecord) : undefined;
+    if (!batchId) {
+      message.warning('缺少批次 ID，无法更新');
+      return;
+    }
     try {
       const values = await editForm.validateFields();
       await updateMutation.mutateAsync({
-        id: editingRecord.batchId!,
+        id: batchId,
         params: {
           periodLabel: values.periodLabel,
           type: values.type,
@@ -232,101 +295,203 @@ const PayrollBatches: React.FC = () => {
       const msg = error?.response?.data?.message || error?.message || '更新失败';
       message.error(msg);
     }
-  }, [editForm, editingRecord, updateMutation, message]);
+  }, [editForm, editingRecord, message, updateMutation]);
 
-  const handleViewLedger = useCallback((record: PayrollBatchSummaryDto) => {
-    const batchKey = getBatchId(record);
-    if (!batchKey) {
-      message.warning('缺少批次标识，无法打开财务台账');
-      return;
-    }
-    navigate(`/payroll/batches/${batchKey}/ledger`);
-  }, [navigate, message]);
 
-  const handleViewManager = useCallback((record: PayrollBatchSummaryDto) => {
-    const batchKey = getBatchId(record);
-    if (!batchKey) {
-      message.warning('缺少批次标识，无法打开经理核对视图');
-      return;
-    }
-    navigate(`/payroll/batches/${batchKey}/manager-review`);
-  }, [navigate, message]);
+  const handleViewLedger = useCallback(
+    (record: PayrollBatchSummaryDto) => {
+      const batchId = getBatchId(record);
+      if (!batchId) {
+        message.warning('缺少批次 ID，无法打开财务台账');
+        return;
+      }
+      navigate(`/payroll/batches/${batchId}/ledger`);
+    },
+    [message, navigate],
+  );
 
-  const handleOpenConfirmationWorkbench = useCallback((record?: PayrollBatchSummaryDto) => {
-    const batchKey = record ? getBatchId(record) : undefined;
-    if (batchKey) {
-      navigate(`/payroll/confirmations?batchId=${batchKey}`);
-      return;
-    }
-    navigate('/payroll/confirmations');
-  }, [navigate]);
+  const handleViewManager = useCallback(
+    (record: PayrollBatchSummaryDto) => {
+      const batchId = getBatchId(record);
+      if (!batchId) {
+        message.warning('缺少批次 ID，无法打开经理核对视图');
+        return;
+      }
+      navigate(`/payroll/batches/${batchId}/manager-review`);
+    },
+    [message, navigate],
+  );
 
-  // ==================== 表格列定义 ====================
-  const columns: ProColumns<PayrollBatchSummaryDto>[] = [
+  const handleViewApproval = useCallback(
+    (record: PayrollBatchSummaryDto) => {
+      if (!record.approvalWorkflowId) {
+        message.warning('当前批次暂无审批流信息');
+        return;
+      }
+      navigate(`/approval/workflows?keyword=${record.approvalWorkflowId}`);
+    },
+    [message, navigate],
+  );
+
+  const handleOpenConfirmationWorkbench = useCallback(
+    (record?: PayrollBatchSummaryDto) => {
+      const batchId = record ? getBatchId(record) : undefined;
+      if (batchId) {
+        navigate(`/payroll/confirmations?batchId=${batchId}`);
+        return;
+      }
+      navigate('/payroll/confirmations');
+    },
+    [navigate],
+  );
+
+  const handleOpenDistributions = useCallback(
+    (record?: PayrollBatchSummaryDto) => {
+      const batchId = record ? getBatchId(record) : undefined;
+      if (batchId) {
+        navigate(`/payroll/distributions?batchId=${batchId}`);
+        return;
+      }
+      navigate('/payroll/distributions');
+    },
+    [navigate],
+  );
+
+  const handleOpenReconciliations = useCallback(
+    (record?: PayrollBatchSummaryDto) => {
+      const batchId = record ? getBatchId(record) : undefined;
+      if (batchId) {
+        navigate(`/payroll/reconciliations?batchId=${batchId}`);
+        return;
+      }
+      navigate('/payroll/reconciliations');
+    },
+    [navigate],
+  );
+
+  const buildFlowAction = useCallback(
+    (record: PayrollBatchSummaryDto) => {
+      const status = normalizeStatus(record.status);
+      return {
+        key: 'workspace',
+        label: canManageBatch
+          ? canImportBatch(status)
+            ? '录入工作台'
+            : '批次工作台'
+          : '查看流程',
+        icon: <FileSearchOutlined />,
+        onClick: () => openWorkspace(record, canImportBatch(status) && canManageBatch ? 'entry' : 'overview'),
+      };
+    },
+    [canManageBatch, openWorkspace],
+  );
+
+  const columns = useMemo<ProColumns<PayrollBatchSummaryDto>[]>(() => [
     {
-      title: '关键字',
-      dataIndex: 'keyword',
+      title: '期间',
+      dataIndex: 'period',
       hideInTable: true,
-      fieldProps: { placeholder: '批次号 / 周期 / 备注' },
-    },
-    {
-      title: '批次号',
-      dataIndex: 'batchNo',
-      width: 180,
-      copyable: true,
-      render: (_, record) => getBatchId(record) || '—',
-    },
-    {
-      title: '周期',
-      dataIndex: 'periodLabel',
-      width: 140,
-      render: (_, record) => record.periodLabel || '—',
+      valueType: 'dateMonth',
+      fieldProps: {
+        placeholder: '选择期间',
+      },
     },
     {
       title: '用工类型',
       dataIndex: 'payrollType',
       width: 100,
       valueType: 'select',
-      valueEnum: Object.fromEntries(
-        Object.entries(payrollTypeEnum).map(([key, value]) => [key, { text: value.text }]),
-      ),
+      valueEnum: Object.fromEntries(Object.entries(payrollTypeEnum).map(([key, value]) => [key, { text: value.text }])),
       render: (_, record) => {
         const meta = payrollTypeEnum[record.payrollType ?? ''];
         return meta ? <Tag color={meta.color}>{meta.text}</Tag> : record.payrollType || '—';
       },
     },
     {
-      title: '批次状态',
-      dataIndex: 'status',
-      width: 100,
+      title: '核算状态',
+      dataIndex: 'calculationStatus',
+      width: 110,
+      hideInSearch: true,
       valueType: 'select',
       valueEnum: Object.fromEntries(
-        Object.entries(statusEnum).map(([key, value]) => [key, { text: value.text }]),
+        Object.entries(calculationStatusEnum).map(([key, value]) => [key, { text: value.text }]),
       ),
       render: (_, record) => {
-        const meta = statusEnum[record.status ?? ''];
+        const meta = getCalculationStatusMeta(record.calculationStatus ?? record.computeStatus);
+        return meta ? <Tag color={meta.color}>{meta.text}</Tag> : '—';
+      },
+    },
+    {
+      title: '流转状态',
+      dataIndex: 'status',
+      width: 110,
+      valueType: 'select',
+      valueEnum: Object.fromEntries(Object.entries(statusEnum).map(([key, value]) => [key, { text: value.text }])),
+      render: (_, record) => {
+        const meta = getFlowStatusMeta(record.status) ?? statusEnum[normalizeStatus(record.status)];
         return meta ? <Tag color={meta.color}>{meta.text}</Tag> : record.status || '—';
       },
     },
     {
-      title: '计算状态',
-      dataIndex: 'computeStatus',
-      width: 100,
-      valueType: 'select',
-      valueEnum: Object.fromEntries(
-        Object.entries(computeEnum).map(([key, value]) => [key, { text: value.text }]),
-      ),
+      title: '批次标识',
+      dataIndex: 'batchId',
+      width: 240,
       render: (_, record) => {
-        const meta = computeEnum[record.computeStatus ?? ''];
-        return meta ? <Tag color={meta.color}>{meta.text}</Tag> : record.computeStatus || '—';
+        const batchId = getBatchId(record);
+        const paymentBatchNo = getPaymentBatchNo(record);
+        return (
+          <Space direction="vertical" size={0}>
+            <Space size={8} wrap>
+              <Text strong>{batchId ? `#${batchId}` : '—'}</Text>
+              {record.batchRevision != null && <Tag>{getBatchRevisionText(record.batchRevision)}</Tag>}
+            </Space>
+            {record.batchNo && <Text type="secondary">批次号：{record.batchNo}</Text>}
+            {record.approvalWorkflowId && (
+              <Text type="secondary">审批流：#{record.approvalWorkflowId}</Text>
+            )}
+            {paymentBatchNo && <Text type="secondary">支付批次：{paymentBatchNo}</Text>}
+          </Space>
+        );
+      },
+    },
+    {
+      title: '期间/名称',
+      dataIndex: 'periodLabel',
+      width: 180,
+      render: (_, record) => record.periodLabel || '—',
+    },
+    {
+      title: '流程信息',
+      key: 'flowInfo',
+      width: 220,
+      render: (_, record) => {
+        const paymentMeta = getDistributionStatusMeta(record.paymentStatus);
+        return (
+          <Space size={4} wrap>
+            <Tag color={record.confirmationRequired === false ? 'default' : 'blue'}>
+              {record.confirmationRequired === false ? '免确认' : '需确认'}
+            </Tag>
+            {(record.confirmationMode || record.confirmationRequired === false) && (
+              <Tag>
+                {record.confirmationRequired === false
+                  ? '跳过确认'
+                  : record.confirmationMode === 'group'
+                    ? '组确认'
+                    : record.confirmationMode === 'individual'
+                      ? '逐人确认'
+                      : record.confirmationMode}
+              </Tag>
+            )}
+            {paymentMeta && <Tag color={paymentMeta.color}>{paymentMeta.text}</Tag>}
+          </Space>
+        );
       },
     },
     {
       title: '员工数',
       dataIndex: 'totalEmployees',
       width: 90,
-      sorter: true,
-      render: (value) => value ?? '—',
+      render: (_, record) => record.totalEmployees ?? '—',
     },
     {
       title: '应发金额',
@@ -345,13 +510,13 @@ const PayrollBatches: React.FC = () => {
     {
       title: '预警',
       dataIndex: 'warnings',
-      width: 120,
+      width: 220,
       render: (_, record) =>
         record.warnings && record.warnings.length > 0 ? (
-          <Space size={2} wrap>
+          <Space size={4} wrap>
             {record.warnings.slice(0, 2).map((warning, index) => (
-              <Tag color="orange" key={index}>
-                <ExclamationCircleOutlined style={{ marginRight: 2 }} />
+              <Tag color="orange" key={`${warning}-${index}`}>
+                <ExclamationCircleOutlined style={{ marginRight: 4 }} />
                 {warning}
               </Tag>
             ))}
@@ -370,8 +535,10 @@ const PayrollBatches: React.FC = () => {
     {
       title: '操作',
       valueType: 'option',
-      width: 180,
+      width: 220,
       render: (_, record) => {
+        const status = normalizeStatus(record.status);
+        const flowAction = buildFlowAction(record);
         const items: MenuProps['items'] = [
           {
             key: 'ledger',
@@ -391,24 +558,39 @@ const PayrollBatches: React.FC = () => {
             icon: <CheckCircleOutlined />,
             onClick: () => handleOpenConfirmationWorkbench(record),
           },
+          {
+            key: 'distributions',
+            label: '发放单',
+            icon: <SendOutlined />,
+            onClick: () => handleOpenDistributions(record),
+          },
+          {
+            key: 'reconciliations',
+            label: '对账任务',
+            icon: <AuditOutlined />,
+            onClick: () => handleOpenReconciliations(record),
+          },
         ];
 
-        // 只有草稿状态可以编辑
-        if ((record.status ?? '').toLowerCase() === 'draft') {
-          items.unshift({
-            key: 'edit',
-            label: '编辑',
-            icon: <EditOutlined />,
-            onClick: () => handleEdit(record),
+        if (record.approvalWorkflowId) {
+          items.push({
+            key: 'approval',
+            label: '审批流详情',
+            icon: <ClockCircleOutlined />,
+            onClick: () => handleViewApproval(record),
           });
         }
 
+        if (canManageBatch && status === 'draft') {
+          items.unshift({ key: 'edit', label: '编辑', icon: <EditOutlined />, onClick: () => handleEdit(record) });
+        }
+
         return [
+          <Button key={flowAction.key} type="link" size="small" onClick={flowAction.onClick}>
+            {flowAction.label}
+          </Button>,
           <Button key="ledger" type="link" size="small" onClick={() => handleViewLedger(record)}>
             台账
-          </Button>,
-          <Button key="confirmations" type="link" size="small" onClick={() => handleOpenConfirmationWorkbench(record)}>
-            确认
           </Button>,
           <Dropdown key="more" menu={{ items }} trigger={['click']}>
             <Button type="link" size="small">
@@ -418,121 +600,113 @@ const PayrollBatches: React.FC = () => {
         ];
       },
     },
-  ];
+  ], [
+    buildFlowAction,
+    canManageBatch,
+    handleEdit,
+    handleOpenConfirmationWorkbench,
+    handleOpenDistributions,
+    handleOpenReconciliations,
+    handleViewApproval,
+    handleViewLedger,
+    handleViewManager,
+  ]);
 
-  // ==================== 渲染 ====================
+  const toolbarButtons = useMemo(
+    () => [
+      canManageBatch ? (
+        <Button key="create" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+          新建批次
+        </Button>
+      ) : null,
+      <Button key="confirm-workbench" icon={<CheckCircleOutlined />} onClick={() => handleOpenConfirmationWorkbench()}>
+        确认工作台
+      </Button>,
+    ].filter(Boolean),
+    [canManageBatch, handleCreate, handleOpenConfirmationWorkbench],
+  );
+
   return (
     <PageContainer
-      header={{
-        title: '薪酬批次管理',
-        breadcrumb: {},
-        extra: [
-          <Button key="refresh" icon={<ReloadOutlined />} onClick={() => actionRef.current?.reload()}>
-            刷新
-          </Button>,
-        ],
-      }}
+      title="薪酬批次"
+      subTitle="通过批次工作台统一管理录入、核算、确认、审批与发放链路"
     >
-      {/* 统计卡片 - 单行显示 */}
-      <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4, marginBottom: 16 }}>
-        <Card size="small" style={{ flex: '0 0 auto', width: 120 }}>
-          <Statistic title="批次数" value={summary.total} prefix={<CalendarOutlined />} />
-        </Card>
-        <Card size="small" style={{ flex: '0 0 auto', width: 120 }}>
-          <Statistic title="草稿" value={summary.draft} valueStyle={{ color: '#faad14' }} />
-        </Card>
-        <Card size="small" style={{ flex: '0 0 auto', width: 120 }}>
-          <Statistic title="待计算" value={summary.awaitingCompute} prefix={<ClockCircleOutlined />} />
-        </Card>
-        <Card size="small" style={{ flex: '0 0 auto', width: 120 }}>
-          <Statistic title="发薪中" value={summary.payProcessing} prefix={<ThunderboltOutlined />} valueStyle={{ color: '#1890ff' }} />
-        </Card>
-        <Card size="small" style={{ flex: '0 0 auto', width: 120 }}>
-          <Statistic title="存在预警" value={summary.withWarnings} prefix={<ExclamationCircleOutlined />} valueStyle={{ color: '#fa541c' }} />
-        </Card>
-        <Card size="small" style={{ flex: '0 0 auto', width: 120 }}>
-          <Statistic title="员工总数" value={summary.totalEmployees} prefix={<TeamOutlined />} />
-        </Card>
-        <Card size="small" style={{ flex: '0 0 auto', width: 140 }}>
-          <Statistic title="实发金额" value={formatCurrency(summary.totalNet)} />
-        </Card>
-      </div>
-
-      <ProTable<PayrollBatchSummaryDto>
-        columns={columns}
-        actionRef={actionRef}
-        formRef={formRef}
-        scroll={{ x: 1400 }}
-        request={async (params, sort) => {
-          const nextParams: PayrollBatchListParams = {
-            current: params.current || 1,
-            pageSize: params.pageSize || 10,
-            keyword: params.keyword,
-            payrollType: params.payrollType,
-            cycleType: params.cycleType,
-            status: params.status,
-            computeStatus: params.computeStatus,
-            sortBy: undefined,
-            order: undefined,
-          };
-
-          const rawPeriod = (params as any).period;
-          if (rawPeriod) {
-            nextParams.period = dayjs(rawPeriod).format('YYYY-MM');
+      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Alert
+          type={canManageBatch ? 'info' : 'warning'}
+          showIcon
+          message={canManageBatch ? '批次操作流程' : '当前为只读视角'}
+          description={
+            canManageBatch
+              ? '建议按“新建批次 → 打开工作台 → 导入或补录 → 锁定并核算 → 员工确认 → 提交审批 → 跟踪发放”的顺序操作；若发放失败，可在工作台重试失败子集。'
+              : '当前账号可查看工作台、台账、经理核对与确认工作台；新建、录入、锁定、核算、提交审批、重试发放仅对财务或管理员开放。'
           }
+        />
 
-          if (sort && Object.keys(sort).length > 0) {
-            const [field, order] = Object.entries(sort)[0];
-            nextParams.sortBy = field;
-            nextParams.order = order === 'ascend' ? 'asc' : 'desc';
-          }
+        <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
+          {summaryCards.map((card) => (
+            <Card key={card.key} size="small" style={{ flex: '0 0 auto', width: 138 }}>
+              <Statistic title={card.title} value={card.value} prefix={card.prefix} valueStyle={card.valueStyle} />
+            </Card>
+          ))}
+        </div>
 
-          setQueryParams(nextParams);
-          updateUrlParams(nextParams);
-
-          try {
-            const data = await fetchPayrollBatches(nextParams);
-            setLatestData(data);
-            return {
-              data: getPagedRecords(data),
-              success: true,
-              total: data.total ?? 0,
+        <ProTable<PayrollBatchSummaryDto>
+          actionRef={actionRef}
+          columns={columns}
+          request={async (params) => {
+            const nextParams: PayrollBatchListParams = {
+              current: params.current,
+              pageSize: params.pageSize,
+              payrollType: typeof params.payrollType === 'string' ? params.payrollType : undefined,
+              status: typeof params.status === 'string' ? params.status : undefined,
+              period: params.period ? dayjs(params.period as string | Date).format('YYYY-MM') : undefined,
             };
-          } catch (error: any) {
-            const msg = error?.response?.data?.message || error?.message || '批次数据加载失败';
-            message.error(msg);
-            setLatestData(undefined);
-            return { data: [], success: false, total: 0 };
-          }
-        }}
-        rowKey={(record) => getBatchId(record) ?? Math.random()}
-        search={{
-          labelWidth: 'auto',
-          collapseRender: false,
-          optionRender: (_, __, dom) => dom,
-        }}
-        pagination={{
-          current: queryParams.current,
-          pageSize: queryParams.pageSize,
-          showQuickJumper: true,
-          showSizeChanger: true,
-        }}
-        toolBarRender={() => [
-          <Button key="create" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-            新建批次
-          </Button>,
-          <Button key="confirm-workbench" icon={<CheckCircleOutlined />} onClick={() => handleOpenConfirmationWorkbench()}>
-            确认工作台
-          </Button>,
-          <Tooltip key="refresh" title="刷新列表">
-            <Button icon={<ReloadOutlined />} onClick={() => actionRef.current?.reload()} />
-          </Tooltip>,
-        ]}
-        options={{ density: true, setting: true, reload: false }}
-        locale={{ emptyText: '暂无薪酬批次' }}
+            setQueryParams(nextParams);
+            updateUrlParams(nextParams);
+            try {
+              const data = await fetchPayrollBatches(nextParams);
+              setLatestData(data);
+              return {
+                data: getPagedRecords(data),
+                success: true,
+                total: data.total ?? 0,
+              };
+            } catch (error: any) {
+              const msg = error?.response?.data?.message || error?.message || '批次数据加载失败';
+              message.error(msg);
+              setLatestData(undefined);
+              return { data: [], success: false, total: 0 };
+            }
+          }}
+          rowKey={(record) => String(getBatchId(record) ?? `${record.periodLabel ?? 'batch'}-${record.updatedAt ?? record.createdAt ?? ''}`)}
+          search={{
+            labelWidth: 'auto',
+            collapseRender: false,
+            optionRender: (_, __, dom) => dom,
+          }}
+          pagination={{
+            current: queryParams.current,
+            pageSize: queryParams.pageSize,
+            showQuickJumper: true,
+            showSizeChanger: true,
+            showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条/共 ${total} 条`,
+          }}
+          toolBarRender={() => toolbarButtons as React.ReactNode[]}
+          options={{ density: true, setting: true, reload: true }}
+          locale={{ emptyText: '暂无薪酬批次' }}
+        />
+      </Space>
+
+      <BatchWorkspaceDrawer
+        open={!!workspaceRecord}
+        batch={workspaceRecord}
+        defaultTab={workspaceDefaultTab}
+        canManageBatch={canManageBatch}
+        onClose={() => setWorkspaceRecord(null)}
+        onBatchChanged={() => actionRef.current?.reload()}
       />
 
-      {/* 创建批次 Modal */}
       <Modal
         title="新建薪酬批次"
         open={isCreateModalOpen}
@@ -540,13 +714,13 @@ const PayrollBatches: React.FC = () => {
         onCancel={() => setIsCreateModalOpen(false)}
         confirmLoading={createMutation.isPending}
         width={480}
-        destroyOnHidden
+        forceRender
       >
         <Alert
           type="info"
           showIcon
-          message="提示"
-          description="新建批次默认为草稿状态，可以继续配置后提交审批。"
+          message="创建说明"
+          description="新建后系统会自动打开批次工作台；你可以继续上传 CSV 或直接手动录入薪资项。"
           style={{ marginBottom: 16 }}
         />
         <Form form={createForm} layout="vertical">
@@ -558,23 +732,14 @@ const PayrollBatches: React.FC = () => {
               { min: 2, max: 50, message: '名称长度应为 2-50 个字符' },
             ]}
           >
-            <Input placeholder="如：2024年1月工资、年终奖补发" />
+            <Input placeholder="如：2026年3月工资、年终奖补发" />
           </Form.Item>
-
-          <Form.Item
-            name="type"
-            label="用工类型"
-            rules={[{ required: true, message: '请选择用工类型' }]}
-          >
+          <Form.Item name="type" label="用工类型" rules={[{ required: true, message: '请选择用工类型' }]}> 
             <Select
               placeholder="请选择用工类型"
-              options={Object.entries(payrollTypeEnum).map(([key, value]) => ({
-                label: value.text,
-                value: key,
-              }))}
+              options={Object.entries(payrollTypeEnum).map(([key, value]) => ({ label: value.text, value: key }))}
             />
           </Form.Item>
-
           <Form.Item name="currency" label="币种">
             <Select
               options={[
@@ -583,14 +748,12 @@ const PayrollBatches: React.FC = () => {
               ]}
             />
           </Form.Item>
-
           <Form.Item name="remark" label="备注">
             <Input.TextArea rows={3} placeholder="可选，添加批次备注信息" />
           </Form.Item>
         </Form>
       </Modal>
 
-      {/* 编辑批次 Modal */}
       <Modal
         title="编辑薪酬批次"
         open={isEditModalOpen}
@@ -601,13 +764,13 @@ const PayrollBatches: React.FC = () => {
         }}
         confirmLoading={updateMutation.isPending}
         width={480}
-        destroyOnHidden
+        forceRender
       >
         <Alert
           type="warning"
           showIcon
           message="编辑限制"
-          description="仅草稿状态的批次可以编辑。修改后批次将保留草稿状态，需要重新提交审批。"
+          description="仅草稿状态的批次可以编辑。修改后建议回到批次工作台核对录入数据，再继续后续流转。"
           style={{ marginBottom: 16 }}
         />
         <Form form={editForm} layout="vertical">
@@ -619,23 +782,14 @@ const PayrollBatches: React.FC = () => {
               { min: 2, max: 50, message: '名称长度应为 2-50 个字符' },
             ]}
           >
-            <Input placeholder="如：2024年1月工资、年终奖补发" />
+            <Input placeholder="如：2026年3月工资、年终奖补发" />
           </Form.Item>
-
-          <Form.Item
-            name="type"
-            label="用工类型"
-            rules={[{ required: true, message: '请选择用工类型' }]}
-          >
+          <Form.Item name="type" label="用工类型" rules={[{ required: true, message: '请选择用工类型' }]}> 
             <Select
               placeholder="请选择用工类型"
-              options={Object.entries(payrollTypeEnum).map(([key, value]) => ({
-                label: value.text,
-                value: key,
-              }))}
+              options={Object.entries(payrollTypeEnum).map(([key, value]) => ({ label: value.text, value: key }))}
             />
           </Form.Item>
-
           <Form.Item name="currency" label="币种">
             <Select
               options={[
@@ -644,12 +798,12 @@ const PayrollBatches: React.FC = () => {
               ]}
             />
           </Form.Item>
-
           <Form.Item name="remark" label="备注">
             <Input.TextArea rows={3} placeholder="可选，添加批次备注信息" />
           </Form.Item>
         </Form>
       </Modal>
+
     </PageContainer>
   );
 };

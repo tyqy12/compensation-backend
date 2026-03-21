@@ -40,7 +40,7 @@ public class ApprovalFlowConfigManager {
      */
     private void initializeDefaultFlows() {
         // 批量支付审批流程 - 默认三审制
-        defaultFlowConfigs.put(WorkflowType.BATCH, List.of(
+        List<ApprovalStepConfig> payrollApprovalSteps = List.of(
                 ApprovalStepConfig.builder()
                         .stepNo(1)
                         .stepName("部门负责人审批")
@@ -63,7 +63,9 @@ public class ApprovalFlowConfigManager {
                         .optional(false)
                         .finalStep(true)
                         .build()
-        ));
+        );
+        defaultFlowConfigs.put(WorkflowType.BATCH, payrollApprovalSteps);
+        defaultFlowConfigs.put(WorkflowType.PAYROLL_DISTRIBUTION, payrollApprovalSteps);
 
         // 临时支付审批流程 - 两审制
         defaultFlowConfigs.put(WorkflowType.ADHOC, List.of(
@@ -84,7 +86,7 @@ public class ApprovalFlowConfigManager {
                         .build()
         ));
 
-        // 离线员工审批流程 - 仅管理员审批
+        // 架构外员工审批流程 - 仅管理员审批
         defaultFlowConfigs.put(WorkflowType.OFFLINE, List.of(
                 ApprovalStepConfig.builder()
                         .stepNo(1)

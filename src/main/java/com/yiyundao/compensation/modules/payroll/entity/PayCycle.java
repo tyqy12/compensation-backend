@@ -6,6 +6,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -13,9 +14,18 @@ import java.time.LocalDate;
 public class PayCycle extends BaseEntity {
     private String type; // monthly/custom
     private String periodLabel;
+    private String cycleCode;
+    private String cycleName;
+    private String cycleType;
     private LocalDate startDate;
     private LocalDate endDate;
     private LocalDate cutoffDate;
-    private String status; // open/closed/archived
+    private Integer payDay;
+    private Integer leadDays;
+    private Integer graceDays;
+    private String timezone;
+    private String description;
+    private LocalDateTime nextExecutionTime;
+    private LocalDateTime lastExecutionTime;
+    private String status; // draft/open/closed/archived
 }
-

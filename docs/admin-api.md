@@ -95,21 +95,21 @@
 
 代码：`src/main/java/com/yiyundao/compensation/interfaces/controller/admin/RoleController.java`
 
-## 2) 离线员工管理
+## 2) 架构外员工管理
 
-### 设置/取消离线
+### 设置/取消架构外标记
 - 方法：`PATCH /admin/employees/{id}/offline?value=true|false`
 - 权限：`ROLE_ADMIN`
-- 描述：设置员工的离线标记。
+- 描述：设置员工的架构外标记。
 - 响应：`data=null`
 
-### 指定离线员工负责人
+### 指定架构外员工负责人
 - 方法：`PUT /admin/employees/{id}/manager?managerId=...`
 - 权限：`ROLE_ADMIN`
-- 描述：为离线员工指定负责人（managerId）。
+- 描述：为架构外员工指定负责人（managerId）。
 - 响应：`data=null`
 
-辅助查询：`GET /employee/offline`（非 admin 路径）
+辅助查询：`GET /employee/offline`（架构外员工）、`GET /employee/resigned`（离职员工）
 
 代码：`src/main/java/com/yiyundao/compensation/interfaces/controller/admin/OfflineEmployeeAdminController.java`
 
@@ -172,4 +172,3 @@
 - 描述：返回应用信息（profile、启动时长）、JVM（内存、线程）、数据库/Redis ping 结果。
 
 代码：`src/main/java/com/yiyundao/compensation/interfaces/controller/admin/MonitorAdminController.java`
-

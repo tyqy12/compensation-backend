@@ -21,20 +21,27 @@
             COALESCE(summary.line_count, 0) AS total_lines,
             COALESCE(summary.gross_total, 0) AS gross_total,
             COALESCE(summary.net_total, 0) AS net_total,
-            summary.warnings AS warnings
+            COALESCE(warning_summary.warnings, '[]') AS warnings
         FROM payroll_batch pb
         LEFT JOIN (
             SELECT
                 batch_id,
-                COUNT(*) AS employee_count,
+                COUNT(DISTINCT employee_id) AS employee_count,
                 COUNT(*) AS line_count,
                 COALESCE(SUM(gross_amount), 0) AS gross_total,
-                COALESCE(SUM(net_amount), 0) AS net_total,
+                COALESCE(SUM(net_amount), 0) AS net_total
+            FROM payroll_line pl
+            WHERE pl.deleted = 0
+            GROUP BY batch_id
+        ) summary ON pb.id = summary.batch_id
+        LEFT JOIN (
+            SELECT
+                batch_id,
                 CONCAT('[', GROUP_CONCAT(DISTINCT CONCAT('"', REPLACE(pl.warning, '"', '\\"'), '"') SEPARATOR ','), ']') AS warnings
             FROM payroll_line pl
             WHERE pl.deleted = 0 AND pl.warning IS NOT NULL AND pl.warning != ''
             GROUP BY batch_id
-        ) summary ON pb.id = summary.batch_id
+        ) warning_summary ON pb.id = warning_summary.batch_id
         WHERE pb.deleted = 0
         <if test="type != null and type != ''">
             AND pb.type = #{type}

@@ -21,6 +21,7 @@ import com.yiyundao.compensation.modules.audit.entity.AuditLog;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.system.service.OrgSyncTaskService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -43,6 +44,7 @@ public class DashboardService {
     private final AuditLogService auditLogService;
     private final ApprovalEngine approvalEngine;
     private final OrgSyncTaskService orgSyncTaskService;
+    private final JdbcTemplate jdbcTemplate;
 
     public DashboardMetricsDto collectMetrics() {
         LocalDateTime monthStart = firstDayOfThisMonth();
@@ -70,19 +72,10 @@ public class DashboardService {
 
         // 用户绑定率（按系统用户绑定平台账号）
         long userTotal = sysUserService.count();
-        long userBound = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                .isNotNull(SysUser::getPlatformType)
-                .ne(SysUser::getPlatformType, "")
-                .isNotNull(SysUser::getPlatformUserId)
-                .ne(SysUser::getPlatformUserId, ""));
+        long userBound = countBoundUsers(null);
         long userTotalPrev = sysUserService.count(new LambdaQueryWrapper<SysUser>()
                 .le(SysUser::getCreateTime, endOfPrevMonth()));
-        long userBoundPrev = sysUserService.count(new LambdaQueryWrapper<SysUser>()
-                .le(SysUser::getCreateTime, endOfPrevMonth())
-                .isNotNull(SysUser::getPlatformType)
-                .ne(SysUser::getPlatformType, "")
-                .isNotNull(SysUser::getPlatformUserId)
-                .ne(SysUser::getPlatformUserId, ""));
+        long userBoundPrev = countBoundUsers(endOfPrevMonth());
 
         DashboardMetricsDto dto = new DashboardMetricsDto();
         dto.setEmployeeTotal((int) employeeTotal);
@@ -260,6 +253,23 @@ public class DashboardService {
             if (r.getAmount() != null) sum = sum.add(r.getAmount());
         }
         return sum;
+    }
+
+    private long countBoundUsers(LocalDateTime until) {
+        String sql = """
+                SELECT COUNT(DISTINCT user_id)
+                FROM external_identity
+                WHERE deleted = 0
+                  AND status = 'active'
+                  AND user_id IS NOT NULL
+                """;
+        Long count;
+        if (until == null) {
+            count = jdbcTemplate.queryForObject(sql, Long.class);
+        } else {
+            count = jdbcTemplate.queryForObject(sql + " AND create_time <= ?", Long.class, until);
+        }
+        return count != null ? count : 0L;
     }
 
     private static LocalDateTime firstDayOfThisMonth() {

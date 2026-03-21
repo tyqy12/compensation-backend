@@ -38,6 +38,48 @@ import { getPagedRecords } from '@types/api';
 
 const { Text } = Typography;
 const { Option } = Select;
+const BANK_ACCOUNT_PATTERN = /^\d{8,30}$/;
+
+type SettlementAccountType = NonNullable<EmployeeFormData['settlementAccountType']>;
+
+function normalizeTextValue(value?: string | null) {
+  if (value == null) {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function normalizeSettlementAccountType(value?: string | null): SettlementAccountType | undefined {
+  const normalized = normalizeTextValue(value)?.toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+  if (normalized === 'bank_card' || normalized === 'alipay' || normalized === 'wechat' || normalized === 'other') {
+    return normalized;
+  }
+  return undefined;
+}
+
+function isBankCardType(type?: string | null) {
+  return normalizeSettlementAccountType(type) === 'bank_card';
+}
+
+function getSettlementAccountLabel(type?: string | null) {
+  const normalized = normalizeSettlementAccountType(type);
+  if (normalized === 'alipay') return '支付宝账号';
+  if (normalized === 'wechat') return '微信账号';
+  if (normalized === 'other') return '收款账户';
+  return '收款账户';
+}
+
+function getSettlementAccountPlaceholder(type?: string | null) {
+  const normalized = normalizeSettlementAccountType(type);
+  if (normalized === 'alipay') return '请输入支付宝账号（手机号/邮箱）';
+  if (normalized === 'wechat') return '请输入微信账号';
+  if (normalized === 'other') return '请输入收款账户';
+  return '请输入收款账户';
+}
 
 const EmployeesList: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -57,7 +99,7 @@ const EmployeesList: React.FC = () => {
       keyword: searchParams.get('keyword') || undefined,
       department: searchParams.get('department') || undefined,
       status: (searchParams.get('status') as any) || undefined,
-      platformType: (searchParams.get('platformType') as any) || undefined,
+      provider: (searchParams.get('provider') as any) || undefined,
       isOffline: searchParams.get('isOffline') === 'true' ? true : undefined,
       sortBy: searchParams.get('sortBy') || 'createTime',
       order: (searchParams.get('order') as 'asc' | 'desc') || 'desc',
@@ -76,6 +118,8 @@ const EmployeesList: React.FC = () => {
   const formRef = useRef<ProFormInstance>();
   const [createForm] = Form.useForm();
   const [bindForm] = Form.useForm();
+  const createSettlementType = Form.useWatch('settlementAccountType', createForm);
+  const resolvedCreateSettlementType = normalizeSettlementAccountType(createSettlementType ?? 'bank_card');
 
   const { message, modal } = AntdApp.useApp();
   const canCreate = useHasAction('api.employee.create');
@@ -106,8 +150,38 @@ const EmployeesList: React.FC = () => {
   // 创建员工
   const handleCreate = async (values: EmployeeFormData) => {
     try {
-      await createEmployeeMutation.mutateAsync({
+      const formValues = {
         ...values,
+      } as Partial<EmployeeFormData>;
+
+      formValues.employeeId = normalizeTextValue(formValues.employeeId);
+      formValues.name = normalizeTextValue(formValues.name);
+      formValues.phone = normalizeTextValue(formValues.phone);
+      formValues.email = normalizeTextValue(formValues.email);
+      formValues.department = normalizeTextValue(formValues.department);
+      formValues.position = normalizeTextValue(formValues.position);
+      formValues.username = normalizeTextValue(formValues.username);
+      formValues.settlementAccountName = normalizeTextValue(formValues.settlementAccountName);
+      formValues.bankName = normalizeTextValue(formValues.bankName);
+      formValues.bankBranchName = normalizeTextValue(formValues.bankBranchName);
+
+      const settlementType = normalizeSettlementAccountType(String(formValues.settlementAccountType ?? ''));
+      const settlementAccountValue = normalizeTextValue(formValues.settlementAccount);
+      const bankAccountValue = normalizeTextValue(formValues.bankAccount);
+
+      if (isBankCardType(settlementType)) {
+        const resolvedBankAccount = bankAccountValue ?? settlementAccountValue;
+        formValues.bankAccount = resolvedBankAccount;
+        formValues.settlementAccount = resolvedBankAccount;
+      } else {
+        formValues.settlementAccount = settlementAccountValue ?? bankAccountValue;
+        delete formValues.bankAccount;
+        delete formValues.bankName;
+        delete formValues.bankBranchName;
+      }
+
+      await createEmployeeMutation.mutateAsync({
+        ...formValues,
         hireDate: values.hireDate ? dayjs(values.hireDate).format('YYYY-MM-DD') : undefined,
       });
       message.success('员工创建成功');
@@ -117,6 +191,20 @@ const EmployeesList: React.FC = () => {
     } catch (error: any) {
       message.error(`创建失败：${error.message || '网络错误'}`);
     }
+  };
+
+  const handleCreateSettlementTypeChange = (nextType: SettlementAccountType) => {
+    if (isBankCardType(nextType)) {
+      createForm.setFieldsValue({
+        settlementAccount: undefined,
+      });
+      return;
+    }
+    createForm.setFieldsValue({
+      bankAccount: undefined,
+      bankName: undefined,
+      bankBranchName: undefined,
+    });
   };
 
   const handleBatchImport = async () => {
@@ -142,7 +230,7 @@ const EmployeesList: React.FC = () => {
 
   // 更新员工状态
   const handleStatusChange = async (employee: Employee, status: 'active' | 'inactive' | 'suspended') => {
-    const actionText = status === 'active' ? '激活' : status === 'inactive' ? '停用' : '暂停';
+    const actionText = status === 'active' ? '激活' : status === 'inactive' ? '设为离职' : '暂停';
 
     modal.confirm({
       title: `确认${actionText}员工`,
@@ -192,7 +280,7 @@ const EmployeesList: React.FC = () => {
     }
   };
 
-  const getPlatformName = (platformType?: Employee['platformType']) => {
+  const getPlatformName = (platformType?: Employee['provider']) => {
     const platformMap = {
       wechat: '企业微信',
       dingtalk: '钉钉',
@@ -200,6 +288,8 @@ const EmployeesList: React.FC = () => {
     };
     return platformType ? platformMap[platformType] : '未绑定';
   };
+
+  const getRecordProvider = (record: Employee) => record.provider as Employee['provider'] | undefined;
 
   const columns: ProColumns<Employee>[] = [
     {
@@ -270,25 +360,26 @@ const EmployeesList: React.FC = () => {
     },
     {
       title: '平台绑定',
-      dataIndex: 'platformType',
+      dataIndex: 'provider',
       valueType: 'select',
       valueEnum: {
         wechat: { text: '企业微信' },
         dingtalk: { text: '钉钉' },
         feishu: { text: '飞书' },
       },
-      render: (_, record) => (
-        record.platformType ? (
-          <Tag color={record.platformType === 'wechat' ? 'green' : record.platformType === 'dingtalk' ? 'blue' : 'orange'}>
-            {getPlatformName(record.platformType)}
+      render: (_, record) => {
+        const provider = getRecordProvider(record);
+        return provider ? (
+          <Tag color={provider === 'wechat' ? 'green' : provider === 'dingtalk' ? 'blue' : 'orange'}>
+            {getPlatformName(provider)}
           </Tag>
         ) : (
           <Text type="secondary">未绑定</Text>
-        )
-      ),
+        );
+      },
     },
     {
-      title: '离线员工',
+      title: '架构外员工',
       dataIndex: 'isOffline',
       valueType: 'select',
       valueEnum: {
@@ -326,7 +417,7 @@ const EmployeesList: React.FC = () => {
             查看
           </Button>
         </Tooltip>,
-        !record.platformType && canBind && (
+        !getRecordProvider(record) && canBind && (
           <Tooltip key="bind" title="绑定平台">
             <Button
               type="link"
@@ -418,7 +509,7 @@ const EmployeesList: React.FC = () => {
             keyword: params.keyword,
             department: params.department,
             status: params.status,
-            platformType: params.platformType,
+            provider: params.provider as EmployeeQueryParams['provider'],
             isOffline:
               params.isOffline === true || params.isOffline === 'true'
                 ? true
@@ -537,6 +628,7 @@ const EmployeesList: React.FC = () => {
         onOk={() => createForm.submit()}
         confirmLoading={createEmployeeMutation.isPending}
         width={600}
+        forceRender
       >
         <Form
           form={createForm}
@@ -568,8 +660,15 @@ const EmployeesList: React.FC = () => {
             <Input placeholder="请输入邮箱地址" />
           </Form.Item>
 
-          <Form.Item name="settlementAccountType" label="收款账户类型">
-            <Select placeholder="请选择收款账户类型">
+          <Form.Item
+            name="settlementAccountType"
+            label="收款账户类型"
+            rules={[{ required: true, message: '请选择收款账户类型' }]}
+          >
+            <Select
+              placeholder="请选择收款账户类型"
+              onChange={(value) => handleCreateSettlementTypeChange(value as SettlementAccountType)}
+            >
               <Option value="bank_card">银行卡</Option>
               <Option value="alipay">支付宝</Option>
               <Option value="wechat">微信</Option>
@@ -577,24 +676,54 @@ const EmployeesList: React.FC = () => {
             </Select>
           </Form.Item>
 
-          <Form.Item name="settlementAccount" label="收款账户">
-            <Input placeholder="请输入收款账户（银行卡号/支付宝账号等）" />
-          </Form.Item>
+          {isBankCardType(resolvedCreateSettlementType) ? (
+            <>
+              <Form.Item
+                name="bankAccount"
+                label="银行卡号"
+                preserve={false}
+                rules={[
+                  { required: true, message: '请输入银行卡号' },
+                  {
+                    pattern: BANK_ACCOUNT_PATTERN,
+                    message: '请输入8-30位数字银行卡号',
+                  },
+                ]}
+              >
+                <Input placeholder="请输入银行卡号" />
+              </Form.Item>
+
+              <Form.Item
+                name="bankName"
+                label="开户银行"
+                preserve={false}
+                rules={[{ required: true, message: '请输入开户银行' }]}
+              >
+                <Input placeholder="请输入开户银行" />
+              </Form.Item>
+
+              <Form.Item
+                name="bankBranchName"
+                label="开户支行"
+                preserve={false}
+                rules={[{ required: true, message: '请输入开户支行' }]}
+              >
+                <Input placeholder="请输入开户支行" />
+              </Form.Item>
+            </>
+          ) : (
+            <Form.Item
+              name="settlementAccount"
+              label={getSettlementAccountLabel(resolvedCreateSettlementType)}
+              preserve={false}
+              rules={[{ required: true, message: `请输入${getSettlementAccountLabel(resolvedCreateSettlementType)}` }]}
+            >
+              <Input placeholder={getSettlementAccountPlaceholder(resolvedCreateSettlementType)} />
+            </Form.Item>
+          )}
 
           <Form.Item name="settlementAccountName" label="收款账户实名">
             <Input placeholder="请输入收款账户实名（选填）" />
-          </Form.Item>
-
-          <Form.Item name="bankName" label="开户银行">
-            <Input placeholder="请输入开户银行（银行卡场景）" />
-          </Form.Item>
-
-          <Form.Item name="bankBranchName" label="开户支行">
-            <Input placeholder="请输入开户支行（银行卡场景）" />
-          </Form.Item>
-
-          <Form.Item name="bankAccount" label="银行卡号（兼容字段）">
-            <Input placeholder="仅银行卡场景需要，通常可与收款账户保持一致" />
           </Form.Item>
 
           <Form.Item
@@ -631,8 +760,8 @@ const EmployeesList: React.FC = () => {
             <DatePicker placeholder="请选择入职日期" style={{ width: '100%' }} />
           </Form.Item>
 
-          <Form.Item name="offline" label="离线员工">
-            <Select placeholder="是否为离线员工">
+          <Form.Item name="offline" label="架构外员工">
+            <Select placeholder="是否为架构外员工">
               <Option value={false}>否</Option>
               <Option value={true}>是</Option>
             </Select>
@@ -676,6 +805,7 @@ const EmployeesList: React.FC = () => {
         }}
         onOk={() => bindForm.submit()}
         confirmLoading={bindPlatformMutation.isPending}
+        forceRender
       >
         <Form
           form={bindForm}
@@ -683,7 +813,7 @@ const EmployeesList: React.FC = () => {
           onFinish={handleBindPlatform}
         >
           <Form.Item
-            name="platformType"
+            name="provider"
             label="平台类型"
             rules={[{ required: true, message: '请选择平台类型' }]}
           >
@@ -695,7 +825,7 @@ const EmployeesList: React.FC = () => {
           </Form.Item>
 
           <Form.Item
-            name="platformUserId"
+            name="subjectId"
             label="平台用户ID"
             rules={[{ required: true, message: '请输入平台用户ID' }]}
           >

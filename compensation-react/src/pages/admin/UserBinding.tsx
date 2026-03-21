@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Button, Space, Tag, App as AntdApp, Typography, Modal, Form, Select, Input } from 'antd';
 import { PageContainer, ProTable, type ProColumns, type ActionType, type ProFormInstance } from '@ant-design/pro-components';
 import {
@@ -29,7 +29,7 @@ const UserBindingPage: React.FC = () => {
   });
   const [bindModalVisible, setBindModalVisible] = useState(false);
   const [currentUser, setCurrentUser] = useState<UserBindingItem | null>(null);
-  const [bindForm] = Form.useForm<{ platform?: Platform; platformUserId: string }>();
+  const [bindForm] = Form.useForm<{ provider?: Platform; subjectId: string }>();
   const [employeeModalVisible, setEmployeeModalVisible] = useState(false);
   const [employeeForm] = Form.useForm<{ employeeId: string }>();
 
@@ -46,12 +46,15 @@ const UserBindingPage: React.FC = () => {
   const unbindUserMutation = useUnbindUserMutation();
   const bindEmployeeMutation = useBindEmployeeMutation();
 
-  const handleBind = async (id: number, platform: Platform, platformUserId: string) => {
+  const getRecordProvider = (user: UserBindingItem) => user.provider as Platform | null | undefined;
+  const getRecordSubjectId = (user: UserBindingItem) => user.subjectId;
+
+  const handleBind = async (id: number, provider: Platform, subjectId: string) => {
     try {
       await bindUserMutation.mutateAsync({
         id,
-        platformType: platform,
-        platformUserId: platformUserId.trim(),
+        provider,
+        subjectId: subjectId.trim(),
       });
       message.success('用户绑定成功');
       actionRef.current?.reload();
@@ -79,7 +82,7 @@ const UserBindingPage: React.FC = () => {
   };
 
   const confirmUnbind = (user: UserBindingItem) => {
-    if (!user.platformType) {
+    if (!getRecordProvider(user)) {
       message.warning('该用户尚未绑定平台');
       return;
     }
@@ -94,18 +97,14 @@ const UserBindingPage: React.FC = () => {
 
   const openBindModal = (user: UserBindingItem) => {
     setCurrentUser(user);
-    bindForm.setFieldsValue({
-      platform: user.platformType ?? undefined,
-      platformUserId: user.platformUserId ?? '',
-    });
     setBindModalVisible(true);
   };
 
   const submitBindModal = async () => {
     if (!currentUser) return;
     try {
-    const values = await bindForm.validateFields();
-      await handleBind(currentUser.id, values.platform as Platform, values.platformUserId);
+      const values = await bindForm.validateFields();
+      await handleBind(currentUser.id, values.provider as Platform, values.subjectId);
       setBindModalVisible(false);
       setCurrentUser(null);
       bindForm.resetFields();
@@ -118,9 +117,25 @@ const UserBindingPage: React.FC = () => {
 
   const openEmployeeModal = (user: UserBindingItem) => {
     setCurrentUser(user);
-    employeeForm.setFieldsValue({ employeeId: user.employeeId ? String(user.employeeId) : '' });
     setEmployeeModalVisible(true);
   };
+
+  useEffect(() => {
+    if (!bindModalVisible || !currentUser) {
+      return;
+    }
+    bindForm.setFieldsValue({
+      provider: getRecordProvider(currentUser) ?? undefined,
+      subjectId: getRecordSubjectId(currentUser) ?? '',
+    });
+  }, [bindModalVisible, currentUser, bindForm]);
+
+  useEffect(() => {
+    if (!employeeModalVisible || !currentUser) {
+      return;
+    }
+    employeeForm.setFieldsValue({ employeeId: currentUser.employeeId ? String(currentUser.employeeId) : '' });
+  }, [employeeModalVisible, currentUser, employeeForm]);
 
   const submitEmployeeModal = async () => {
     if (!currentUser) return;
@@ -185,28 +200,32 @@ const UserBindingPage: React.FC = () => {
     },
     {
       title: '平台',
-      dataIndex: 'platformType',
+      dataIndex: 'provider',
       valueType: 'select',
       valueEnum: {
         wechat: { text: '企业微信' },
         dingtalk: { text: '钉钉' },
         feishu: { text: '飞书' },
       },
-      render: (_, record) => (
-        record.platformType ? (
-          <Tag color={record.platformType === 'wechat' ? 'green' : record.platformType === 'dingtalk' ? 'blue' : 'orange'}>
-            {getPlatformName(record.platformType)}
+      render: (_, record) => {
+        const provider = getRecordProvider(record);
+        return provider ? (
+          <Tag color={provider === 'wechat' ? 'green' : provider === 'dingtalk' ? 'blue' : 'orange'}>
+            {getPlatformName(provider)}
           </Tag>
         ) : (
           <Tag color="default">未绑定</Tag>
-        )
-      ),
+        );
+      },
     },
     {
       title: '平台账号',
-      dataIndex: 'platformUserId',
+      dataIndex: 'subjectId',
       search: false,
-      render: (value) => (value ? <Text code>{value}</Text> : <Text type="secondary">-</Text>),
+      render: (_, record) => {
+        const subjectId = getRecordSubjectId(record);
+        return subjectId ? <Text code>{subjectId}</Text> : <Text type="secondary">-</Text>;
+      },
     },
     {
       title: '绑定状态',
@@ -257,7 +276,7 @@ const UserBindingPage: React.FC = () => {
             icon={<DisconnectOutlined />}
             loading={unbindUserMutation.isPending}
             onClick={() => confirmUnbind(record)}
-            disabled={!record.platformType}
+            disabled={!getRecordProvider(record)}
           >
             解绑
           </Button>
@@ -316,7 +335,7 @@ const UserBindingPage: React.FC = () => {
             current: params.current || 1,
             pageSize: params.pageSize || 10,
             username: params.username,
-            platformType: params.platformType,
+            provider: params.provider,
             bound: params.bound !== undefined ? params.bound === 'true' : undefined,
           };
 
@@ -406,10 +425,11 @@ const UserBindingPage: React.FC = () => {
         onOk={submitBindModal}
         confirmLoading={bindUserMutation.isPending}
         destroyOnHidden
+        forceRender
       >
         <Form form={bindForm} layout="vertical">
           <Form.Item
-            name="platform"
+            name="provider"
             label="选择平台"
             rules={[{ required: true, message: '请选择绑定平台' }]}
           >
@@ -420,7 +440,7 @@ const UserBindingPage: React.FC = () => {
             </Select>
           </Form.Item>
           <Form.Item
-            name="platformUserId"
+            name="subjectId"
             label="平台账号"
             rules={[{ required: true, message: '请输入平台账号' }]}
           >
@@ -440,6 +460,7 @@ const UserBindingPage: React.FC = () => {
         onOk={submitEmployeeModal}
         confirmLoading={bindEmployeeMutation.isPending}
         destroyOnHidden
+        forceRender
       >
         <Form form={employeeForm} layout="vertical">
           <Form.Item

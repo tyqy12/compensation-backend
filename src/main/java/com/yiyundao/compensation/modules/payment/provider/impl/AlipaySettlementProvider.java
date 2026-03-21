@@ -62,7 +62,22 @@ public class AlipaySettlementProvider implements SettlementProvider {
                     .build();
         } catch (Exception e) {
             log.error("支付宝单笔转账失败: paymentRecordId={}", request.getPaymentRecordId(), e);
-            return fail("ALIPAY_TRANSFER_FAILED", e.getMessage());
+            PaymentRecord record = paymentRecordService.getById(request.getPaymentRecordId());
+            String providerOrderNo = record != null && StringUtils.hasText(record.getProviderOrderNo())
+                    ? record.getProviderOrderNo()
+                    : (record != null ? record.getAlipayOrderNo() : null);
+            String providerTradeNo = record != null && StringUtils.hasText(record.getProviderTradeNo())
+                    ? record.getProviderTradeNo()
+                    : (record != null ? record.getAlipayTradeNo() : null);
+            return SettlementResult.builder()
+                    .success(false)
+                    .status(SettlementStatus.FAILED)
+                    .providerOrderNo(providerOrderNo)
+                    .providerTradeNo(providerTradeNo)
+                    .errorCode("ALIPAY_TRANSFER_FAILED")
+                    .errorMsg(normalizeErrorMessage(e == null ? null : e.getMessage()))
+                    .responseTime(LocalDateTime.now())
+                    .build();
         }
     }
 
@@ -163,9 +178,26 @@ public class AlipaySettlementProvider implements SettlementProvider {
                 .success(false)
                 .status(SettlementStatus.FAILED)
                 .errorCode(code)
-                .errorMsg(msg)
+                .errorMsg(normalizeErrorMessage(msg))
                 .responseTime(LocalDateTime.now())
                 .build();
+    }
+
+    private String normalizeErrorMessage(String rawMessage) {
+        if (!StringUtils.hasText(rawMessage)) {
+            return "支付宝转账失败";
+        }
+        String message = rawMessage.trim();
+        if (message.contains("RSA2签名遭遇异常")
+                || message.contains("InvalidKeyException")
+                || message.contains("privateKeySize")) {
+            return "支付宝签名失败，请检查应用私钥格式（PKCS8）";
+        }
+        int contentIndex = message.indexOf("content=");
+        if (contentIndex > 0) {
+            message = message.substring(0, contentIndex).trim();
+        }
+        return message.length() > 200 ? message.substring(0, 200) : message;
     }
 
     private SettlementStatus mapPaymentStatus(PaymentStatus status) {
@@ -189,4 +221,3 @@ public class AlipaySettlementProvider implements SettlementProvider {
         };
     }
 }
-

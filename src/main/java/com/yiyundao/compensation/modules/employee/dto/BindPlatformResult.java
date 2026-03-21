@@ -55,16 +55,16 @@ public class BindPlatformResult {
     private String employeeName;
 
     /**
-     * 平台类型
+     * 平台提供方（wechat/dingtalk/feishu）
      */
-    @Schema(description = "平台类型")
-    private String platformType;
+    @Schema(description = "平台提供方")
+    private String provider;
 
     /**
-     * 平台用户ID
+     * 平台主体ID
      */
-    @Schema(description = "平台用户ID")
-    private String platformUserId;
+    @Schema(description = "平台主体ID")
+    private String subjectId;
 
     /**
      * 关联的系统用户ID（绑定成功后）
@@ -131,10 +131,16 @@ public class BindPlatformResult {
         private String occupiedEmployeeNo;
 
         /**
-         * 被占用的平台用户ID
+         * 被占用的平台提供方
          */
-        @Schema(description = "被占用的平台用户ID")
-        private String occupiedPlatformUserId;
+        @Schema(description = "被占用的平台提供方")
+        private String occupiedProvider;
+
+        /**
+         * 被占用的平台主体ID
+         */
+        @Schema(description = "被占用的平台主体ID")
+        private String occupiedSubjectId;
 
         /**
          * 冲突详情描述
@@ -147,15 +153,15 @@ public class BindPlatformResult {
      * 创建成功结果
      */
     public static BindPlatformResult success(Long employeeId, String employeeNo, String employeeName,
-                                              String platformType, String platformUserId, Long userId) {
+                                             String provider, String subjectId, Long userId) {
         return BindPlatformResult.builder()
                 .result(BindResult.SUCCESS)
                 .message("绑定成功")
                 .employeeId(employeeId)
                 .employeeNo(employeeNo)
                 .employeeName(employeeName)
-                .platformType(platformType)
-                .platformUserId(platformUserId)
+                .provider(provider)
+                .subjectId(subjectId)
                 .userId(userId)
                 .operationTime(LocalDateTime.now())
                 .build();
@@ -165,15 +171,15 @@ public class BindPlatformResult {
      * 创建已绑定结果（无需重复绑定）
      */
     public static BindPlatformResult alreadyBound(Long employeeId, String employeeNo, String employeeName,
-                                                    String platformType, String platformUserId) {
+                                                  String provider, String subjectId) {
         return BindPlatformResult.builder()
                 .result(BindResult.ALREADY_BOUND)
                 .message("已是同一平台账号，无需重复绑定")
                 .employeeId(employeeId)
                 .employeeNo(employeeNo)
                 .employeeName(employeeName)
-                .platformType(platformType)
-                .platformUserId(platformUserId)
+                .provider(provider)
+                .subjectId(subjectId)
                 .operationTime(LocalDateTime.now())
                 .build();
     }
@@ -182,17 +188,17 @@ public class BindPlatformResult {
      * 创建待审批结果
      */
     public static BindPlatformResult pendingApproval(Long employeeId, String employeeNo, String employeeName,
-                                                       String platformType, String platformUserId,
-                                                       Long workflowId, String workflowType,
-                                                       ConflictInfo conflictInfo) {
+                                                     String provider, String subjectId,
+                                                     Long workflowId, String workflowType,
+                                                     ConflictInfo conflictInfo) {
         return BindPlatformResult.builder()
                 .result(BindResult.PENDING_APPROVAL)
                 .message("平台账号冲突，已发起审批流程")
                 .employeeId(employeeId)
                 .employeeNo(employeeNo)
                 .employeeName(employeeName)
-                .platformType(platformType)
-                .platformUserId(platformUserId)
+                .provider(provider)
+                .subjectId(subjectId)
                 .workflowId(workflowId)
                 .workflowType(workflowType)
                 .conflictInfo(conflictInfo)

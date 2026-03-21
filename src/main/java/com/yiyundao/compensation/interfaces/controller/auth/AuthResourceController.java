@@ -59,6 +59,8 @@ public class AuthResourceController {
         data.put("id", String.valueOf(user.getId()));
         data.put("username", user.getUsername());
         data.put("roles", toRoleList(user.getId()));
+        data.put("employeeId", user.getEmployeeId());
+        data.put("hasEmployeeProfile", user.getEmployeeId() != null);
         return ApiResponse.success(data);
     }
 

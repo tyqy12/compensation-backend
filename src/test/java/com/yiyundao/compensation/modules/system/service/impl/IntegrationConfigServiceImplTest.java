@@ -3,6 +3,7 @@ package com.yiyundao.compensation.modules.system.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.infrastructure.dao.IntegrationConfigMapper;
+import com.yiyundao.compensation.interfaces.dto.config.WechatConfigDto;
 import com.yiyundao.compensation.modules.system.entity.IntegrationConfig;
 import com.yiyundao.compensation.service.ConfigDecryptionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,10 +16,13 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -69,5 +73,21 @@ class IntegrationConfigServiceImplTest {
 
         assertFalse(service.isPlatformEnabled("wechat"));
         assertTrue(service.isPlatformEnabled("wechat"));
+    }
+
+    @Test
+    @DisplayName("明文 JSON 配置应直接解析，不触发解密")
+    void getWechatConfig_plainJsonShouldParseWithoutDecrypt() {
+        IntegrationConfig cfg = new IntegrationConfig();
+        cfg.setEnabled(true);
+        cfg.setConfigJson("{\"corpId\":\"ww123\",\"corpSecret\":\"sec\",\"agentId\":\"1000003\"}");
+        when(integrationConfigMapper.selectOne(any(), eq(true))).thenReturn(cfg);
+
+        WechatConfigDto dto = service.getWechatConfig();
+
+        assertNotNull(dto);
+        assertEquals("ww123", dto.getCorpId());
+        assertEquals("1000003", dto.getAgentId());
+        verify(configDecryptionService, never()).decrypt(any());
     }
 }

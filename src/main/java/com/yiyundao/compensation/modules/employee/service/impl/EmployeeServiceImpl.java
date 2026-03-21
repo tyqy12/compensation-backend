@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.modules.employee.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -23,6 +24,7 @@ import com.yiyundao.compensation.modules.employee.dto.BindPlatformRequest;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult.ConflictInfo;
 import com.yiyundao.compensation.modules.employee.dto.BindResult;
+import com.yiyundao.compensation.modules.employee.dto.EmployeeProfileChangePayload;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.infrastructure.dao.EmployeeMapper;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
@@ -35,7 +37,9 @@ import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.payroll.service.PayCycleService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
+import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.modules.user.service.UserBindingService;
 import com.yiyundao.compensation.service.EncryptionService;
@@ -65,6 +69,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     private final ObjectProvider<UserBindingService> userBindingServiceProvider;
     private final ObjectProvider<ApprovalEngine> approvalEngineProvider;
     private final SysUserService sysUserService;
+    private final ExternalIdentityService externalIdentityService;
     private final ApprovalWorkflowMapper approvalWorkflowMapper;
     private final PayrollLineService payrollLineService;
     private final PayrollBatchService payrollBatchService;
@@ -89,6 +94,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     @Transactional
     public EmployeeVO createEmployee(Employee employee) {
         log.info("创建员工: {}", employee.getName());
+        PlatformBinding platformBinding = extractPlatformBinding(employee);
         normalizeFinancialFields(employee);
         validateEmployeeData(employee);
         if (existsByEmployeeId(employee.getEmployeeId())) {
@@ -96,7 +102,10 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         }
         encryptSensitiveData(employee);
         setDefaultValues(employee);
+        employee.setProvider(null);
+        employee.setSubjectId(null);
         save(employee);
+        upsertPlatformBinding(platformBinding, employee.getId(), null, "manual");
         log.info("员工创建成功: id={}, employeeId={}", employee.getId(), employee.getEmployeeId());
         return voConverter.toEmployeeVO(employee);
     }
@@ -121,6 +130,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (existingEmployee == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "员工不存在: " + id);
         }
+        PlatformBinding platformBinding = extractPlatformBinding(updateInfo);
         validateFinancialData(updateInfo.getSettlementAccountType(), updateInfo.getSettlementAccount(), updateInfo.getBankAccount());
         if (StringUtils.hasText(updateInfo.getName())) existingEmployee.setName(updateInfo.getName());
         if (StringUtils.hasText(updateInfo.getPhone())) existingEmployee.setPhone(updateInfo.getPhone());
@@ -182,8 +192,105 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         }
 
         updateById(existingEmployee);
+        if (platformBinding != null) {
+            SysUser user = sysUserService.getOne(new LambdaQueryWrapper<SysUser>()
+                    .eq(SysUser::getEmployeeId, existingEmployee.getId())
+                    .last("limit 1"));
+            upsertPlatformBinding(platformBinding, existingEmployee.getId(), user != null ? user.getId() : null, "manual");
+        }
         log.info("员工信息更新成功: id={}", id);
         return voConverter.toEmployeeVO(existingEmployee);
+    }
+
+    @Override
+    public EmployeeVO getCurrentEmployeeProfile(Long userId) {
+        Employee employee = resolveEmployeeByUserId(userId);
+        return getEmployeeVO(employee.getId());
+    }
+
+    @Override
+    @Transactional
+    public EmployeeVO updateCurrentEmployeeContact(Long userId, String phone, String email) {
+        Employee employee = resolveEmployeeByUserId(userId);
+        Employee update = new Employee();
+        if (StringUtils.hasText(phone)) {
+            update.setPhone(phone.trim());
+        }
+        if (StringUtils.hasText(email)) {
+            update.setEmail(email.trim());
+        }
+        if (!StringUtils.hasText(update.getPhone()) && !StringUtils.hasText(update.getEmail())) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "至少提供一个联系方式字段（phone/email）");
+        }
+        return updateEmployee(employee.getId(), update);
+    }
+
+    @Override
+    @Transactional
+    public Long submitCurrentEmployeeProfileChange(Long userId, EmployeeProfileChangePayload payload, String reason) {
+        Employee employee = resolveEmployeeByUserId(userId);
+        if (payload == null) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "缺少变更内容");
+        }
+
+        EmployeeProfileChangePayload normalizedPayload = payload.normalize();
+        if (!normalizedPayload.hasAnyChangeField()) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "至少提交一个需要审核的字段");
+        }
+        validateProfileChangePayload(normalizedPayload);
+
+        Map<String, Object> workflowData = buildProfileChangeWorkflowData(employee, normalizedPayload, reason);
+        ApprovalEngine approvalEngine = approvalEngineProvider.getObject();
+        Long workflowId = approvalEngine.startWorkflow(
+                WorkflowType.OFFLINE,
+                buildEmployeeProfileChangeBusinessKey(employee.getId()),
+                BUSINESS_TYPE_EMPLOYEE_PROFILE_CHANGE,
+                userId,
+                workflowData
+        );
+        log.info("员工资料变更申请已提交: workflowId={}, employeeId={}, initiatorId={}",
+                workflowId, employee.getId(), userId);
+        return workflowId;
+    }
+
+    @Override
+    public PageResponse<EmployeeApprovalRecordVO> pageCurrentEmployeeProfileChanges(Long userId, int pageNum, int pageSize) {
+        Employee employee = resolveEmployeeByUserId(userId);
+        return pageEmployeeApprovalsInternal(employee.getId(), userId, BUSINESS_TYPE_EMPLOYEE_PROFILE_CHANGE, pageNum, pageSize);
+    }
+
+    @Override
+    @Transactional
+    public EmployeeVO applyApprovedProfileChange(Long workflowId, Long employeeId, EmployeeProfileChangePayload payload) {
+        if (workflowId == null) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "workflowId不能为空");
+        }
+        if (employeeId == null) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "employeeId不能为空");
+        }
+        if (payload == null) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "审批变更数据不能为空");
+        }
+
+        EmployeeProfileChangePayload normalizedPayload = payload.normalize();
+        if (!normalizedPayload.hasAnyChangeField()) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "审批变更数据为空");
+        }
+        validateProfileChangePayload(normalizedPayload);
+
+        Employee updateInfo = new Employee();
+        updateInfo.setName(normalizedPayload.getName());
+        updateInfo.setEncryptedIdCard(normalizedPayload.getIdCard());
+        updateInfo.setSettlementAccountType(normalizedPayload.getSettlementAccountType());
+        updateInfo.setSettlementAccount(normalizedPayload.getSettlementAccount());
+        updateInfo.setSettlementAccountName(normalizedPayload.getSettlementAccountName());
+        updateInfo.setBankAccount(normalizedPayload.getBankAccount());
+        updateInfo.setBankName(normalizedPayload.getBankName());
+        updateInfo.setBankBranchName(normalizedPayload.getBankBranchName());
+
+        EmployeeVO result = updateEmployee(employeeId, updateInfo);
+        log.info("审批通过后已应用员工资料变更: workflowId={}, employeeId={}", workflowId, employeeId);
+        return result;
     }
 
     @Override
@@ -202,48 +309,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
 
     @Override
     public PageResponse<EmployeeApprovalRecordVO> pageEmployeeApprovals(Long employeeId, int pageNum, int pageSize) {
-        long current = Math.max(1, pageNum);
-        long size = Math.max(1, pageSize);
-        Page<ApprovalWorkflow> page = new Page<>(current, size);
-        LambdaQueryWrapper<ApprovalWorkflow> queryWrapper = new LambdaQueryWrapper<ApprovalWorkflow>()
-                .eq(ApprovalWorkflow::getEmployeeId, employeeId)
-                .orderByDesc(ApprovalWorkflow::getSubmitTime);
-        Page<ApprovalWorkflow> result = approvalWorkflowMapper.selectPage(page, queryWrapper);
-
-        Set<Long> userIds = new HashSet<>();
-        for (ApprovalWorkflow workflow : result.getRecords()) {
-            if (workflow.getInitiatorId() != null) {
-                userIds.add(workflow.getInitiatorId());
-            }
-            if (workflow.getCurrentApproverId() != null) {
-                userIds.add(workflow.getCurrentApproverId());
-            }
-        }
-        Map<Long, String> userNameMap = buildUserNameMap(userIds);
-
-        List<EmployeeApprovalRecordVO> records = result.getRecords().stream().map(workflow -> {
-            EmployeeApprovalRecordVO vo = new EmployeeApprovalRecordVO();
-            vo.setId(workflow.getId());
-            vo.setEmployeeId(workflow.getEmployeeId());
-            vo.setWorkflowName(workflow.getWorkflowName());
-            vo.setWorkflowType(workflow.getWorkflowType() != null ? workflow.getWorkflowType().getCode() : null);
-            vo.setWorkflowTypeName(workflow.getWorkflowType() != null ? workflow.getWorkflowType().getName() : null);
-            vo.setBusinessType(workflow.getBusinessType());
-            vo.setBusinessKey(workflow.getBusinessKey());
-            vo.setCurrentStep(workflow.getCurrentStep());
-            vo.setTotalSteps(workflow.getTotalSteps());
-            vo.setStatus(workflow.getStatus() != null ? workflow.getStatus().getCode() : null);
-            vo.setStatusName(workflow.getStatus() != null ? workflow.getStatus().getName() : null);
-            vo.setInitiatorId(workflow.getInitiatorId());
-            vo.setInitiatorName(userNameMap.get(workflow.getInitiatorId()));
-            vo.setCurrentApproverId(workflow.getCurrentApproverId());
-            vo.setCurrentApproverName(userNameMap.get(workflow.getCurrentApproverId()));
-            vo.setSubmitTime(workflow.getSubmitTime());
-            vo.setCompleteTime(workflow.getCompleteTime());
-            return vo;
-        }).toList();
-
-        return PageResponse.of(result, records);
+        return pageEmployeeApprovalsInternal(employeeId, null, null, pageNum, pageSize);
     }
 
     @Override
@@ -329,21 +395,30 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     @Override
     public PageResponse<EmployeeListItemVO> pageEmployees(int pageNum, int pageSize, String keyword,
                                                           String department, String status,
-                                                          Boolean isOffline, String platformType,
+                                                          Boolean isOffline, String provider,
                                                           Long managerId, String sortBy, String order) {
         log.info("分页查询员工: page={}, size={}, keyword={}", pageNum, pageSize, keyword);
         Page<Employee> page = new Page<>(pageNum, pageSize);
-        LambdaQueryWrapper<Employee> queryWrapper = buildQueryWrapper(keyword, department, status, isOffline, platformType, managerId, sortBy, order);
+        LambdaQueryWrapper<Employee> queryWrapper = buildQueryWrapper(keyword, department, status, isOffline, provider, managerId, sortBy, order);
         Page<Employee> result = page(page, queryWrapper);
+        Map<Long, ExternalIdentity> identityMap = buildPrimaryIdentityMap(result.getRecords());
         List<EmployeeListItemVO> voList = result.getRecords().stream()
-                .map(voConverter::toEmployeeListItemVO)
+                .map(employee -> {
+                    EmployeeListItemVO vo = voConverter.toEmployeeListItemVO(employee);
+                    ExternalIdentity identity = identityMap.get(employee.getId());
+                    if (identity != null) {
+                        vo.setProvider(identity.getProvider());
+                        vo.setProviderName(translatePlatformName(identity.getProvider()));
+                    }
+                    return vo;
+                })
                 .toList();
         return PageResponse.of(voList, result.getCurrent(), result.getSize(), result.getTotal());
     }
 
     @Override
     public List<EmployeeVO> getOfflineEmployees(Long managerId) {
-        log.info("查询离线员工列表: managerId={}", managerId);
+        log.info("查询架构外员工列表: managerId={}", managerId);
         LambdaQueryWrapper<Employee> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(Employee::getOffline, true)
                    .eq(Employee::getStatus, EmployeeStatus.ACTIVE.getCode());
@@ -354,10 +429,21 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     }
 
     @Override
+    public List<EmployeeVO> getResignedEmployees(Long managerId) {
+        log.info("查询离职员工列表: managerId={}", managerId);
+        LambdaQueryWrapper<Employee> queryWrapper = new LambdaQueryWrapper<>();
+        queryWrapper.eq(Employee::getStatus, EmployeeStatus.INACTIVE.getCode());
+        if (managerId != null) queryWrapper.eq(Employee::getManagerId, managerId);
+        return list(queryWrapper).stream()
+                .map(voConverter::toEmployeeVO)
+                .toList();
+    }
+
+    @Override
     @Transactional
     public BindPlatformResult bindPlatform(Long employeeId, BindPlatformRequest request) {
-        log.info("绑定平台用户: employeeId={}, platformType={}, platformUserId={}",
-                employeeId, request.getPlatformType(), request.getPlatformUserId());
+        log.info("绑定平台用户: employeeId={}, provider={}, subjectId={}",
+                employeeId, request.getProvider(), request.getSubjectId());
 
         // 1. 检查员工是否存在
         Employee employee = getById(employeeId);
@@ -366,23 +452,25 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
             return BindPlatformResult.failed(BindResult.EMPLOYEE_NOT_FOUND, "员工不存在");
         }
 
-        String platformType = normalizePlatform(request.getPlatformType());
-        String platformUserId = request.getPlatformUserId().trim();
+        String provider = normalizePlatform(request.getProvider());
+        String subjectId = request.getSubjectId().trim();
 
         // 2. 检查是否已是同一账号（无需重复绑定）
-        if (platformType.equals(employee.getPlatformType())
-                && platformUserId.equals(employee.getPlatformUserId())) {
+        ExternalIdentity currentIdentity = externalIdentityService.findPrimaryByEmployeeId(employeeId);
+        if (currentIdentity != null
+                && provider.equals(currentIdentity.getProvider())
+                && subjectId.equals(currentIdentity.getSubjectId())) {
             log.info("已是同一平台账号，无需重复绑定: employeeId={}", employeeId);
             return BindPlatformResult.alreadyBound(employeeId, employee.getEmployeeId(), employee.getName(),
-                    platformType, platformUserId);
+                    provider, subjectId);
         }
 
         // 3. 检查目标平台账号是否已被其他员工占用
-        Employee occupiedEmployee = getByPlatformUserId(platformUserId, platformType);
+        Employee occupiedEmployee = getByProviderAndSubjectId(provider, subjectId);
         if (occupiedEmployee != null && !occupiedEmployee.getId().equals(employeeId)) {
             // 冲突：平台账号已被其他员工占用
-            log.warn("平台账号冲突: platformUserId={}, occupiedBy={}",
-                    platformUserId, occupiedEmployee.getId());
+            log.warn("平台账号冲突: subjectId={}, occupiedBy={}",
+                    subjectId, occupiedEmployee.getId());
 
             // 构建冲突信息
             ConflictInfo conflictInfo = ConflictInfo.builder()
@@ -390,20 +478,21 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
                     .occupiedEmployeeId(occupiedEmployee.getId())
                     .occupiedEmployeeName(occupiedEmployee.getName())
                     .occupiedEmployeeNo(occupiedEmployee.getEmployeeId())
-                    .occupiedPlatformUserId(platformUserId)
+                    .occupiedProvider(provider)
+                    .occupiedSubjectId(subjectId)
                     .detail(String.format("平台账号已被员工【%s(%s)】占用，如需强制绑定请等待审批",
                             occupiedEmployee.getName(), occupiedEmployee.getEmployeeId()))
                     .build();
 
             // 发起审批流程
-            Long workflowId = startApprovalWorkflow(employee, platformType, platformUserId, conflictInfo);
+            Long workflowId = startApprovalWorkflow(employee, provider, subjectId, conflictInfo);
 
             return BindPlatformResult.pendingApproval(employeeId, employee.getEmployeeId(), employee.getName(),
-                    platformType, platformUserId, workflowId, "PLATFORM_LINK", conflictInfo);
+                    provider, subjectId, workflowId, "PLATFORM_LINK", conflictInfo);
         }
 
         // 4. 执行绑定（双向同步）
-        performBinding(employee, platformType, platformUserId);
+        performBinding(employee, provider, subjectId);
 
         // 5. 获取关联的用户ID
         Long userId = null;
@@ -417,7 +506,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
 
         log.info("平台用户绑定成功: employeeId={}, userId={}", employeeId, userId);
         return BindPlatformResult.success(employeeId, employee.getEmployeeId(), employee.getName(),
-                platformType, platformUserId, userId);
+                provider, subjectId, userId);
     }
 
     @Override
@@ -431,33 +520,30 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
             return;
         }
 
-        // 记录解绑前的状态（用于审计）
-        String oldPlatformType = employee.getPlatformType();
-        String oldPlatformUserId = employee.getPlatformUserId();
         Long userId = null;
 
         if (employee.getId() != null) {
             SysUser user = sysUserService.getOne(
-                    new LambdaQueryWrapper<SysUser>().eq(SysUser::getEmployeeId, employee.getId()));
+                    new LambdaQueryWrapper<SysUser>().eq(SysUser::getEmployeeId, employee.getId()).last("limit 1"));
             if (user != null) {
                 userId = user.getId();
             }
         }
 
-        // 清空员工平台信息
-        employee.setPlatformType(null);
-        employee.setPlatformUserId(null);
-        updateById(employee);
-
-        // 同步清空用户平台信息
-        if (userId != null) {
-            SysUser user = sysUserService.getById(userId);
-            if (user != null && oldPlatformType.equals(user.getPlatformType())
-                    && oldPlatformUserId.equals(user.getPlatformUserId())) {
-                user.setPlatformType(null);
-                user.setPlatformUserId(null);
-                sysUserService.updateById(user);
-            }
+        ExternalIdentity identity = externalIdentityService.findPrimaryByEmployeeId(employeeId);
+        if (identity == null && userId != null) {
+            identity = externalIdentityService.findPrimaryByUserId(userId);
+        }
+        if (identity != null) {
+            externalIdentityService.deactivatePlatformIdentity(
+                    identity.getProvider(),
+                    identity.getTenantKey(),
+                    identity.getSubjectType(),
+                    identity.getSubjectId(),
+                    employeeId,
+                    userId,
+                    "manual"
+            );
         }
 
         log.info("平台用户解绑成功: employeeId={}, userId={}, reason={}", employeeId, userId, reason);
@@ -466,9 +552,9 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     @Override
     @Transactional
     public BindPlatformResult executeApprovedBinding(Long workflowId, Long employeeId,
-                                                      String platformType, String platformUserId) {
-        log.info("执行审批通过后的绑定: workflowId={}, employeeId={}, platformType={}, platformUserId={}",
-                workflowId, employeeId, platformType, platformUserId);
+                                                      String provider, String subjectId) {
+        log.info("执行审批通过后的绑定: workflowId={}, employeeId={}, provider={}, subjectId={}",
+                workflowId, employeeId, provider, subjectId);
 
         Employee employee = getById(employeeId);
         if (employee == null) {
@@ -477,7 +563,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         }
 
         // 重新检查是否仍可绑定（可能情况已变化）
-        Employee occupiedEmployee = getByPlatformUserId(platformUserId, platformType);
+        Employee occupiedEmployee = getByProviderAndSubjectId(provider, subjectId);
         if (occupiedEmployee != null && !occupiedEmployee.getId().equals(employeeId)) {
             log.warn("审批通过但平台账号已被其他员工占用: employeeId={}, occupiedBy={}",
                     employeeId, occupiedEmployee.getId());
@@ -485,7 +571,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         }
 
         // 执行绑定
-        performBinding(employee, platformType, platformUserId);
+        performBinding(employee, provider, subjectId);
 
         Long userId = null;
         if (employee.getId() != null) {
@@ -498,35 +584,39 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
 
         log.info("审批通过后的绑定执行成功: employeeId={}, userId={}", employeeId, userId);
         return BindPlatformResult.success(employeeId, employee.getEmployeeId(), employee.getName(),
-                platformType, platformUserId, userId);
+                provider, subjectId, userId);
     }
 
     /**
      * 执行实际的绑定操作（双向同步）
      */
-    private void performBinding(Employee employee, String platformType, String platformUserId) {
-        // 更新员工平台信息
-        employee.setPlatformType(platformType);
-        employee.setPlatformUserId(platformUserId);
-        updateById(employee);
-
-        // 同步更新关联用户的平台信息
+    private void performBinding(Employee employee, String provider, String subjectId) {
+        // 仅维护 external_identity，旧字段不再写入
+        Long userId = null;
         if (employee.getId() != null) {
             SysUser user = sysUserService.getOne(
                     new LambdaQueryWrapper<SysUser>().eq(SysUser::getEmployeeId, employee.getId()));
             if (user != null) {
-                user.setPlatformType(platformType);
-                user.setPlatformUserId(platformUserId);
-                sysUserService.updateById(user);
-                log.debug("同步更新用户平台信息: userId={}", user.getId());
+                userId = user.getId();
             }
         }
+
+        externalIdentityService.upsertPlatformIdentity(
+                provider,
+                ExternalIdentityService.DEFAULT_TENANT_KEY,
+                ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
+                subjectId,
+                employee.getId(),
+                userId,
+                "manual",
+                true
+        );
     }
 
     /**
      * 发起审批流程
      */
-    private Long startApprovalWorkflow(Employee employee, String platformType, String platformUserId,
+    private Long startApprovalWorkflow(Employee employee, String provider, String subjectId,
                                         ConflictInfo conflictInfo) {
         Long operatorId = getCurrentUserId();
 
@@ -534,8 +624,8 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         data.put("employeeId", employee.getId());
         data.put("employeeName", employee.getName());
         data.put("employeeNo", employee.getEmployeeId());
-        data.put("platformType", platformType);
-        data.put("platformUserId", platformUserId);
+        data.put("provider", provider);
+        data.put("subjectId", subjectId);
         data.put("conflictInfo", toJsonSafe(conflictInfo));
         data.put("action", "BIND_PLATFORM");
         data.put("reason", "平台账号冲突，申请强制绑定");
@@ -577,6 +667,42 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         }
     }
 
+    private PlatformBinding extractPlatformBinding(Employee employee) {
+        if (employee == null) {
+            return null;
+        }
+        if (!StringUtils.hasText(employee.getProvider()) && !StringUtils.hasText(employee.getSubjectId())) {
+            return null;
+        }
+        if (!StringUtils.hasText(employee.getProvider()) || !StringUtils.hasText(employee.getSubjectId())) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "平台提供方与平台主体ID需同时传入");
+        }
+        String provider = normalizePlatform(employee.getProvider());
+        String subjectId = employee.getSubjectId().trim();
+        if (!StringUtils.hasText(provider) || !StringUtils.hasText(subjectId)) {
+            return null;
+        }
+        return new PlatformBinding(provider, subjectId);
+    }
+
+    private void upsertPlatformBinding(PlatformBinding binding, Long employeeId, Long userId, String source) {
+        if (binding == null) {
+            return;
+        }
+        externalIdentityService.upsertPlatformIdentity(
+                binding.provider(),
+                ExternalIdentityService.DEFAULT_TENANT_KEY,
+                ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
+                binding.subjectId(),
+                employeeId,
+                userId,
+                source,
+                true
+        );
+    }
+
+    private record PlatformBinding(String provider, String subjectId) { }
+
     /**
      * 获取当前用户ID
      */
@@ -602,6 +728,127 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
 
     private String buildEmployeeApprovalBusinessKey(Long employeeId) {
         return "EMPLOYEE-" + employeeId + "-" + System.currentTimeMillis();
+    }
+
+    private String buildEmployeeProfileChangeBusinessKey(Long employeeId) {
+        return "EMPLOYEE-PROFILE-" + employeeId + "-" + System.currentTimeMillis();
+    }
+
+    private Employee resolveEmployeeByUserId(Long userId) {
+        if (userId == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED, "未登录");
+        }
+        SysUser user = sysUserService.getById(userId);
+        if (user == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED, "用户不存在");
+        }
+        if (user.getEmployeeId() == null) {
+            throw new BusinessException(ErrorCode.ACCESS_DENIED, "当前账号未绑定员工档案");
+        }
+        Employee employee = getById(user.getEmployeeId());
+        if (employee == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "员工不存在: " + user.getEmployeeId());
+        }
+        return employee;
+    }
+
+    private void validateProfileChangePayload(EmployeeProfileChangePayload payload) {
+        if (payload == null) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "缺少变更内容");
+        }
+        if (StringUtils.hasText(payload.getName()) && payload.getName().trim().length() > 100) {
+            throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "姓名长度不能超过100个字符");
+        }
+        if (StringUtils.hasText(payload.getIdCard()) && !ValidationUtils.isValidIdCard(payload.getIdCard().trim())) {
+            throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "身份证号格式不正确");
+        }
+        if (StringUtils.hasText(payload.getSettlementAccountName())
+                && payload.getSettlementAccountName().trim().length() > 100) {
+            throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "收款账户实名长度不能超过100个字符");
+        }
+        if (StringUtils.hasText(payload.getBankName()) && payload.getBankName().trim().length() > 100) {
+            throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "开户银行长度不能超过100个字符");
+        }
+        if (StringUtils.hasText(payload.getBankBranchName()) && payload.getBankBranchName().trim().length() > 120) {
+            throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "开户支行长度不能超过120个字符");
+        }
+        validateFinancialData(payload.getSettlementAccountType(), payload.getSettlementAccount(), payload.getBankAccount());
+    }
+
+    private Map<String, Object> buildProfileChangeWorkflowData(Employee employee,
+                                                               EmployeeProfileChangePayload payload,
+                                                               String reason) {
+        Map<String, Object> data = new HashMap<>();
+        data.put("employeeId", employee.getId());
+        data.put("employeeNo", employee.getEmployeeId());
+        data.put("employeeName", employee.getName());
+        data.put("action", BUSINESS_TYPE_EMPLOYEE_PROFILE_CHANGE);
+        data.put("changedFields", payload.changedFields());
+        if (StringUtils.hasText(reason)) {
+            data.put("reason", reason.trim());
+        }
+        try {
+            String payloadJson = objectMapper.writeValueAsString(payload);
+            data.put("changePayloadCipher", encryptionService.encrypt(payloadJson));
+        } catch (Exception e) {
+            throw new BusinessException(ErrorCode.SYSTEM_ERROR, "序列化变更内容失败");
+        }
+        return data;
+    }
+
+    private PageResponse<EmployeeApprovalRecordVO> pageEmployeeApprovalsInternal(Long employeeId,
+                                                                                 Long initiatorId,
+                                                                                 String businessType,
+                                                                                 int pageNum,
+                                                                                 int pageSize) {
+        long current = Math.max(1, pageNum);
+        long size = Math.max(1, pageSize);
+        Page<ApprovalWorkflow> page = new Page<>(current, size);
+        LambdaQueryWrapper<ApprovalWorkflow> queryWrapper = new LambdaQueryWrapper<ApprovalWorkflow>()
+                .eq(ApprovalWorkflow::getEmployeeId, employeeId)
+                .orderByDesc(ApprovalWorkflow::getSubmitTime);
+        if (initiatorId != null) {
+            queryWrapper.eq(ApprovalWorkflow::getInitiatorId, initiatorId);
+        }
+        if (StringUtils.hasText(businessType)) {
+            queryWrapper.eq(ApprovalWorkflow::getBusinessType, businessType);
+        }
+        Page<ApprovalWorkflow> result = approvalWorkflowMapper.selectPage(page, queryWrapper);
+
+        Set<Long> userIds = new HashSet<>();
+        for (ApprovalWorkflow workflow : result.getRecords()) {
+            if (workflow.getInitiatorId() != null) {
+                userIds.add(workflow.getInitiatorId());
+            }
+            if (workflow.getCurrentApproverId() != null) {
+                userIds.add(workflow.getCurrentApproverId());
+            }
+        }
+        Map<Long, String> userNameMap = buildUserNameMap(userIds);
+
+        List<EmployeeApprovalRecordVO> records = result.getRecords().stream().map(workflow -> {
+            EmployeeApprovalRecordVO vo = new EmployeeApprovalRecordVO();
+            vo.setId(workflow.getId());
+            vo.setEmployeeId(workflow.getEmployeeId());
+            vo.setWorkflowName(workflow.getWorkflowName());
+            vo.setWorkflowType(workflow.getWorkflowType() != null ? workflow.getWorkflowType().getCode() : null);
+            vo.setWorkflowTypeName(workflow.getWorkflowType() != null ? workflow.getWorkflowType().getName() : null);
+            vo.setBusinessType(workflow.getBusinessType());
+            vo.setBusinessKey(workflow.getBusinessKey());
+            vo.setCurrentStep(workflow.getCurrentStep());
+            vo.setTotalSteps(workflow.getTotalSteps());
+            vo.setStatus(workflow.getStatus() != null ? workflow.getStatus().getCode() : null);
+            vo.setStatusName(workflow.getStatus() != null ? workflow.getStatus().getName() : null);
+            vo.setInitiatorId(workflow.getInitiatorId());
+            vo.setInitiatorName(userNameMap.get(workflow.getInitiatorId()));
+            vo.setCurrentApproverId(workflow.getCurrentApproverId());
+            vo.setCurrentApproverName(userNameMap.get(workflow.getCurrentApproverId()));
+            vo.setSubmitTime(workflow.getSubmitTime());
+            vo.setCompleteTime(workflow.getCompleteTime());
+            return vo;
+        }).toList();
+
+        return PageResponse.of(result, records);
     }
 
     private Map<Long, String> buildUserNameMap(Set<Long> userIds) {
@@ -631,6 +878,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     @Transactional
     public void batchImport(List<Employee> employees) {
         log.info("批量导入员工: count={}", employees.size());
+        Map<Employee, PlatformBinding> bindingMap = new HashMap<>();
         List<Employee> toSave = employees.stream().filter(e -> {
             if (!StringUtils.hasText(e.getEmployeeId()) || !StringUtils.hasText(e.getName())) {
                 log.warn("跳过无效数据: 员工工号或姓名为空");
@@ -641,8 +889,21 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
                 return false;
             }
             return true;
+        }).peek(e -> {
+            PlatformBinding platformBinding = extractPlatformBinding(e);
+            if (platformBinding != null) {
+                bindingMap.put(e, platformBinding);
+            }
+            e.setProvider(null);
+            e.setSubjectId(null);
         }).peek(this::normalizeFinancialFields).peek(this::encryptSensitiveData).peek(this::setDefaultValues).toList();
         saveBatch(toSave);
+        for (Employee employee : toSave) {
+            PlatformBinding binding = bindingMap.get(employee);
+            if (binding != null) {
+                upsertPlatformBinding(binding, employee.getId(), null, "sync");
+            }
+        }
         log.info("批量导入完成: 成功导入{}个员工", toSave.size());
     }
 
@@ -687,12 +948,23 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     }
 
     @Override
-    public Employee getByPlatformUserId(String platformUserId, String platformType) {
-        LambdaQueryWrapper<Employee> queryWrapper = new LambdaQueryWrapper<>();
-        queryWrapper.eq(Employee::getPlatformUserId, platformUserId)
-                   .eq(Employee::getPlatformType, platformType)
-                   .eq(Employee::getStatus, EmployeeStatus.ACTIVE.getCode());
-        return getOne(queryWrapper);
+    public Employee getByProviderAndSubjectId(String provider, String subjectId) {
+        if (!StringUtils.hasText(provider) || !StringUtils.hasText(subjectId)) {
+            return null;
+        }
+        Long employeeId = externalIdentityService.findBoundEmployeeId(
+                provider,
+                ExternalIdentityService.DEFAULT_TENANT_KEY,
+                ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
+                subjectId
+        );
+        if (employeeId != null) {
+            Employee employee = getById(employeeId);
+            if (employee != null && EmployeeStatus.ACTIVE.getCode().equals(employee.getStatus())) {
+                return employee;
+            }
+        }
+        return null;
     }
 
     @Override
@@ -860,8 +1132,47 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         return null;
     }
 
+    private Map<Long, ExternalIdentity> buildPrimaryIdentityMap(List<Employee> employees) {
+        if (employees == null || employees.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> employeeIds = employees.stream()
+                .map(Employee::getId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        if (employeeIds.isEmpty()) {
+            return Map.of();
+        }
+        QueryWrapper<ExternalIdentity> wrapper = new QueryWrapper<>();
+        wrapper.select("id", "employee_id", "provider", "subject_id", "last_seen_at");
+        wrapper.in("employee_id", employeeIds);
+        wrapper.eq("status", ExternalIdentityService.STATUS_ACTIVE);
+        wrapper.orderByDesc("is_primary", "last_seen_at", "id");
+        List<ExternalIdentity> identities = externalIdentityService.list(wrapper);
+        Map<Long, ExternalIdentity> map = new HashMap<>();
+        for (ExternalIdentity identity : identities) {
+            if (identity.getEmployeeId() != null) {
+                map.putIfAbsent(identity.getEmployeeId(), identity);
+            }
+        }
+        return map;
+    }
+
+    private String translatePlatformName(String platformType) {
+        if (!StringUtils.hasText(platformType)) {
+            return null;
+        }
+        return switch (platformType.trim().toLowerCase()) {
+            case "wechat" -> "企业微信";
+            case "dingtalk" -> "钉钉";
+            case "feishu" -> "飞书";
+            default -> platformType;
+        };
+    }
+
     private LambdaQueryWrapper<Employee> buildQueryWrapper(String keyword, String department, String status,
-                                                           Boolean isOffline, String platformType, Long managerId,
+                                                           Boolean isOffline, String provider, Long managerId,
                                                            String sortBy, String order) {
         LambdaQueryWrapper<Employee> queryWrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(keyword)) {
@@ -875,7 +1186,23 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (StringUtils.hasText(department)) queryWrapper.eq(Employee::getDepartment, department);
         if (StringUtils.hasText(status)) queryWrapper.eq(Employee::getStatus, status);
         if (isOffline != null) queryWrapper.eq(Employee::getOffline, isOffline);
-        if (StringUtils.hasText(platformType)) queryWrapper.eq(Employee::getPlatformType, platformType);
+        if (StringUtils.hasText(provider)) {
+            String normalizedPlatform = normalizePlatform(provider);
+            List<Long> employeeIds = externalIdentityService.list(new LambdaQueryWrapper<ExternalIdentity>()
+                    .select(ExternalIdentity::getEmployeeId)
+                    .eq(ExternalIdentity::getProvider, normalizedPlatform)
+                    .eq(ExternalIdentity::getStatus, ExternalIdentityService.STATUS_ACTIVE)
+                    .isNotNull(ExternalIdentity::getEmployeeId))
+                    .stream()
+                    .map(ExternalIdentity::getEmployeeId)
+                    .distinct()
+                    .toList();
+            if (employeeIds.isEmpty()) {
+                queryWrapper.eq(Employee::getId, -1L);
+            } else {
+                queryWrapper.in(Employee::getId, employeeIds);
+            }
+        }
         if (managerId != null) queryWrapper.eq(Employee::getManagerId, managerId);
 
         boolean asc = "asc".equalsIgnoreCase(order);

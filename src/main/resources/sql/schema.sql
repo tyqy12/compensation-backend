@@ -25,9 +25,7 @@ CREATE TABLE `employee` (
   `department` varchar(100) DEFAULT NULL COMMENT '部门',
   `position` varchar(100) DEFAULT NULL COMMENT '职位',
   `employment_type` varchar(20) DEFAULT 'full_time' COMMENT '用工类型(full_time/part_time)',
-  `platform_user_id` varchar(100) DEFAULT NULL COMMENT '平台用户ID(企微/钉钉/飞书)',
-  `platform_type` varchar(20) DEFAULT NULL COMMENT '平台类型(wechat/dingtalk/feishu)',
-  `is_offline` tinyint(1) DEFAULT '0' COMMENT '是否离线员工(0:否,1:是)',
+  `is_offline` tinyint(1) DEFAULT '0' COMMENT '是否架构外员工(0:否,1:是)',
   `manager_id` bigint DEFAULT NULL COMMENT '管理员ID',
   `hire_date` date DEFAULT NULL COMMENT '入职日期',
   `status` varchar(20) DEFAULT 'active' COMMENT '员工状态(active:在职,inactive:离职,suspended:停职)',
@@ -46,11 +44,10 @@ CREATE TABLE `employee` (
   `version` int DEFAULT '0' COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_employee_id` (`employee_id`),
-  KEY `idx_platform_user` (`platform_user_id`, `platform_type`),
   KEY `idx_manager` (`manager_id`),
-  KEY `idx_status` (`status`),
+  KEY `idx_employee_status` (`status`),
   KEY `idx_offline` (`is_offline`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_employee_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工信息表';
 
 -- ============================================
@@ -125,10 +122,20 @@ CREATE TABLE `pay_cycle` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `type` varchar(20) NOT NULL COMMENT 'monthly/custom',
   `period_label` varchar(20) NOT NULL COMMENT '周期标签(YYYY-MM)',
+  `cycle_code` varchar(64) DEFAULT NULL COMMENT '周期编码',
+  `cycle_name` varchar(100) DEFAULT NULL COMMENT '周期名称',
+  `cycle_type` varchar(20) DEFAULT NULL COMMENT '周期类型(monthly/semi_monthly/weekly/biweekly/custom)',
   `start_date` date DEFAULT NULL,
   `end_date` date DEFAULT NULL,
   `cutoff_date` date DEFAULT NULL,
-  `status` varchar(20) DEFAULT 'open',
+  `pay_day` tinyint DEFAULT NULL COMMENT '发薪日(1-31)',
+  `lead_days` int DEFAULT NULL COMMENT '提前天数',
+  `grace_days` int DEFAULT NULL COMMENT '宽限天数',
+  `timezone` varchar(50) DEFAULT NULL COMMENT '时区',
+  `description` varchar(500) DEFAULT NULL COMMENT '描述',
+  `next_execution_time` datetime DEFAULT NULL COMMENT '下次执行时间',
+  `last_execution_time` datetime DEFAULT NULL COMMENT '最近执行时间',
+  `status` varchar(20) DEFAULT 'draft',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `create_by` varchar(50) DEFAULT NULL,
@@ -137,6 +144,9 @@ CREATE TABLE `pay_cycle` (
   `version` int DEFAULT '0',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_cycle` (`type`,`period_label`),
+  UNIQUE KEY `uk_cycle_code` (`cycle_code`),
+  KEY `idx_cycle_status_type` (`status`,`cycle_type`),
+  KEY `idx_cycle_next_execution` (`next_execution_time`),
   KEY `idx_status_start` (`status`,`start_date`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='发薪周期';
 
@@ -148,6 +158,8 @@ CREATE TABLE `payroll_batch` (
   `type` varchar(20) NOT NULL COMMENT 'full_time/part_time',
   `scope_json` json DEFAULT NULL COMMENT '范围JSON',
   `currency` varchar(10) DEFAULT 'CNY',
+  `calculation_status` varchar(32) DEFAULT 'draft' COMMENT '核算状态',
+  `batch_revision` int DEFAULT '1' COMMENT '业务批次版本号',
   `status` varchar(20) DEFAULT 'draft',
   `approval_workflow_id` bigint DEFAULT NULL,
   `payment_batch_no` varchar(50) DEFAULT NULL,
@@ -164,7 +176,9 @@ CREATE TABLE `payroll_batch` (
   `version` int DEFAULT '0',
   PRIMARY KEY (`id`),
   KEY `idx_batch_type_period_status` (`type`,`period_label`,`status`),
-  KEY `idx_cycle` (`pay_cycle_id`)
+  KEY `idx_cycle` (`pay_cycle_id`),
+  KEY `idx_calculation_status` (`calculation_status`),
+  KEY `idx_batch_revision` (`batch_revision`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='发薪批次';
 
 DROP TABLE IF EXISTS `payroll_line`;
@@ -203,6 +217,158 @@ CREATE TABLE `payroll_line` (
   KEY `idx_confirmation_assignee_status` (`confirmation_assignee_employee_id`,`confirmation_status`),
   KEY `idx_dispute_workflow` (`dispute_workflow_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工资行';
+
+DROP TABLE IF EXISTS `payroll_confirmation`;
+CREATE TABLE `payroll_confirmation` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `confirmation_no` varchar(64) NOT NULL COMMENT '确认单号',
+  `batch_id` bigint NOT NULL COMMENT '核算批次ID',
+  `batch_revision` int NOT NULL COMMENT '批次版本号',
+  `require_confirmation` tinyint(1) NOT NULL DEFAULT '1' COMMENT '是否需要确认',
+  `deadline` datetime DEFAULT NULL COMMENT '确认截止时间',
+  `timeout_strategy` varchar(32) DEFAULT NULL COMMENT '超时策略',
+  `confirmation_status` varchar(32) NOT NULL COMMENT '确认单状态',
+  `total_employees` int NOT NULL DEFAULT '0' COMMENT '总人数',
+  `confirmed_count` int NOT NULL DEFAULT '0' COMMENT '已确认人数',
+  `rejected_count` int NOT NULL DEFAULT '0' COMMENT '拒绝人数',
+  `policy_id` varchar(64) DEFAULT NULL COMMENT '策略ID/模式',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_confirmation_no` (`confirmation_no`),
+  UNIQUE KEY `uk_confirmation_batch_revision_deleted` (`batch_id`,`batch_revision`,`deleted`),
+  KEY `idx_confirmation_status` (`confirmation_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资确认单';
+
+DROP TABLE IF EXISTS `payroll_confirmation_record`;
+CREATE TABLE `payroll_confirmation_record` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `confirmation_id` bigint NOT NULL COMMENT '确认单ID',
+  `employee_id` bigint NOT NULL COMMENT '员工ID',
+  `line_id` bigint NOT NULL COMMENT '薪资行ID',
+  `record_status` varchar(32) NOT NULL COMMENT '确认记录状态',
+  `reject_reason` varchar(500) DEFAULT NULL COMMENT '拒绝原因',
+  `comment` varchar(500) DEFAULT NULL COMMENT '备注',
+  `confirmed_at` datetime DEFAULT NULL COMMENT '确认时间',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_confirmation_employee_deleted` (`confirmation_id`,`employee_id`,`deleted`),
+  KEY `idx_confirmation_line` (`confirmation_id`,`line_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资确认记录';
+
+DROP TABLE IF EXISTS `payroll_distribution`;
+CREATE TABLE `payroll_distribution` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `distribution_no` varchar(64) NOT NULL COMMENT '发放单号',
+  `batch_id` bigint NOT NULL COMMENT '核算批次ID',
+  `batch_revision` int NOT NULL COMMENT '批次版本号',
+  `total_amount` decimal(15,2) NOT NULL DEFAULT '0.00' COMMENT '应发总额快照',
+  `total_count` int NOT NULL DEFAULT '0' COMMENT '应发人数快照',
+  `scheduled_date` date NOT NULL COMMENT '计划发放日期',
+  `retry_limit` int NOT NULL DEFAULT '3' COMMENT '最大重试次数',
+  `allow_partial` tinyint(1) NOT NULL DEFAULT '0' COMMENT '是否允许部分成功',
+  `distribution_status` varchar(32) NOT NULL COMMENT '发放状态',
+  `actual_amount` decimal(15,2) NOT NULL DEFAULT '0.00' COMMENT '实发金额',
+  `success_count` int NOT NULL DEFAULT '0' COMMENT '成功人数',
+  `failed_count` int NOT NULL DEFAULT '0' COMMENT '失败人数',
+  `current_attempt` int NOT NULL DEFAULT '0' COMMENT '当前尝试号',
+  `approval_workflow_id` bigint DEFAULT NULL COMMENT '审批流ID',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_distribution_no` (`distribution_no`),
+  UNIQUE KEY `uk_distribution_batch_revision_deleted` (`batch_id`,`batch_revision`,`deleted`),
+  KEY `idx_distribution_status` (`distribution_status`),
+  KEY `idx_distribution_schedule` (`scheduled_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资发放单';
+
+DROP TABLE IF EXISTS `payroll_distribution_item`;
+CREATE TABLE `payroll_distribution_item` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `distribution_id` bigint NOT NULL COMMENT '发放单ID',
+  `employee_id` bigint NOT NULL COMMENT '员工ID',
+  `line_id` bigint NOT NULL COMMENT '薪资行ID',
+  `employee_name` varchar(128) DEFAULT NULL COMMENT '员工姓名快照',
+  `recipient_name` varchar(128) DEFAULT NULL COMMENT '收款人姓名快照',
+  `account_no_encrypted` text COMMENT '收款账户密文',
+  `account_no_masked` varchar(128) DEFAULT NULL COMMENT '收款账户脱敏',
+  `account_type` varchar(32) DEFAULT NULL COMMENT '账户类型',
+  `payment_method` varchar(32) DEFAULT NULL COMMENT '支付方式',
+  `provider_code` varchar(32) DEFAULT NULL COMMENT '结算渠道编码',
+  `amount` decimal(15,2) NOT NULL DEFAULT '0.00' COMMENT '应发金额快照',
+  `item_status` varchar(32) NOT NULL COMMENT '明细状态',
+  `payment_record_id` bigint DEFAULT NULL COMMENT '最新支付记录ID',
+  `failure_reason` varchar(500) DEFAULT NULL COMMENT '失败原因',
+  `retry_count` int NOT NULL DEFAULT '0' COMMENT '重试次数',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_distribution_employee_deleted` (`distribution_id`,`employee_id`,`deleted`),
+  KEY `idx_distribution_item_status` (`distribution_id`,`item_status`),
+  KEY `idx_distribution_payment_record` (`payment_record_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资发放明细';
+
+DROP TABLE IF EXISTS `payroll_approval_projection`;
+CREATE TABLE `payroll_approval_projection` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `batch_id` bigint NOT NULL COMMENT '核算批次ID',
+  `batch_revision` int NOT NULL COMMENT '批次版本号',
+  `distribution_id` bigint DEFAULT NULL COMMENT '发放单ID',
+  `workflow_id` bigint NOT NULL COMMENT '审批流ID',
+  `business_status` varchar(32) NOT NULL COMMENT '业务状态',
+  `submitter_id` bigint DEFAULT NULL COMMENT '提交人ID',
+  `submitted_at` datetime DEFAULT NULL COMMENT '提交时间',
+  `current_approver_id` bigint DEFAULT NULL COMMENT '当前审批人',
+  `completed_at` datetime DEFAULT NULL COMMENT '完成时间',
+  `result` varchar(64) DEFAULT NULL COMMENT '审批结果',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_workflow_deleted` (`workflow_id`,`deleted`),
+  KEY `idx_projection_distribution` (`distribution_id`),
+  KEY `idx_projection_status` (`business_status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资审批投影';
+
+DROP TABLE IF EXISTS `payroll_reconciliation_task`;
+CREATE TABLE `payroll_reconciliation_task` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `distribution_id` bigint NOT NULL COMMENT '发放单ID',
+  `task_status` varchar(32) NOT NULL COMMENT '任务状态',
+  `expected_amount` decimal(15,2) DEFAULT '0.00' COMMENT '应发金额',
+  `actual_amount` decimal(15,2) DEFAULT '0.00' COMMENT '实发金额',
+  `difference` decimal(15,2) DEFAULT '0.00' COMMENT '差异金额',
+  `result` varchar(32) DEFAULT NULL COMMENT '结果',
+  `difference_detail` text COMMENT '差异明细JSON',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) DEFAULT '0',
+  `version` int DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_reconciliation_distribution_deleted` (`distribution_id`,`deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资对账任务';
 
 DROP TABLE IF EXISTS `payroll_adjustment`;
 CREATE TABLE `payroll_adjustment` (
@@ -301,10 +467,10 @@ CREATE TABLE `payment_record` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_alipay_order` (`alipay_order_no`),
   KEY `idx_batch_no` (`batch_no`),
-  KEY `idx_employee` (`employee_id`),
-  KEY `idx_status` (`status`),
-  KEY `idx_payment_type` (`payment_type`),
-  KEY `idx_create_time` (`create_time`),
+  KEY `idx_payment_record_employee` (`employee_id`),
+  KEY `idx_payment_record_status` (`status`),
+  KEY `idx_payment_record_payment_type` (`payment_type`),
+  KEY `idx_payment_record_create_time` (`create_time`),
   KEY `idx_payment_time` (`payment_time`),
   KEY `idx_provider_order` (`provider_code`, `provider_order_no`),
   KEY `idx_provider_trade` (`provider_code`, `provider_trade_no`),
@@ -325,6 +491,8 @@ CREATE TABLE `payment_batch` (
   `success_count` int DEFAULT '0' COMMENT '成功笔数',
   `failed_count` int DEFAULT '0' COMMENT '失败笔数',
   `status` varchar(20) DEFAULT 'draft' COMMENT '批次状态(draft:草稿,submitted:已提交,approved:已审批,processing:处理中,completed:已完成,failed:失败)',
+  `distribution_id` bigint DEFAULT NULL COMMENT '关联发放单ID',
+  `payment_status` varchar(32) DEFAULT NULL COMMENT '支付处理状态',
   `submit_time` datetime DEFAULT NULL COMMENT '提交时间',
   `approve_time` datetime DEFAULT NULL COMMENT '审批时间',
   `process_start_time` datetime DEFAULT NULL COMMENT '开始处理时间',
@@ -340,9 +508,11 @@ CREATE TABLE `payment_batch` (
   `version` int DEFAULT '0' COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_batch_no` (`batch_no`),
-  KEY `idx_status` (`status`),
-  KEY `idx_payment_type` (`payment_type`),
-  KEY `idx_create_time` (`create_time`),
+  KEY `idx_payment_batch_status` (`status`),
+  KEY `idx_distribution` (`distribution_id`),
+  KEY `idx_payment_status` (`payment_status`),
+  KEY `idx_payment_batch_payment_type` (`payment_type`),
+  KEY `idx_payment_batch_create_time` (`create_time`),
   KEY `idx_submit_time` (`submit_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='支付批次表';
 
@@ -452,7 +622,7 @@ DROP TABLE IF EXISTS `approval_workflow`;
 CREATE TABLE `approval_workflow` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `workflow_name` varchar(100) NOT NULL COMMENT '流程名称',
-  `workflow_type` varchar(20) NOT NULL COMMENT '流程类型(BATCH:批量支付,ADHOC:临时支付,OFFLINE:离线员工)',
+  `workflow_type` varchar(20) NOT NULL COMMENT '流程类型(BATCH:批量支付,ADHOC:临时支付,OFFLINE:架构外员工)',
   `business_key` varchar(100) NOT NULL COMMENT '业务关键字(如batch_no)',
   `business_type` varchar(50) NOT NULL COMMENT '业务类型',
   `current_step` int DEFAULT '1' COMMENT '当前步骤',
@@ -473,11 +643,11 @@ CREATE TABLE `approval_workflow` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_business_key` (`business_key`, `business_type`),
   KEY `idx_workflow_type` (`workflow_type`),
-  KEY `idx_status` (`status`),
+  KEY `idx_approval_workflow_status` (`status`),
   KEY `idx_initiator` (`initiator_id`),
-  KEY `idx_employee` (`employee_id`),
+  KEY `idx_approval_workflow_employee` (`employee_id`),
   KEY `idx_current_approver` (`current_approver_id`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_approval_step_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='审批流程表';
 
 -- ============================================
@@ -505,8 +675,8 @@ CREATE TABLE `approval_step` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_workflow_step` (`workflow_id`, `step_no`),
   KEY `idx_approver` (`approver_id`),
-  KEY `idx_status` (`status`),
-  KEY `idx_create_time` (`create_time`),
+  KEY `idx_approval_step_status` (`status`),
+  KEY `idx_approval_workflow_create_time` (`create_time`),
   CONSTRAINT `fk_step_workflow` FOREIGN KEY (`workflow_id`) REFERENCES `approval_workflow` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='审批步骤表';
 
@@ -525,8 +695,6 @@ CREATE TABLE `sys_user` (
   `status` varchar(20) DEFAULT 'active' COMMENT '用户状态(active:激活,inactive:禁用)',
   `roles` varchar(500) DEFAULT NULL COMMENT '角色列表(逗号分隔)',
   `employee_id` bigint DEFAULT NULL COMMENT '关联员工ID',
-  `platform_user_id` varchar(100) DEFAULT NULL COMMENT '平台用户ID',
-  `platform_type` varchar(20) DEFAULT NULL COMMENT '平台类型',
   `last_login_time` datetime DEFAULT NULL COMMENT '最后登录时间',
   `last_login_ip` varchar(50) DEFAULT NULL COMMENT '最后登录IP',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -537,12 +705,45 @@ CREATE TABLE `sys_user` (
   `version` int DEFAULT '0' COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_username` (`username`),
-  KEY `idx_employee` (`employee_id`),
-  KEY `idx_platform_user` (`platform_user_id`, `platform_type`),
-  KEY `idx_status` (`status`),
-  KEY `idx_create_time` (`create_time`),
+  KEY `idx_sys_user_employee` (`employee_id`),
+  KEY `idx_sys_user_status` (`status`),
+  KEY `idx_notification_record_create_time` (`create_time`),
   CONSTRAINT `fk_user_employee` FOREIGN KEY (`employee_id`) REFERENCES `employee` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统用户表';
+
+-- ============================================
+-- 6.1 外部平台身份绑定表 (external_identity)
+-- ============================================
+DROP TABLE IF EXISTS `external_identity`;
+CREATE TABLE `external_identity` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+  `provider` varchar(20) NOT NULL COMMENT '平台标识(wechat/dingtalk/feishu)',
+  `tenant_key` varchar(100) NOT NULL DEFAULT 'default' COMMENT '租户标识(如corpId/appId/appKey)',
+  `subject_type` varchar(30) NOT NULL DEFAULT 'platform_user_id' COMMENT '主体类型(user_id/open_id/union_id/platform_user_id)',
+  `subject_id` varchar(191) NOT NULL COMMENT '平台主体ID',
+  `employee_id` bigint DEFAULT NULL COMMENT '关联员工ID',
+  `user_id` bigint DEFAULT NULL COMMENT '关联用户ID',
+  `is_primary` tinyint(1) NOT NULL DEFAULT '1' COMMENT '同平台主账号标记',
+  `status` varchar(20) NOT NULL DEFAULT 'active' COMMENT 'active/inactive',
+  `source` varchar(20) DEFAULT NULL COMMENT '来源(sync/manual/oauth/migration/approval)',
+  `bound_at` datetime DEFAULT NULL COMMENT '绑定时间',
+  `unbound_at` datetime DEFAULT NULL COMMENT '解绑时间',
+  `last_seen_at` datetime DEFAULT NULL COMMENT '最近使用时间',
+  `ext_json` json DEFAULT NULL COMMENT '扩展字段',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_provider_subject` (`provider`, `tenant_key`, `subject_type`, `subject_id`, `deleted`),
+  KEY `idx_employee_provider_status` (`employee_id`, `provider`, `status`),
+  KEY `idx_user_provider_status` (`user_id`, `provider`, `status`),
+  KEY `idx_subject_lookup` (`provider`, `tenant_key`, `subject_type`, `status`),
+  CONSTRAINT `fk_external_identity_employee` FOREIGN KEY (`employee_id`) REFERENCES `employee` (`id`),
+  CONSTRAINT `fk_external_identity_user` FOREIGN KEY (`user_id`) REFERENCES `sys_user` (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部平台身份绑定表';
 
 -- ============================================
 -- 7. 通知记录表 (notification_record)
@@ -582,7 +783,7 @@ CREATE TABLE `notification_record` (
   KEY `idx_status_next_retry` (`status`, `next_retry_time`),
   KEY `idx_business_type_key` (`business_type`, `business_key`),
   KEY `idx_recipient_channel` (`recipient_id`, `channel`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_sys_user_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='通知发送记录表';
 
 -- ============================================
@@ -614,7 +815,7 @@ CREATE TABLE `audit_log` (
   KEY `idx_user` (`user_id`),
   KEY `idx_operation` (`operation`),
   KEY `idx_business` (`business_type`, `business_key`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_audit_log_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='操作日志表(5年保存期)';
 
 -- ============================================
@@ -637,7 +838,7 @@ CREATE TABLE `sys_config` (
   `version` int DEFAULT '0' COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_config_key` (`config_key`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_sys_config_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统配置表';
 
 -- ============================================
@@ -662,7 +863,7 @@ CREATE TABLE `org_department` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_platform_dept` (`platform_type`, `platform_dept_id`),
   KEY `idx_parent` (`parent_platform_dept_id`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_org_department_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='组织部门表';
 
 DROP TABLE IF EXISTS `integration_config`;
@@ -679,7 +880,7 @@ CREATE TABLE `integration_config` (
   `version` int DEFAULT '0' COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_platform_type` (`platform_type`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_integration_config_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='第三方平台集成配置表';
 
 -- ============================================
@@ -707,11 +908,11 @@ SET FOREIGN_KEY_CHECKS = 1;
 -- ============================================
 
 -- 员工表复合索引
-CREATE INDEX `idx_employee_platform_status` ON `employee` (`platform_type`, `status`, `is_offline`);
+CREATE INDEX `idx_employee_status_offline` ON `employee` (`status`, `is_offline`);
 CREATE INDEX `idx_employee_dept_position` ON `employee` (`department`, `position`);
 
 -- 支付记录表复合索引
-CREATE INDEX `idx_payment_batch_status` ON `payment_record` (`batch_no`, `status`);
+CREATE INDEX `idx_payment_record_batch_status` ON `payment_record` (`batch_no`, `status`);
 CREATE INDEX `idx_payment_time_range` ON `payment_record` (`create_time`, `payment_time`);
 
 -- 审批流程复合索引

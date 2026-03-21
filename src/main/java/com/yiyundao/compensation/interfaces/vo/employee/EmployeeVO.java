@@ -17,8 +17,8 @@ public class EmployeeVO {
     private String email;
     private String department;
     private String position;
-    private String platformUserId;
-    private String platformType;
+    private String provider;
+    private String subjectId;
     private String employmentType;
     private Long managerId;
     private String managerName;
@@ -44,8 +44,8 @@ public class EmployeeVO {
         vo.setEmail(e.getEmail());
         vo.setDepartment(e.getDepartment());
         vo.setPosition(e.getPosition());
-        vo.setPlatformUserId(e.getPlatformUserId());
-        vo.setPlatformType(e.getPlatformType());
+        vo.setProvider(e.getProvider());
+        vo.setSubjectId(e.getSubjectId());
         vo.setEmploymentType(e.getEmploymentType());
         vo.setManagerId(e.getManagerId());
         vo.setHireDate(e.getHireDate());

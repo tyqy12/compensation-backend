@@ -6,7 +6,7 @@
 - **项目名称**: Compensation Assistant System (薪酬助手系统)
 - **Group ID**: com.yiyundao
 - **技术栈**: Spring Boot 3.5.6 + Java 17 + MyBatis-Plus
-- **主要功能**: 支付宝批量转账、多平台组织同步、离线员工管理
+- **主要功能**: 支付宝批量转账、多平台组织同步、架构外员工管理
 
 ## 🏗️ 已完成的初始化工作
 
@@ -104,7 +104,8 @@ curl http://localhost:8080/api/system/health
   - `GET /api/employee` 分页（支持 keyword、department、status、platformType、managerId、sortBy、order）
   - `POST /api/employee` 创建；`PUT /api/employee/{id}` 更新
   - `POST /api/employee/{id}/bind-platform` 绑定平台；`PATCH /api/employee/{id}/status` 状态
-  - `GET /api/employee/offline` 离线员工列表
+  - `GET /api/employee/offline` 架构外员工列表
+  - `GET /api/employee/resigned` 离职员工列表
   - `GET /api/employee/{id}/id-card`/`bank-account` 解密（ADMIN）
 - 支付：
   - `GET /api/payment/batch/{batchNo}` 批次详情
@@ -130,7 +131,7 @@ curl http://localhost:8080/api/system/health
 - `GET /api/dashboard/activities` 最近活动
 
 ### 管理接口（Admin）
-- 离线员工：`PATCH /api/admin/employees/{id}/offline`、`PUT /api/admin/employees/{id}/manager`
+- 架构外员工：`PATCH /api/admin/employees/{id}/offline`、`PUT /api/admin/employees/{id}/manager`
 - 批量支付：`POST /api/admin/payment/batch`、`POST /api/admin/payment/batch/{id}/cancel`、`GET /api/admin/payment/batch/stats`
 - 审计日志：`GET /api/admin/audit-logs`、`GET /api/admin/audit-logs/{id}`；组织历史：`GET /api/system/org/history`
 - 监控：`GET /api/admin/monitor/summary`
@@ -171,10 +172,11 @@ curl http://localhost:8080/api/system/health
 - [x] 聚合登录：账号密码 + 企微/钉钉/飞书扫码（未绑定拒绝登录）
 - [x] 刷新令牌与登出（白/黑名单）
 - [x] 登录限流/爆破防护（用户名/IP 窗口 + 锁定）
-- [x] 离线员工管理界面（API）
-  - `PATCH /api/admin/employees/{id}/offline?value=true|false` 设置离线
+- [x] 架构外员工管理界面（API）
+  - `PATCH /api/admin/employees/{id}/offline?value=true|false` 设置架构外标记
   - `PUT /api/admin/employees/{id}/manager?managerId=...` 指定负责人
-  - 辅助：`GET /api/employee/offline` 查询离线员工列表
+  - 辅助：`GET /api/employee/offline` 查询架构外员工列表
+  - 新增：`GET /api/employee/resigned` 查询离职员工列表
 - [x] 批量支付管理（API）
   - `POST /api/admin/payment/batch` 创建批次（草稿）
   - `POST /api/admin/payment/batch/{id}/cancel` 关闭批次（置为 FAILED）

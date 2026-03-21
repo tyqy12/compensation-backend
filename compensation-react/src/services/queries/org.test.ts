@@ -3,7 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import api from '@services/api';
-import { useOrgSyncMutation } from './org';
+import { useOrgImportMutation, useOrgSyncMutation } from './org';
 
 // Mock the API
 vi.mock('@services/api', () => ({
@@ -107,7 +107,9 @@ describe('Org Mutations', () => {
       const syncPromise = result.current.mutateAsync('wecom');
 
       // Should be loading
-      expect(result.current.isPending).toBe(true);
+      await waitFor(() => {
+        expect(result.current.isPending).toBe(true);
+      });
 
       // Resolve the promise
       resolvePromise!({ data: { success: true } });
@@ -137,6 +139,50 @@ describe('Org Mutations', () => {
       // Should invalidate employee and user binding queries
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['employees'] });
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['userBindings'] });
+    });
+  });
+
+  describe('useOrgImportMutation', () => {
+    it('should submit provider/subjectId payload', async () => {
+      const mockImportResult = {
+        success: 1,
+        failed: 0,
+        errors: [],
+      };
+      mockApi.post.mockResolvedValue({ data: mockImportResult });
+
+      const { result } = renderHook(() => useOrgImportMutation(), { wrapper: createWrapper() });
+
+      const payload = {
+        provider: 'wechat',
+        items: [
+          {
+            employeeId: 'EMP001',
+            name: '张三',
+            employmentType: 'full_time',
+            provider: 'wechat',
+            subjectId: 'wx_user_001',
+          },
+        ],
+        metadata: { source: 'test' },
+      };
+
+      const mutateResult = await result.current.mutateAsync(payload as any);
+
+      expect(mockApi.post).toHaveBeenCalledWith('/system/org/import', {
+        provider: 'wechat',
+        items: [
+          {
+            employeeId: 'EMP001',
+            name: '张三',
+            employmentType: 'full_time',
+            provider: 'wechat',
+            subjectId: 'wx_user_001',
+          },
+        ],
+        metadata: { source: 'test' },
+      });
+      expect(mutateResult).toEqual(mockImportResult);
     });
   });
 });

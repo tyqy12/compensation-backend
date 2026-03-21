@@ -49,10 +49,10 @@ Context path is `/api`. Security: see docs/security.md.
 - Single binding per user (current version). Admin may bind or unbind a user's external account for WeCom/DingTalk/Feishu.
 
 - GET `/admin/users/{id}/platform-binding`
-  - Resp: `{ username, platformType, platformUserId }`
+  - Resp: `{ username, provider, subjectId }`
 - PUT `/admin/users/{id}/platform-binding`
-  - Body: `{ "platformType": "wechat|dingtalk|feishu", "platformUserId": "xxx" }`
-  - Validates uniqueness across users per `(platformType, platformUserId)`
+  - Body: `{ "provider": "wechat|dingtalk|feishu", "subjectId": "xxx" }`
+  - Validates uniqueness across users per `(provider, subjectId)`
   - 409 if already bound to another user
 - DELETE `/admin/users/{id}/platform-binding`
   - Unbinds the external account

@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.modules.payroll.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.enums.ApprovalStatus;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.enums.PayrollConfirmationStatus;
@@ -13,9 +14,11 @@ import com.yiyundao.compensation.modules.approval.service.ApprovalEngine;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollDistribution;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.payroll.service.impl.PayrollBatchServiceImpl;
 import com.yiyundao.compensation.modules.payroll.service.impl.PayrollConfirmationServiceImpl;
+import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
@@ -27,6 +30,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -38,14 +42,14 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * 薪酬确认流程集成测试（跨服务编排）
- * 覆盖链路：员工确认 -> 员工异议 -> 审批回写 -> 发薪提交闸门变化
+ * 覆盖链路：员工确认 -> 员工异议 -> 审批回写 -> 发薪提交流转
  */
 class PayrollConfirmationFlowIntegrationTest {
 
@@ -57,11 +61,24 @@ class PayrollConfirmationFlowIntegrationTest {
     @Test
     void flow_shouldOpenSubmitGateAfterDisputeApproved() {
         FlowContext ctx = buildContext();
-
-        when(ctx.payrollLineService.count(any())).thenReturn(2L, 0L);
-        when(ctx.approvalEngine.startWorkflow(any(), anyString(), anyString(), anyLong(), anyMap()))
-                .thenReturn(7001L)
-                .thenThrow(new RuntimeException("workflow unavailable"));
+        when(ctx.approvalEngine.startWorkflow(
+                eq(WorkflowType.PAYROLL_DISPUTE),
+                eq("payroll_dispute:line:" + ctx.line2.getId()),
+                eq("payroll_dispute"),
+                eq(ctx.operator.getId()),
+                anyMap()
+        )).thenReturn(7001L);
+        when(ctx.approvalEngine.startWorkflow(
+                eq(WorkflowType.PAYROLL_DISTRIBUTION),
+                eq("payroll_distribution:" + ctx.distribution.getId()),
+                eq("payroll_distribution"),
+                eq(ctx.operator.getId()),
+                eq(Map.of(
+                        "batchId", ctx.batch.getId(),
+                        "batchRevision", ctx.batch.getBatchRevision(),
+                        "distributionId", ctx.distribution.getId()
+                ))
+        )).thenThrow(new RuntimeException("workflow unavailable"));
 
         PayslipConfirmRequest confirmRequest = new PayslipConfirmRequest();
         confirmRequest.setSignature("员工签字");
@@ -78,8 +95,9 @@ class PayrollConfirmationFlowIntegrationTest {
         assertThat(ctx.line2.getConfirmationStatus()).isEqualTo(PayrollConfirmationStatus.OBJECTED.getCode());
         assertThat(ctx.batch.getStatus()).isEqualTo(PayrollBatchStatus.DISPUTE_PROCESSING);
 
-        boolean submitBlocked = ctx.batchService.submitForApproval(ctx.batch.getId());
-        assertThat(submitBlocked).isFalse();
+        assertThatThrownBy(() -> ctx.batchService.submitForApproval(ctx.batch.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("当前状态不可提交审批：dispute_processing");
 
         ApprovalWorkflow workflow = new ApprovalWorkflow();
         workflow.setId(7001L);
@@ -92,6 +110,7 @@ class PayrollConfirmationFlowIntegrationTest {
 
         assertThat(ctx.line2.getConfirmationStatus()).isEqualTo(PayrollConfirmationStatus.OBJECTED_APPROVED.getCode());
         assertThat(ctx.batch.getStatus()).isEqualTo(PayrollBatchStatus.CONFIRMED);
+        verify(ctx.payrollProcessManager).onConfirmationCompleted(ctx.batch.getId(), ctx.batch.getBatchRevision());
 
         assertThatThrownBy(() -> ctx.batchService.submitForApproval(ctx.batch.getId()))
                 .isInstanceOf(RuntimeException.class)
@@ -105,22 +124,28 @@ class PayrollConfirmationFlowIntegrationTest {
                 anyMap()
         );
         verify(ctx.approvalEngine).startWorkflow(
-                eq(WorkflowType.BATCH),
-                eq("payroll_batch:" + ctx.batch.getId()),
-                eq("payroll"),
+                eq(WorkflowType.PAYROLL_DISTRIBUTION),
+                eq("payroll_distribution:" + ctx.distribution.getId()),
+                eq("payroll_distribution"),
                 eq(ctx.operator.getId()),
-                eq(Map.of("batchId", ctx.batch.getId()))
+                eq(Map.of(
+                        "batchId", ctx.batch.getId(),
+                        "batchRevision", ctx.batch.getBatchRevision(),
+                        "distributionId", ctx.distribution.getId()
+                ))
         );
-        verify(ctx.payrollLineService, times(2)).count(any());
     }
 
     @Test
     void flow_shouldKeepSubmitBlockedAfterDisputeRejected() {
         FlowContext ctx = buildContext();
-
-        when(ctx.payrollLineService.count(any())).thenReturn(2L, 1L, 2L, 1L);
-        when(ctx.approvalEngine.startWorkflow(any(), anyString(), anyString(), anyLong(), anyMap()))
-                .thenReturn(8001L);
+        when(ctx.approvalEngine.startWorkflow(
+                eq(WorkflowType.PAYROLL_DISPUTE),
+                eq("payroll_dispute:line:" + ctx.line2.getId()),
+                eq("payroll_dispute"),
+                eq(ctx.operator.getId()),
+                anyMap()
+        )).thenReturn(8001L);
 
         PayslipConfirmRequest confirmRequest = new PayslipConfirmRequest();
         confirmRequest.setSignature("员工签字");
@@ -132,8 +157,9 @@ class PayrollConfirmationFlowIntegrationTest {
         assertThat(disputeWorkflowId).isEqualTo(8001L);
         assertThat(ctx.batch.getStatus()).isEqualTo(PayrollBatchStatus.DISPUTE_PROCESSING);
 
-        boolean firstSubmitBlocked = ctx.batchService.submitForApproval(ctx.batch.getId());
-        assertThat(firstSubmitBlocked).isFalse();
+        assertThatThrownBy(() -> ctx.batchService.submitForApproval(ctx.batch.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("当前状态不可提交审批：dispute_processing");
 
         ApprovalWorkflow workflow = new ApprovalWorkflow();
         workflow.setId(8001L);
@@ -147,17 +173,18 @@ class PayrollConfirmationFlowIntegrationTest {
         assertThat(ctx.line2.getConfirmationStatus()).isEqualTo(PayrollConfirmationStatus.OBJECTED_REJECTED.getCode());
         assertThat(ctx.batch.getStatus()).isEqualTo(PayrollBatchStatus.CONFIRMING);
 
-        boolean secondSubmitBlocked = ctx.batchService.submitForApproval(ctx.batch.getId());
-        assertThat(secondSubmitBlocked).isFalse();
+        assertThatThrownBy(() -> ctx.batchService.submitForApproval(ctx.batch.getId()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("当前状态不可提交审批：confirming");
 
-        verify(ctx.approvalEngine, times(1)).startWorkflow(
-                eq(WorkflowType.PAYROLL_DISPUTE),
-                eq("payroll_dispute:line:" + ctx.line2.getId()),
-                eq("payroll_dispute"),
-                eq(ctx.operator.getId()),
+        verify(ctx.payrollProcessManager, never()).onConfirmationCompleted(ctx.batch.getId(), ctx.batch.getBatchRevision());
+        verify(ctx.approvalEngine, never()).startWorkflow(
+                eq(WorkflowType.PAYROLL_DISTRIBUTION),
+                anyString(),
+                anyString(),
+                anyLong(),
                 anyMap()
         );
-        verify(ctx.approvalEngine, times(1)).startWorkflow(any(), anyString(), anyString(), anyLong(), anyMap());
     }
 
     private FlowContext buildContext() {
@@ -170,6 +197,11 @@ class PayrollConfirmationFlowIntegrationTest {
         ctx.userRoleService = mock(UserRoleService.class);
         ctx.payrollPaymentService = mock(PayrollPaymentService.class);
         ctx.auditLogService = mock(AuditLogService.class);
+        ctx.validationIssueSupport = mock(PayrollValidationIssueSupport.class);
+        ctx.confirmationAggregateService = mock(PayrollConfirmationAggregateService.class);
+        ctx.distributionService = mock(PayrollDistributionService.class);
+        ctx.approvalProjectionService = mock(PayrollApprovalProjectionService.class);
+        ctx.payrollProcessManager = mock(PayrollProcessManager.class);
 
         ctx.operator = new SysUser();
         ctx.operator.setId(10001L);
@@ -187,10 +219,13 @@ class PayrollConfirmationFlowIntegrationTest {
 
         ctx.batch = new PayrollBatch();
         ctx.batch.setId(5001L);
+        ctx.batch.setBatchRevision(1);
         ctx.batch.setStatus(PayrollBatchStatus.CONFIRMING);
         ctx.batch.setConfirmationRequired(Boolean.TRUE);
         when(ctx.payrollBatchService.getById(ctx.batch.getId())).thenReturn(ctx.batch);
         when(ctx.payrollBatchService.updateById(any(PayrollBatch.class))).thenReturn(true);
+        when(ctx.confirmationAggregateService.isCompletedForApproval(ctx.batch.getId(), ctx.batch.getBatchRevision()))
+                .thenReturn(true);
 
         ctx.line1 = new PayrollLine();
         ctx.line1.setId(6001L);
@@ -218,6 +253,12 @@ class PayrollConfirmationFlowIntegrationTest {
             lineStore.put(updated.getId(), updated);
             return true;
         });
+        when(ctx.validationIssueSupport.deserialize(any())).thenReturn(List.of());
+
+        ctx.distribution = new PayrollDistribution();
+        ctx.distribution.setId(7101L);
+        when(ctx.distributionService.createOrReuseForBatch(any(PayrollBatch.class))).thenReturn(ctx.distribution);
+        when(ctx.approvalProjectionService.getByDistributionId(ctx.distribution.getId())).thenReturn(null);
 
         ctx.confirmationService = new PayrollConfirmationServiceImpl(
                 ctx.payrollLineService,
@@ -226,7 +267,9 @@ class PayrollConfirmationFlowIntegrationTest {
                 ctx.sysUserService,
                 ctx.employeeService,
                 ctx.userRoleService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                ctx.confirmationAggregateService,
+                ctx.payrollProcessManager
         );
         ctx.disputeApprovalHandler = new PayrollDisputeApprovalHandler(ctx.confirmationService);
 
@@ -236,7 +279,12 @@ class PayrollConfirmationFlowIntegrationTest {
                 ctx.payrollLineService,
                 ctx.payrollPaymentService,
                 ctx.userRoleService,
-                ctx.auditLogService
+                ctx.auditLogService,
+                ctx.validationIssueSupport,
+                ctx.confirmationAggregateService,
+                ctx.distributionService,
+                ctx.approvalProjectionService,
+                ctx.payrollProcessManager
         ));
         doReturn(ctx.batch).when(ctx.batchService).getById(ctx.batch.getId());
 
@@ -252,11 +300,17 @@ class PayrollConfirmationFlowIntegrationTest {
         private UserRoleService userRoleService;
         private PayrollPaymentService payrollPaymentService;
         private AuditLogService auditLogService;
+        private PayrollValidationIssueSupport validationIssueSupport;
+        private PayrollConfirmationAggregateService confirmationAggregateService;
+        private PayrollDistributionService distributionService;
+        private PayrollApprovalProjectionService approvalProjectionService;
+        private PayrollProcessManager payrollProcessManager;
         private PayrollConfirmationServiceImpl confirmationService;
         private PayrollDisputeApprovalHandler disputeApprovalHandler;
         private PayrollBatchServiceImpl batchService;
         private SysUser operator;
         private PayrollBatch batch;
+        private PayrollDistribution distribution;
         private PayrollLine line1;
         private PayrollLine line2;
     }

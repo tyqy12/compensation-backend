@@ -565,9 +565,9 @@ const TemplatesPage: React.FC = () => {
         onCancel={() => setIsModalOpen(false)}
         confirmLoading={isLoading}
         width={900}
-        destroyOnHidden
+        forceRender
         okText={modalType === 'create' ? '创建' : '保存'}
-        bodyStyle={{ maxHeight: '70vh', overflowY: 'auto' }}
+        styles={{ body: { maxHeight: '70vh', overflowY: 'auto' } }}
       >
         <Form form={form} layout="vertical">
           <Space style={{ width: '100%' }} size={16}>

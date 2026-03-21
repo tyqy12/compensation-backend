@@ -51,6 +51,9 @@ public class AlipayService {
     private static final int BATCH_SIZE = 1000; // 批量转账最大1000笔
     private static final int DEDUP_EXPIRE_HOURS = 24; // 去重缓存24小时
     private static final String DAILY_LIMIT_KEY_PREFIX = "alipay:daily_limit:";
+    private static final int ERROR_CODE_MAX_LENGTH = 50;
+    private static final int ERROR_MSG_MAX_LENGTH = 500;
+    private static final int NORMALIZED_ERROR_MSG_MAX_LENGTH = 200;
 
     /**
      * 动态创建AlipayClient
@@ -136,7 +139,7 @@ public class AlipayService {
     /**
      * 单笔转账到支付宝账户
      */
-    @Transactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class, noRollbackFor = AlipayApiException.class)
     public String singleTransfer(Long paymentRecordId) throws Exception {
         PaymentRecord record = paymentRecordService.getById(paymentRecordId);
         if (record == null) {
@@ -152,6 +155,8 @@ public class AlipayService {
 
         // 生成商户订单号
         String outBizNo = generateOutBizNo();
+        String failureCode = null;
+        String failureMsg = null;
 
         log.info("发起支付宝单笔转账: recordId={}, outBizNo={}, amount={}",
                 paymentRecordId, outBizNo, record.getAmount());
@@ -231,33 +236,32 @@ public class AlipayService {
                 return tradeNo;
             } else {
                 // 转账失败
-                String errorCode = response.getCode();
-                String errorMsg = response.getMsg() + " - " + response.getSubMsg();
-
-                updatePaymentStatus(paymentRecordId, PaymentStatus.FAILED, outBizNo, null,
-                                  errorCode, errorMsg);
+                failureCode = response.getCode();
+                failureMsg = response.getMsg() + " - " + response.getSubMsg();
 
                 log.error("支付宝转账失败: recordId={}, outBizNo={}, code={}, msg={}",
-                        paymentRecordId, outBizNo, errorCode, errorMsg);
+                        paymentRecordId, outBizNo, failureCode, failureMsg);
 
-                throw new AlipayApiException(errorCode, errorMsg);
+                throw new AlipayApiException(failureCode, failureMsg);
             }
 
         } catch (Exception e) {
             // 异常情况，删除去重标记并记录失败状态
             redisTemplate.delete(dedupKey);
-            updatePaymentStatus(paymentRecordId, PaymentStatus.FAILED, outBizNo, null,
-                              "SYSTEM_ERROR", e.getMessage());
 
-            log.error("支付宝转账异常: recordId={}, outBizNo={}", paymentRecordId, outBizNo, e);
-
-            // 确保事务回滚（仅当存在事务时）
-            if (TransactionSynchronizationManager.isActualTransactionActive()) {
-                TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+            String finalFailureCode = StringUtils.hasText(failureCode) ? failureCode : "SYSTEM_ERROR";
+            String finalFailureMsg = StringUtils.hasText(failureMsg) ? failureMsg : e.getMessage();
+            String normalizedFailureCode = normalizeFailureCode(finalFailureCode);
+            String normalizedFailureMsg = normalizeFailureMessage(finalFailureMsg);
+            try {
+                updatePaymentStatus(paymentRecordId, PaymentStatus.FAILED, outBizNo, null,
+                        normalizedFailureCode, normalizedFailureMsg);
+            } catch (Exception persistEx) {
+                log.error("持久化支付失败状态异常: recordId={}, outBizNo={}", paymentRecordId, outBizNo, persistEx);
             }
 
-            // 重新抛出异常以触发事务回滚
-            throw e;
+            log.error("支付宝转账异常: recordId={}, outBizNo={}", paymentRecordId, outBizNo, e);
+            throw new AlipayApiException(normalizedFailureCode, normalizedFailureMsg);
         }
     }
 
@@ -570,17 +574,71 @@ public class AlipayService {
             updateWrapper.set(PaymentRecord::getProviderTradeNo, tradeNo);
             updateWrapper.set(PaymentRecord::getAlipayTradeNo, tradeNo);
         }
-        if (errorCode != null) {
-            updateWrapper.set(PaymentRecord::getErrorCode, errorCode);
+        String safeErrorCode = trimToLength(errorCode, ERROR_CODE_MAX_LENGTH);
+        String safeErrorMsg = trimToLength(errorMsg, ERROR_MSG_MAX_LENGTH);
+        if (safeErrorCode != null) {
+            updateWrapper.set(PaymentRecord::getErrorCode, safeErrorCode);
+        } else if (status != PaymentStatus.FAILED) {
+            updateWrapper.set(PaymentRecord::getErrorCode, null);
         }
-        if (errorMsg != null) {
-            updateWrapper.set(PaymentRecord::getErrorMsg, errorMsg);
+        if (safeErrorMsg != null) {
+            updateWrapper.set(PaymentRecord::getErrorMsg, safeErrorMsg);
+        } else if (status != PaymentStatus.FAILED) {
+            updateWrapper.set(PaymentRecord::getErrorMsg, null);
         }
         if (status == PaymentStatus.SUCCESS) {
             updateWrapper.set(PaymentRecord::getPaymentTime, LocalDateTime.now());
         }
 
         paymentRecordService.update(updateWrapper);
+    }
+
+    private String trimToLength(String value, int maxLength) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String normalized = value.trim();
+        if (normalized.length() <= maxLength) {
+            return normalized;
+        }
+        return normalized.substring(0, maxLength);
+    }
+
+    private String normalizeFailureCode(String failureCode) {
+        if (!StringUtils.hasText(failureCode)) {
+            return "ALIPAY_TRANSFER_FAILED";
+        }
+        return trimToLength(failureCode, ERROR_CODE_MAX_LENGTH);
+    }
+
+    private String normalizeFailureMessage(String rawMessage) {
+        if (!StringUtils.hasText(rawMessage)) {
+            return "支付宝转账失败";
+        }
+        String message = rawMessage.trim();
+        if (message.contains("RSA2签名遭遇异常")
+                || message.contains("InvalidKeyException")
+                || message.contains("privateKeySize")) {
+            return "支付宝签名失败，请检查应用私钥格式（PKCS8）";
+        }
+        if (message.contains("支付宝配置不完整")) {
+            return "支付宝配置不完整，请检查appId与密钥";
+        }
+        if (message.contains("支付宝集成未启用")) {
+            return "支付宝集成未启用";
+        }
+        if (message.contains("收款账户不能为空")) {
+            return "收款账户不能为空";
+        }
+        if (message.contains("重复支付请求")) {
+            return "重复支付请求，请稍后重试";
+        }
+        int contentIndex = message.indexOf("content=");
+        if (contentIndex > 0) {
+            message = message.substring(0, contentIndex).trim();
+        }
+        String normalized = trimToLength(message, NORMALIZED_ERROR_MSG_MAX_LENGTH);
+        return StringUtils.hasText(normalized) ? normalized : "支付宝转账失败";
     }
 
     /**

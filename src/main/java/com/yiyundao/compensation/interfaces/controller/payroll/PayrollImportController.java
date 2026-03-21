@@ -2,14 +2,26 @@ package com.yiyundao.compensation.interfaces.controller.payroll;
 
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.interfaces.dto.payroll.PayrollManualImportItemRequest;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollPreviewDto;
+import com.yiyundao.compensation.interfaces.vo.payroll.PayrollImportItemVO;
+import com.yiyundao.compensation.interfaces.vo.payroll.PayrollImportSalaryItemVO;
 import com.yiyundao.compensation.modules.payroll.service.PayrollCalculationService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollImportService;
-import com.yiyundao.compensation.service.NotificationService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
+import com.yiyundao.compensation.service.NotificationService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Arrays;
@@ -17,7 +29,7 @@ import java.util.List;
 
 /**
  * 薪酬导入控制器
- * 支持CSV文件预览和提交，支持财务权限控制和头部验证
+ * 支持CSV文件预览、提交，以及批次工作台中的手动录入管理
  */
 @Slf4j
 @RestController
@@ -29,24 +41,15 @@ public class PayrollImportController {
     private final PayrollCalculationService payrollCalculationService;
     private final NotificationService notificationService;
 
-    /**
-     * CSV文件头部验证：期望的列名
-     */
     private static final List<String> EXPECTED_HEADERS = Arrays.asList(
             "employeeId", "itemCode", "amount", "note"
     );
 
-    /**
-     * 预览导入（CSV），不落库
-     * 权限：仅ADMIN和FINANCE角色可访问
-     * 验证：CSV头部格式
-     */
     @PostMapping("/preview")
     @SecurityAnnotations.IsFinanceOrAdmin
     public ApiResponse<String> preview(@RequestParam Long batchId, @RequestParam("file") MultipartFile file) {
         log.info("预览导入CSV: batchId={}, fileName={}", batchId, file.getOriginalFilename());
 
-        // 验证CSV头部
         String headerValidation = validateCsvHeader(file);
         if (headerValidation != null) {
             return ApiResponse.error(ErrorCode.PARAM_INVALID, headerValidation);
@@ -55,29 +58,21 @@ public class PayrollImportController {
         return ApiResponse.success(payrollImportService.previewCsv(batchId, file));
     }
 
-    /**
-     * 提交导入（CSV），写入暂存表
-     * 权限：仅ADMIN和FINANCE角色可访问
-     * 完成后：触发计算预览或通知管理员审核
-     */
     @PostMapping("/commit")
     @SecurityAnnotations.IsFinanceOrAdmin
     public ApiResponse<ImportCommitResult> commit(@RequestParam Long batchId, @RequestParam("file") MultipartFile file) {
         log.info("提交导入CSV: batchId={}, fileName={}", batchId, file.getOriginalFilename());
 
-        // 验证CSV头部
         String headerValidation = validateCsvHeader(file);
         if (headerValidation != null) {
             return ApiResponse.error(ErrorCode.PARAM_INVALID, headerValidation);
         }
 
-        // 执行导入
         String importResult = payrollImportService.commitCsv(batchId, file);
 
         ImportCommitResult result = new ImportCommitResult();
         result.setImportSummary(importResult);
 
-        // 触发计算预览
         try {
             PayrollPreviewDto preview = payrollCalculationService.dryRunPreview(batchId);
             if (preview != null) {
@@ -94,12 +89,11 @@ public class PayrollImportController {
             result.setPreviewError(e.getMessage());
         }
 
-        // 通知管理员审核（异步）
         try {
             notificationService.sendApprovalNotification(
-                    1L, // 默认通知管理员（实际应从配置读取）
-                    "PAYROLL_IMPORT", // workflowId
-                    "薪酬导入审核", // workflowName
+                    1L,
+                    "PAYROLL_IMPORT",
+                    "薪酬导入审核",
                     com.yiyundao.compensation.enums.NotificationType.APPROVAL_PENDING,
                     "薪酬数据已导入，待审核。批次ID: " + batchId + ", 员工数: " + (result.getTotalEmployees() != null ? result.getTotalEmployees() : 0)
             );
@@ -112,10 +106,39 @@ public class PayrollImportController {
         return ApiResponse.success(result);
     }
 
-    /**
-     * 验证CSV文件头部
-     * @return null表示验证通过，错误消息表示验证失败
-     */
+    @GetMapping("/batches/{batchId}/items")
+    @SecurityAnnotations.IsFinanceOrAdmin
+    public ApiResponse<List<PayrollImportItemVO>> listItems(@PathVariable Long batchId) {
+        return ApiResponse.success(payrollImportService.listItems(batchId));
+    }
+
+    @PostMapping("/batches/{batchId}/items/manual")
+    @SecurityAnnotations.IsFinanceOrAdmin
+    public ApiResponse<PayrollImportItemVO> addManualItem(@PathVariable Long batchId,
+                                                          @Valid @RequestBody PayrollManualImportItemRequest request) {
+        return ApiResponse.success(payrollImportService.addManualItem(batchId, request));
+    }
+
+    @PutMapping("/batches/{batchId}/items/{itemId}")
+    @SecurityAnnotations.IsFinanceOrAdmin
+    public ApiResponse<PayrollImportItemVO> updateItem(@PathVariable Long batchId,
+                                                       @PathVariable Long itemId,
+                                                       @Valid @RequestBody PayrollManualImportItemRequest request) {
+        return ApiResponse.success(payrollImportService.updateItem(batchId, itemId, request));
+    }
+
+    @DeleteMapping("/batches/{batchId}/items/{itemId}")
+    @SecurityAnnotations.IsFinanceOrAdmin
+    public ApiResponse<Boolean> deleteItem(@PathVariable Long batchId, @PathVariable Long itemId) {
+        return ApiResponse.success(payrollImportService.deleteItem(batchId, itemId));
+    }
+
+    @GetMapping("/salary-items")
+    @SecurityAnnotations.IsFinanceOrAdmin
+    public ApiResponse<List<PayrollImportSalaryItemVO>> salaryItems() {
+        return ApiResponse.success(payrollImportService.listEnabledSalaryItems());
+    }
+
     private String validateCsvHeader(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             return "文件为空";
@@ -134,29 +157,26 @@ public class PayrollImportController {
                 return "CSV文件头部为空";
             }
 
-            // 解析并标准化头部
             List<String> headers = Arrays.stream(header.split(","))
                     .map(String::trim)
                     .map(String::toLowerCase)
-                    .collect(java.util.stream.Collectors.toList());
+                    .toList();
 
-            // 验证必需的头部列
             List<String> missingHeaders = new java.util.ArrayList<>();
             for (String expected : EXPECTED_HEADERS) {
-                if (!headers.contains(expected)) {
+                if (!headers.contains(expected.toLowerCase())) {
                     missingHeaders.add(expected);
                 }
             }
 
             if (!missingHeaders.isEmpty()) {
                 return "CSV头部缺少必需的列: " + String.join(", ", missingHeaders) +
-                       ". 期望的头部: " + String.join(", ", EXPECTED_HEADERS);
+                        ". 期望的头部: " + String.join(", ", EXPECTED_HEADERS);
             }
 
-            // 检查是否有未知列（允许额外的列，但会警告）
             List<String> unknownHeaders = new java.util.ArrayList<>();
             for (String headerCol : headers) {
-                if (!EXPECTED_HEADERS.contains(headerCol)) {
+                if (!EXPECTED_HEADERS.stream().map(String::toLowerCase).toList().contains(headerCol)) {
                     unknownHeaders.add(headerCol);
                 }
             }
@@ -165,7 +185,7 @@ public class PayrollImportController {
                 log.warn("CSV文件包含未知列: {}", String.join(", ", unknownHeaders));
             }
 
-            return null; // 验证通过
+            return null;
 
         } catch (Exception e) {
             log.error("CSV头部验证失败", e);
@@ -173,9 +193,6 @@ public class PayrollImportController {
         }
     }
 
-    /**
-     * 导入提交结果DTO
-     */
     @lombok.Data
     public static class ImportCommitResult {
         private String importSummary;

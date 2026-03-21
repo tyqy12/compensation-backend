@@ -2,7 +2,7 @@ package com.yiyundao.compensation.modules.user.service;
 
 public interface UserBindingService {
 
-    void bindPlatform(Long userId, String platformType, String platformUserId);
+    void bindPlatform(Long userId, String provider, String subjectId);
 
     void bindEmployee(Long userId, Long employeeId);
 

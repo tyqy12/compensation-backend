@@ -3,6 +3,7 @@ package com.yiyundao.compensation.modules.payroll.entity;
 import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.yiyundao.compensation.entity.BaseEntity;
+import com.yiyundao.compensation.enums.PayrollCalculationStatus;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -20,7 +21,15 @@ public class PayrollBatch extends BaseEntity {
     @TableField("scope_json")
     private String scopeJson;
     private String currency;
+
+    @TableField("calculation_status")
+    private PayrollCalculationStatus calculationStatus;
+
+    @TableField("batch_revision")
+    private Integer batchRevision;
+
     private PayrollBatchStatus status; // 使用枚举类型，MyBatis-Plus会自动处理与数据库的转换
+
     @TableField("approval_workflow_id")
     private Long approvalWorkflowId;
     @TableField("payment_batch_no")

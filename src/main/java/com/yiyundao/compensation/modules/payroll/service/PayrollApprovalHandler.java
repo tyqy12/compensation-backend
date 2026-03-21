@@ -45,6 +45,7 @@ public class PayrollApprovalHandler {
     private final PayrollBatchService payrollBatchService;
     private final SysUserService sysUserService;
     private final NotificationService notificationService;
+    private final PayrollProcessManager payrollProcessManager;
 
     /**
      * 内存中的失败队列（生产环境建议使用 Redis 队列）
@@ -92,7 +93,12 @@ public class PayrollApprovalHandler {
             return;
         }
 
-        // 只处理薪资批次审批
+        if (isPayrollDistributionBusiness(workflow)) {
+            handleDistributionApproval(workflow, finalStatus, event.getFinalApproverId());
+            return;
+        }
+
+        // 只处理旧薪资批次审批
         if (!isPayrollBusiness(workflow)) {
             return;
         }
@@ -124,6 +130,31 @@ public class PayrollApprovalHandler {
             // 可以通过重试机制（利用幂等性保护）重新创建支付批次。
             throw new RuntimeException("薪资批次审批回调处理失败: " + e.getMessage(), e);
         }
+    }
+
+    private void handleDistributionApproval(ApprovalWorkflow workflow, ApprovalStatus finalStatus, Long finalApproverId) {
+        log.info("处理薪资发放审批: workflowId={}, businessKey={}, status={}",
+                workflow.getId(), workflow.getBusinessKey(), finalStatus);
+        Long distributionId = parseDistributionId(workflow.getBusinessKey());
+        if (distributionId == null) {
+            log.warn("无法解析发放单ID: workflowId={}, businessKey={}", workflow.getId(), workflow.getBusinessKey());
+            return;
+        }
+        switch (finalStatus) {
+            case APPROVED -> payrollProcessManager.onApprovalApproved(distributionId, workflow.getId(), finalApproverId);
+            case REJECTED -> payrollProcessManager.onApprovalRejected(distributionId, workflow.getId(), finalApproverId, "REJECTED");
+            case CANCELLED -> payrollProcessManager.onApprovalCancelled(distributionId, workflow.getId(), finalApproverId, "CANCELLED");
+            default -> log.warn("薪资发放审批未知状态: workflowId={}, status={}", workflow.getId(), finalStatus);
+        }
+    }
+
+    private boolean isPayrollDistributionBusiness(ApprovalWorkflow workflow) {
+        if (workflow == null) {
+            return false;
+        }
+        return workflow.getWorkflowType() == com.yiyundao.compensation.enums.WorkflowType.PAYROLL_DISTRIBUTION
+                || (workflow.getBusinessType() != null && "payroll_distribution".equalsIgnoreCase(workflow.getBusinessType()))
+                || (workflow.getBusinessKey() != null && workflow.getBusinessKey().toLowerCase().contains("payroll_distribution"));
     }
 
     /**
@@ -216,6 +247,22 @@ public class PayrollApprovalHandler {
             return Long.parseLong(idPart);
         } catch (NumberFormatException e) {
             log.warn("解析批次ID失败: businessKey={}", businessKey);
+            return null;
+        }
+    }
+
+    private Long parseDistributionId(String businessKey) {
+        if (businessKey == null || businessKey.isEmpty()) {
+            return null;
+        }
+        try {
+            String idPart = businessKey.replaceAll("(?i)payroll_distribution[:_]", "").trim();
+            if (idPart.isEmpty()) {
+                return null;
+            }
+            return Long.parseLong(idPart);
+        } catch (NumberFormatException e) {
+            log.warn("解析发放单ID失败: businessKey={}", businessKey);
             return null;
         }
     }

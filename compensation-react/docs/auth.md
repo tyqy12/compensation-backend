@@ -24,7 +24,8 @@ Security note: For maximum security consider httpOnly cookies on server; current
 
 ## OAuth (WeCom/DingTalk/Feishu)
 
-1. Build URL: GET `/api/auth/oauth/authorize?platform=xxx&redirectUri=${currentUrl}` → `{ url, state }`
+1. Build URL: GET `/api/auth/oauth/authorize?platform=xxx&redirectUri=${callbackUrl}` → `{ url, state }`
+   - WeCom 推荐使用 `VITE_OAUTH_REDIRECT_URI_WECHAT` 固定回调地址（完整 URL），避免因当前访问域名变化导致 `redirect_uri` 校验失败。
 2. Redirect to `url` (for QR or direct)
 3. Callback page `/oauth/callback/:platform` reads `code` & `state` and GET `/api/auth/oauth/callback/{platform}`
 4. Server validates `state` (Redis), exchanges `code`, and issues JWT only if bound; otherwise 403

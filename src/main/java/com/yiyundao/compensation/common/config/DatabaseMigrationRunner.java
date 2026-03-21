@@ -57,6 +57,35 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  KEY `idx_parent` (`parent_platform_dept_id`),\n" +
                 "  KEY `idx_create_time` (`create_time`)\n" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='组织部门表';");
+
+        createTableIfMissing("external_identity",
+                "CREATE TABLE `external_identity` (\n" +
+                "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
+                "  `provider` varchar(20) NOT NULL COMMENT '平台标识(wechat/dingtalk/feishu)',\n" +
+                "  `tenant_key` varchar(100) NOT NULL DEFAULT 'default' COMMENT '租户标识(如corpId/appId/appKey)',\n" +
+                "  `subject_type` varchar(30) NOT NULL DEFAULT 'platform_user_id' COMMENT '主体类型(user_id/open_id/union_id/platform_user_id)',\n" +
+                "  `subject_id` varchar(191) NOT NULL COMMENT '平台主体ID',\n" +
+                "  `employee_id` bigint DEFAULT NULL COMMENT '关联员工ID',\n" +
+                "  `user_id` bigint DEFAULT NULL COMMENT '关联用户ID',\n" +
+                "  `is_primary` tinyint(1) NOT NULL DEFAULT '1' COMMENT '同平台主账号标记',\n" +
+                "  `status` varchar(20) NOT NULL DEFAULT 'active' COMMENT 'active/inactive',\n" +
+                "  `source` varchar(20) DEFAULT NULL COMMENT '来源(sync/manual/oauth/migration/approval)',\n" +
+                "  `bound_at` datetime DEFAULT NULL COMMENT '绑定时间',\n" +
+                "  `unbound_at` datetime DEFAULT NULL COMMENT '解绑时间',\n" +
+                "  `last_seen_at` datetime DEFAULT NULL COMMENT '最近使用时间',\n" +
+                "  `ext_json` json DEFAULT NULL COMMENT '扩展字段',\n" +
+                "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n" +
+                "  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',\n" +
+                "  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',\n" +
+                "  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',\n" +
+                "  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',\n" +
+                "  `version` int DEFAULT '0' COMMENT '乐观锁版本号',\n" +
+                "  PRIMARY KEY (`id`),\n" +
+                "  UNIQUE KEY `uk_provider_subject` (`provider`,`tenant_key`,`subject_type`,`subject_id`,`deleted`),\n" +
+                "  KEY `idx_employee_provider_status` (`employee_id`,`provider`,`status`),\n" +
+                "  KEY `idx_user_provider_status` (`user_id`,`provider`,`status`),\n" +
+                "  KEY `idx_subject_lookup` (`provider`,`tenant_key`,`subject_type`,`status`)\n" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部平台身份绑定表';");
         createTableIfMissing("sys_config",
                 "CREATE TABLE `sys_config` (\n" +
                 "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
@@ -224,10 +253,20 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
                 "  `type` varchar(20) NOT NULL COMMENT 'monthly/custom',\n" +
                 "  `period_label` varchar(20) NOT NULL COMMENT '周期标签(YYYY-MM)',\n" +
+                "  `cycle_code` varchar(64) DEFAULT NULL COMMENT '周期编码',\n" +
+                "  `cycle_name` varchar(100) DEFAULT NULL COMMENT '周期名称',\n" +
+                "  `cycle_type` varchar(20) DEFAULT NULL COMMENT '周期类型(monthly/semi_monthly/weekly/biweekly/custom)',\n" +
                 "  `start_date` date DEFAULT NULL,\n" +
                 "  `end_date` date DEFAULT NULL,\n" +
                 "  `cutoff_date` date DEFAULT NULL,\n" +
-                "  `status` varchar(20) DEFAULT 'open',\n" +
+                "  `pay_day` tinyint DEFAULT NULL COMMENT '发薪日(1-31)',\n" +
+                "  `lead_days` int DEFAULT NULL COMMENT '提前天数',\n" +
+                "  `grace_days` int DEFAULT NULL COMMENT '宽限天数',\n" +
+                "  `timezone` varchar(50) DEFAULT NULL COMMENT '时区',\n" +
+                "  `description` varchar(500) DEFAULT NULL COMMENT '描述',\n" +
+                "  `next_execution_time` datetime DEFAULT NULL COMMENT '下次执行时间',\n" +
+                "  `last_execution_time` datetime DEFAULT NULL COMMENT '最近执行时间',\n" +
+                "  `status` varchar(20) DEFAULT 'draft',\n" +
                 "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,\n" +
                 "  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n" +
                 "  `create_by` varchar(50) DEFAULT NULL,\n" +
@@ -236,8 +275,14 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  `version` int DEFAULT '0',\n" +
                 "  PRIMARY KEY (`id`),\n" +
                 "  UNIQUE KEY `uk_cycle` (`type`,`period_label`),\n" +
+                "  UNIQUE KEY `uk_cycle_code` (`cycle_code`),\n" +
+                "  KEY `idx_cycle_status_type` (`status`,`cycle_type`),\n" +
+                "  KEY `idx_cycle_next_execution` (`next_execution_time`),\n" +
                 "  KEY `idx_status_start` (`status`,`start_date`)\n" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='发薪周期';");
+
+        // pay_cycle 配置扩展字段与索引补齐
+        migratePayCycleColumns();
 
         // 4) payroll_batch
         createTableIfMissing("payroll_batch",
@@ -354,9 +399,51 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
 
         // Payroll confirmation workflow columns
         migratePayrollConfirmationColumns();
+        migratePayrollV21AggregateColumns();
         // Approval workflow incremental columns
         migrateApprovalWorkflowColumns();
         log.info("DB migrations finished.");
+    }
+
+    private void migratePayCycleColumns() {
+        addColumnIfMissing("pay_cycle", "cycle_code",
+                "ALTER TABLE pay_cycle ADD COLUMN `cycle_code` varchar(64) DEFAULT NULL COMMENT '周期编码' AFTER `period_label`");
+        addColumnIfMissing("pay_cycle", "cycle_name",
+                "ALTER TABLE pay_cycle ADD COLUMN `cycle_name` varchar(100) DEFAULT NULL COMMENT '周期名称' AFTER `cycle_code`");
+        addColumnIfMissing("pay_cycle", "cycle_type",
+                "ALTER TABLE pay_cycle ADD COLUMN `cycle_type` varchar(20) DEFAULT NULL COMMENT '周期类型(monthly/semi_monthly/weekly/biweekly/custom)' AFTER `cycle_name`");
+        addColumnIfMissing("pay_cycle", "pay_day",
+                "ALTER TABLE pay_cycle ADD COLUMN `pay_day` tinyint DEFAULT NULL COMMENT '发薪日(1-31)' AFTER `cutoff_date`");
+        addColumnIfMissing("pay_cycle", "lead_days",
+                "ALTER TABLE pay_cycle ADD COLUMN `lead_days` int DEFAULT NULL COMMENT '提前天数' AFTER `pay_day`");
+        addColumnIfMissing("pay_cycle", "grace_days",
+                "ALTER TABLE pay_cycle ADD COLUMN `grace_days` int DEFAULT NULL COMMENT '宽限天数' AFTER `lead_days`");
+        addColumnIfMissing("pay_cycle", "timezone",
+                "ALTER TABLE pay_cycle ADD COLUMN `timezone` varchar(50) DEFAULT NULL COMMENT '时区' AFTER `grace_days`");
+        addColumnIfMissing("pay_cycle", "description",
+                "ALTER TABLE pay_cycle ADD COLUMN `description` varchar(500) DEFAULT NULL COMMENT '描述' AFTER `timezone`");
+        addColumnIfMissing("pay_cycle", "next_execution_time",
+                "ALTER TABLE pay_cycle ADD COLUMN `next_execution_time` datetime DEFAULT NULL COMMENT '下次执行时间' AFTER `description`");
+        addColumnIfMissing("pay_cycle", "last_execution_time",
+                "ALTER TABLE pay_cycle ADD COLUMN `last_execution_time` datetime DEFAULT NULL COMMENT '最近执行时间' AFTER `next_execution_time`");
+
+        executeSqlSafely("UPDATE pay_cycle SET status = 'draft' " +
+                "WHERE status IS NULL OR status = ''");
+        executeSqlSafely("UPDATE pay_cycle SET cycle_name = CONCAT(period_label, ' 发薪周期') " +
+                "WHERE cycle_name IS NULL OR cycle_name = ''");
+        executeSqlSafely("UPDATE pay_cycle SET cycle_type = type " +
+                "WHERE cycle_type IS NULL OR cycle_type = ''");
+        executeSqlSafely("UPDATE pay_cycle SET timezone = 'UTC+8' " +
+                "WHERE timezone IS NULL OR timezone = ''");
+        executeSqlSafely("UPDATE pay_cycle SET cycle_code = UPPER(CONCAT('CYCLE_', REPLACE(type, '-', '_'), '_', REPLACE(period_label, '-', '_'))) " +
+                "WHERE cycle_code IS NULL OR cycle_code = ''");
+
+        addIndexIfMissing("pay_cycle", "uk_cycle_code",
+                "CREATE UNIQUE INDEX `uk_cycle_code` ON `pay_cycle` (`cycle_code`)");
+        addIndexIfMissing("pay_cycle", "idx_cycle_status_type",
+                "CREATE INDEX `idx_cycle_status_type` ON `pay_cycle` (`status`, `cycle_type`)");
+        addIndexIfMissing("pay_cycle", "idx_cycle_next_execution",
+                "CREATE INDEX `idx_cycle_next_execution` ON `pay_cycle` (`next_execution_time`)");
     }
 
     private void migratePaymentRecordProviderColumns() {
@@ -438,6 +525,199 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         executeSqlSafely("INSERT INTO sys_config(config_key, config_value, config_type, config_desc, create_time, update_time) " +
                 "SELECT 'payroll.dispute.approval.flow', '', 'json', '薪酬异议审批流程配置(JSON，空值使用默认链路)', NOW(), NOW() " +
                 "WHERE NOT EXISTS (SELECT 1 FROM sys_config WHERE config_key='payroll.dispute.approval.flow')");
+    }
+
+    private void migratePayrollV21AggregateColumns() {
+        addColumnIfMissing("payroll_batch", "calculation_status",
+                "ALTER TABLE payroll_batch ADD COLUMN `calculation_status` varchar(32) DEFAULT 'draft' COMMENT '核算状态' AFTER `currency`");
+        addColumnIfMissing("payroll_batch", "batch_revision",
+                "ALTER TABLE payroll_batch ADD COLUMN `batch_revision` int DEFAULT 1 COMMENT '业务批次版本号' AFTER `calculation_status`");
+        addIndexIfMissing("payroll_batch", "idx_calculation_status",
+                "CREATE INDEX `idx_calculation_status` ON `payroll_batch` (`calculation_status`)");
+        addIndexIfMissing("payroll_batch", "idx_batch_revision",
+                "CREATE INDEX `idx_batch_revision` ON `payroll_batch` (`batch_revision`)");
+        executeSqlSafely("UPDATE payroll_batch SET calculation_status = CASE " +
+                "WHEN status IN ('draft', 'locked') THEN status " +
+                "WHEN status = 'calculating' THEN 'calculating' " +
+                "WHEN status IN ('confirming', 'dispute_processing', 'confirmed', 'submitted', 'approved', 'pay_processing', 'paid', 'archived') THEN 'calculated' " +
+                "WHEN status IN ('rejected', 'pay_failed', 'failed') THEN 'failed' " +
+                "ELSE COALESCE(NULLIF(calculation_status, ''), 'draft') END");
+        executeSqlSafely("UPDATE payroll_batch SET batch_revision = 1 WHERE batch_revision IS NULL OR batch_revision < 1");
+
+        createTableIfMissing("payroll_confirmation", """
+                CREATE TABLE `payroll_confirmation` (
+                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                  `confirmation_no` varchar(64) NOT NULL COMMENT '确认单号',
+                  `batch_id` bigint NOT NULL COMMENT '核算批次ID',
+                  `batch_revision` int NOT NULL COMMENT '批次版本号',
+                  `require_confirmation` tinyint(1) NOT NULL DEFAULT 1 COMMENT '是否需要确认',
+                  `deadline` datetime DEFAULT NULL COMMENT '确认截止时间',
+                  `timeout_strategy` varchar(32) DEFAULT NULL COMMENT '超时策略',
+                  `confirmation_status` varchar(32) NOT NULL COMMENT '确认单状态',
+                  `total_employees` int NOT NULL DEFAULT 0 COMMENT '总人数',
+                  `confirmed_count` int NOT NULL DEFAULT 0 COMMENT '已确认人数',
+                  `rejected_count` int NOT NULL DEFAULT 0 COMMENT '拒绝人数',
+                  `policy_id` varchar(64) DEFAULT NULL COMMENT '策略ID/模式',
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+                  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+                  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+                  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_confirmation_no` (`confirmation_no`),
+                  UNIQUE KEY `uk_confirmation_batch_revision_deleted` (`batch_id`,`batch_revision`,`deleted`),
+                  KEY `idx_confirmation_status` (`confirmation_status`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资确认单';
+                """);
+
+        createTableIfMissing("payroll_confirmation_record", """
+                CREATE TABLE `payroll_confirmation_record` (
+                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                  `confirmation_id` bigint NOT NULL COMMENT '确认单ID',
+                  `employee_id` bigint NOT NULL COMMENT '员工ID',
+                  `line_id` bigint NOT NULL COMMENT '薪资行ID',
+                  `record_status` varchar(32) NOT NULL COMMENT '确认记录状态',
+                  `reject_reason` varchar(500) DEFAULT NULL COMMENT '拒绝原因',
+                  `comment` varchar(500) DEFAULT NULL COMMENT '备注',
+                  `confirmed_at` datetime DEFAULT NULL COMMENT '确认时间',
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+                  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+                  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+                  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_confirmation_employee_deleted` (`confirmation_id`,`employee_id`,`deleted`),
+                  KEY `idx_confirmation_line` (`confirmation_id`,`line_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资确认记录';
+                """);
+
+        createTableIfMissing("payroll_distribution", """
+                CREATE TABLE `payroll_distribution` (
+                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                  `distribution_no` varchar(64) NOT NULL COMMENT '发放单号',
+                  `batch_id` bigint NOT NULL COMMENT '核算批次ID',
+                  `batch_revision` int NOT NULL COMMENT '批次版本号',
+                  `total_amount` decimal(15,2) NOT NULL DEFAULT '0.00' COMMENT '应发总额快照',
+                  `total_count` int NOT NULL DEFAULT 0 COMMENT '应发人数快照',
+                  `scheduled_date` date NOT NULL COMMENT '计划发放日期',
+                  `retry_limit` int NOT NULL DEFAULT 3 COMMENT '最大重试次数',
+                  `allow_partial` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否允许部分成功',
+                  `distribution_status` varchar(32) NOT NULL COMMENT '发放状态',
+                  `actual_amount` decimal(15,2) NOT NULL DEFAULT '0.00' COMMENT '实发金额',
+                  `success_count` int NOT NULL DEFAULT 0 COMMENT '成功人数',
+                  `failed_count` int NOT NULL DEFAULT 0 COMMENT '失败人数',
+                  `current_attempt` int NOT NULL DEFAULT 0 COMMENT '当前尝试号',
+                  `approval_workflow_id` bigint DEFAULT NULL COMMENT '审批流ID',
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+                  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+                  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+                  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_distribution_no` (`distribution_no`),
+                  UNIQUE KEY `uk_distribution_batch_revision_deleted` (`batch_id`,`batch_revision`,`deleted`),
+                  KEY `idx_distribution_status` (`distribution_status`),
+                  KEY `idx_distribution_schedule` (`scheduled_date`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资发放单';
+                """);
+
+        createTableIfMissing("payroll_distribution_item", """
+                CREATE TABLE `payroll_distribution_item` (
+                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                  `distribution_id` bigint NOT NULL COMMENT '发放单ID',
+                  `employee_id` bigint NOT NULL COMMENT '员工ID',
+                  `line_id` bigint NOT NULL COMMENT '薪资行ID',
+                  `employee_name` varchar(128) DEFAULT NULL COMMENT '员工姓名快照',
+                  `recipient_name` varchar(128) DEFAULT NULL COMMENT '收款人姓名快照',
+                  `account_no_encrypted` text COMMENT '收款账户密文',
+                  `account_no_masked` varchar(128) DEFAULT NULL COMMENT '收款账户脱敏',
+                  `account_type` varchar(32) DEFAULT NULL COMMENT '账户类型',
+                  `payment_method` varchar(32) DEFAULT NULL COMMENT '支付方式',
+                  `provider_code` varchar(32) DEFAULT NULL COMMENT '结算渠道编码',
+                  `amount` decimal(15,2) NOT NULL DEFAULT '0.00' COMMENT '应发金额快照',
+                  `item_status` varchar(32) NOT NULL COMMENT '明细状态',
+                  `payment_record_id` bigint DEFAULT NULL COMMENT '最新支付记录ID',
+                  `failure_reason` varchar(500) DEFAULT NULL COMMENT '失败原因',
+                  `retry_count` int NOT NULL DEFAULT 0 COMMENT '重试次数',
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+                  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+                  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+                  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_distribution_employee_deleted` (`distribution_id`,`employee_id`,`deleted`),
+                  KEY `idx_distribution_item_status` (`distribution_id`,`item_status`),
+                  KEY `idx_distribution_payment_record` (`payment_record_id`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资发放明细';
+                """);
+
+        createTableIfMissing("payroll_approval_projection", """
+                CREATE TABLE `payroll_approval_projection` (
+                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                  `batch_id` bigint NOT NULL COMMENT '核算批次ID',
+                  `batch_revision` int NOT NULL COMMENT '批次版本号',
+                  `distribution_id` bigint DEFAULT NULL COMMENT '发放单ID',
+                  `workflow_id` bigint NOT NULL COMMENT '审批流ID',
+                  `business_status` varchar(32) NOT NULL COMMENT '业务状态',
+                  `submitter_id` bigint DEFAULT NULL COMMENT '提交人ID',
+                  `submitted_at` datetime DEFAULT NULL COMMENT '提交时间',
+                  `current_approver_id` bigint DEFAULT NULL COMMENT '当前审批人',
+                  `completed_at` datetime DEFAULT NULL COMMENT '完成时间',
+                  `result` varchar(64) DEFAULT NULL COMMENT '审批结果',
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+                  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+                  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+                  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_workflow_deleted` (`workflow_id`,`deleted`),
+                  KEY `idx_projection_distribution` (`distribution_id`),
+                  KEY `idx_projection_status` (`business_status`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资审批投影';
+                """);
+
+        createTableIfMissing("payroll_reconciliation_task", """
+                CREATE TABLE `payroll_reconciliation_task` (
+                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                  `distribution_id` bigint NOT NULL COMMENT '发放单ID',
+                  `task_status` varchar(32) NOT NULL COMMENT '任务状态',
+                  `expected_amount` decimal(15,2) DEFAULT '0.00' COMMENT '应发金额',
+                  `actual_amount` decimal(15,2) DEFAULT '0.00' COMMENT '实发金额',
+                  `difference` decimal(15,2) DEFAULT '0.00' COMMENT '差异金额',
+                  `result` varchar(32) DEFAULT NULL COMMENT '结果',
+                  `difference_detail` text COMMENT '差异明细JSON',
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+                  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+                  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+                  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_reconciliation_distribution_deleted` (`distribution_id`,`deleted`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资对账任务';
+                """);
+
+        addColumnIfMissing("payment_batch", "distribution_id",
+                "ALTER TABLE payment_batch ADD COLUMN `distribution_id` bigint DEFAULT NULL COMMENT '关联发放单ID' AFTER `status`");
+        addColumnIfMissing("payment_batch", "payment_status",
+                "ALTER TABLE payment_batch ADD COLUMN `payment_status` varchar(32) DEFAULT NULL COMMENT '支付处理状态' AFTER `distribution_id`");
+        addIndexIfMissing("payment_batch", "idx_distribution",
+                "CREATE INDEX `idx_distribution` ON `payment_batch` (`distribution_id`)");
+        addIndexIfMissing("payment_batch", "idx_payment_status",
+                "CREATE INDEX `idx_payment_status` ON `payment_batch` (`payment_status`)");
+        executeSqlSafely("UPDATE payment_batch SET payment_status = CASE " +
+                "WHEN status = 'draft' THEN 'created' " +
+                "WHEN status IN ('submitted', 'approved') THEN 'submitted' " +
+                "WHEN status = 'processing' THEN 'processing' " +
+                "WHEN status = 'completed' THEN 'success' " +
+                "WHEN status = 'failed' THEN 'failed' " +
+                "ELSE COALESCE(NULLIF(payment_status, ''), 'created') END " +
+                "WHERE payment_status IS NULL OR payment_status = ''");
     }
 
     private void migrateApprovalWorkflowColumns() {

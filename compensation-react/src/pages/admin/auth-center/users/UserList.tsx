@@ -20,13 +20,9 @@ import {
   Space,
   Dropdown,
   Typography,
-  Row,
-  Col,
   Form,
-  Select,
   Tag,
   Badge,
-  message,
 } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
@@ -34,30 +30,33 @@ import {
   ReloadOutlined,
   ExportOutlined,
   DownOutlined,
-  UserOutlined,
   TeamOutlined,
   SafetyCertificateOutlined,
   EyeOutlined,
 } from '@ant-design/icons';
 import { useUserAggregateSearchQuery } from '@services/queries/adminAuth';
 import { useRolesQuery } from '@services/queries/roles';
+import type { AdminUserAggregateItem } from '@services/adminAuth';
 
 const { Text } = Typography;
 
-// 用户数据类型（基于 API 实际响应）
-interface UserRecord {
-  userId: number;
-  username: string;
-  realName?: string | null;
-  email?: string | null;
-  phone?: string | null;
-  roles?: string; // API返回的是逗号分隔的字符串
-  employeeId?: number | null;
-  employeeNo?: string | null;
-  employeeName?: string | null;
-  platformType?: string | null; // 平台绑定类型
-  platformUserId?: string | null;
-}
+type UserRecord = AdminUserAggregateItem;
+
+const PLATFORM_NAME_MAP: Record<string, string> = {
+  wechat: '企业微信',
+  dingtalk: '钉钉',
+  feishu: '飞书',
+};
+
+const normalizeProvider = (value?: string | null) => {
+  if (!value) return null;
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) return null;
+  if (normalized === 'wecom' || normalized === 'qywx' || normalized === 'wx') return 'wechat';
+  if (normalized === 'dingding' || normalized === 'dd') return 'dingtalk';
+  if (normalized === 'lark') return 'feishu';
+  return normalized;
+};
 
 const UserList: React.FC = () => {
   const navigate = useNavigate();
@@ -92,6 +91,12 @@ const UserList: React.FC = () => {
   const getRoleDisplayName = (roleCode: string): string => {
     return roleNameMap[roleCode.trim()] || roleCode;
   };
+
+  const getRecordProvider = (record: UserRecord) =>
+    normalizeProvider(record.provider);
+
+  const getRecordSubjectId = (record: UserRecord) =>
+    record.subjectId ?? null;
 
   // 搜索处理
   const handleSearch = (values: any) => {
@@ -201,14 +206,25 @@ const UserList: React.FC = () => {
     },
     {
       title: '平台绑定',
-      dataIndex: 'platformType',
-      key: 'platformType',
-      width: 120,
-      render: (platform) => {
-        if (!platform) {
+      dataIndex: 'provider',
+      key: 'provider',
+      width: 180,
+      render: (_, record) => {
+        const provider = getRecordProvider(record);
+        if (!provider) {
           return <Badge status="default" text="未绑定" />;
         }
-        return <Badge status="success" text={platform} />;
+        const subjectId = getRecordSubjectId(record);
+        return (
+          <Space direction="vertical" size={0}>
+            <Badge status="success" text={PLATFORM_NAME_MAP[provider] ?? provider} />
+            {subjectId ? (
+              <Text type="secondary" style={{ fontSize: 12 }}>
+                {subjectId}
+              </Text>
+            ) : null}
+          </Space>
+        );
       },
     },
     {

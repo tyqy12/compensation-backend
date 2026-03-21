@@ -600,6 +600,7 @@ const ResourceManager: React.FC = () => {
         onOk={handleSubmit}
         confirmLoading={createMut.isPending || updateMut.isPending}
         width={720}
+        forceRender
         styles={{ body: { paddingTop: 16 } }}
       >
         <Form

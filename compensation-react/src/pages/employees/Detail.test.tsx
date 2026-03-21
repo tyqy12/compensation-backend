@@ -87,8 +87,8 @@ describe('EmployeeDetail 员工详情', () => {
     email: 'zhangsan@company.com',
     department: '技术部',
     position: '高级工程师',
-    platformType: 'wechat',
-    platformUserId: 'wx123456',
+    provider: 'wechat',
+    subjectId: 'wx123456',
     offline: false,
     managerId: 100,
     hireDate: '2024-01-15',
@@ -184,7 +184,7 @@ describe('EmployeeDetail 员工详情', () => {
 
     // 验证操作按钮
     expect(screen.getByRole('button', { name: /编辑信息/ })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /标记离线/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /标记为架构外员工/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /指定负责人/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /刷新/ })).toBeInTheDocument();
 
@@ -351,8 +351,8 @@ describe('EmployeeDetail 员工详情', () => {
   it('应该显示未绑定平台员工的绑定按钮', async () => {
     const unboundEmployee = {
       ...mockEmployeeData,
-      platformType: null,
-      platformUserId: null,
+      provider: null,
+      subjectId: null,
     };
 
     mockUseEmployeeQuery.mockReturnValue({
@@ -379,8 +379,8 @@ describe('EmployeeDetail 员工详情', () => {
   it('应该能绑定平台', async () => {
     const unboundEmployee = {
       ...mockEmployeeData,
-      platformType: null,
-      platformUserId: null,
+      provider: null,
+      subjectId: null,
     };
 
     mockUseEmployeeQuery.mockReturnValue({
@@ -425,8 +425,8 @@ describe('EmployeeDetail 员工详情', () => {
     await waitFor(() => {
       expect(mockMutateAsync).toHaveBeenCalledWith({
         id: 1,
-        platformType: 'dingtalk',
-        platformUserId: 'dt123456',
+        provider: 'dingtalk',
+        subjectId: 'dt123456',
       });
     });
   });
@@ -545,11 +545,11 @@ describe('EmployeeDetail 员工详情', () => {
     });
   });
 
-  it('应该显示离线员工信息', async () => {
+  it('应该显示架构外员工信息', async () => {
     const offlineEmployee = {
       ...mockEmployeeData,
       offline: true,
-      platformType: null,
+      provider: null,
     };
 
     mockUseEmployeeQuery.mockReturnValue({
@@ -567,12 +567,12 @@ describe('EmployeeDetail 员工详情', () => {
     );
 
     await waitFor(() => {
-      // 验证离线员工标识
-      expect(screen.getByText('是')).toBeInTheDocument(); // 离线员工字段
+      // 验证架构外员工标识
+      expect(screen.getByText('是')).toBeInTheDocument(); // 架构外员工字段
       expect(screen.getByText('未绑定')).toBeInTheDocument(); // 平台绑定
     });
 
-    expect(screen.getByRole('button', { name: /取消离线/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /取消架构外标记/ })).toBeInTheDocument();
   });
 
   it('应该处理更新失败的情况', async () => {

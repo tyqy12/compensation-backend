@@ -1,13 +1,10 @@
 /**
  * 用户角色分配页
  *
- * 设计原则：
- * - 使用 Transfer 穿梭框组件（Ant Design 标准组件）
- * - 左侧显示"当前角色"，右侧显示"可选角色"
- * - 清晰的左右对比，操作直观
- * - 底部显示权限预览（分配后的权限统计）
- *
- * 遵循 Ant Design 设计规范
+ * 设计目标：
+ * - 穿梭框快速分配角色
+ * - 右侧实时展示分配结果与变更差异
+ * - 支持一键恢复初始分配
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
@@ -26,11 +23,16 @@ import {
   Spin,
   Tag,
   Alert,
+  Empty,
+  Divider,
+  Badge,
+  Typography,
 } from 'antd';
 import type { TransferDirection } from 'antd/es/transfer';
 import {
   ArrowLeftOutlined,
   SaveOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons';
 import { useRolesQuery } from '@services/queries/roles';
 import { useUserAggregateSearchQuery, useUserRolesQuery, useSetUserRolesMutation } from '@services/queries/adminAuth';
@@ -40,9 +42,19 @@ interface TransferItem {
   key: string;
   title: string;
   description: string;
-  roleType: string;
+  roleType: 'SYSTEM' | 'BUSINESS' | 'CUSTOM';
+  status: string;
+  isProtected: boolean;
   disabled?: boolean;
 }
+
+const ROLE_TYPE_COLOR: Record<string, string> = {
+  SYSTEM: 'red',
+  BUSINESS: 'blue',
+  CUSTOM: 'green',
+};
+
+const { Text } = Typography;
 
 const UserRoleAssign: React.FC = () => {
   const navigate = useNavigate();
@@ -64,17 +76,30 @@ const UserRoleAssign: React.FC = () => {
     return userQuery.data?.records?.find((u) => u.userId === userIdNum);
   }, [userQuery.data, userIdNum]);
 
+  const originalTargetKeys = useMemo(
+    () => (userRolesQuery.data || []).map(String),
+    [userRolesQuery.data],
+  );
+  const originalTargetSet = useMemo(() => new Set(originalTargetKeys), [originalTargetKeys]);
+
   // 角色数据转换为 Transfer 数据源
   const transferData: TransferItem[] = useMemo(() => {
     const roles = rolesQuery.data || [];
     return roles.map((role: RoleInfo) => ({
       key: String(role.id),
       title: role.name,
-      description: `${role.code} - ${role.roleTypeDisplayName}`,
+      description: `${role.code} · ${role.roleTypeDisplayName}`,
       roleType: role.roleType,
-      disabled: role.status !== 'enabled', // 禁用的角色不可选
+      status: role.status,
+      isProtected: role.isProtected,
+      // 禁用角色不允许新分配，但若用户已拥有则允许移除
+      disabled: role.status !== 'enabled' && !originalTargetSet.has(String(role.id)),
     }));
-  }, [rolesQuery.data]);
+  }, [rolesQuery.data, originalTargetSet]);
+
+  const roleMap = useMemo(() => {
+    return new Map(transferData.map((item) => [item.key, item]));
+  }, [transferData]);
 
   // 初始化用户当前角色（从API获取角色ID列表）
   useEffect(() => {
@@ -85,7 +110,7 @@ const UserRoleAssign: React.FC = () => {
   }, [userRolesQuery.data]);
 
   // Transfer 变化处理
-  const handleChange = (newTargetKeys: string[], direction: TransferDirection, moveKeys: string[]) => {
+  const handleChange = (newTargetKeys: string[], _direction: TransferDirection, _moveKeys: string[]) => {
     setTargetKeys(newTargetKeys);
   };
 
@@ -93,8 +118,58 @@ const UserRoleAssign: React.FC = () => {
     setSelectedKeys([...sourceSelectedKeys, ...targetSelectedKeys]);
   };
 
+  const handleReset = () => {
+    setTargetKeys(originalTargetKeys);
+    setSelectedKeys([]);
+  };
+
+  const selectedRoles = useMemo(() => {
+    return targetKeys
+      .map((key) => roleMap.get(key))
+      .filter((r): r is TransferItem => !!r);
+  }, [targetKeys, roleMap]);
+
+  const addedRoleKeys = useMemo(() => {
+    return targetKeys.filter((key) => !originalTargetSet.has(key));
+  }, [targetKeys, originalTargetSet]);
+
+  const removedRoleKeys = useMemo(() => {
+    const current = new Set(targetKeys);
+    return originalTargetKeys.filter((key) => !current.has(key));
+  }, [targetKeys, originalTargetKeys]);
+
+  // 角色统计
+  const roleStats = useMemo(() => {
+    const systemCount = selectedRoles.filter((r) => r.roleType === 'SYSTEM').length;
+    const businessCount = selectedRoles.filter((r) => r.roleType === 'BUSINESS').length;
+    const customCount = selectedRoles.filter((r) => r.roleType === 'CUSTOM').length;
+    const protectedCount = selectedRoles.filter((r) => r.isProtected).length;
+    const disabledCount = selectedRoles.filter((r) => r.status !== 'enabled').length;
+    return {
+      total: selectedRoles.length,
+      systemCount,
+      businessCount,
+      customCount,
+      protectedCount,
+      disabledCount,
+      addedCount: addedRoleKeys.length,
+      removedCount: removedRoleKeys.length,
+    };
+  }, [selectedRoles, addedRoleKeys, removedRoleKeys]);
+
+  const hasChanges = useMemo(() => {
+    if (targetKeys.length !== originalTargetKeys.length) return true;
+    const currentSet = new Set(targetKeys);
+    return originalTargetKeys.some((key) => !currentSet.has(key));
+  }, [targetKeys, originalTargetKeys]);
+
   // 保存角色分配
   const handleSave = async () => {
+    if (!hasChanges) {
+      message.info('角色未发生变化');
+      return;
+    }
+
     try {
       const roleIds = targetKeys.map(Number);
       await setUserRolesMutation.mutateAsync(roleIds);
@@ -104,17 +179,6 @@ const UserRoleAssign: React.FC = () => {
       message.error(error?.message || '保存失败');
     }
   };
-
-  // 权限统计
-  const permissionStats = useMemo(() => {
-    // TODO: 根据选中的角色计算权限统计
-    // 这里需要查询每个角色的资源数量
-    return {
-      menuCount: 0,
-      apiCount: 0,
-      actionCount: 0,
-    };
-  }, [targetKeys]);
 
   if (rolesQuery.isLoading || userQuery.isLoading || userRolesQuery.isLoading) {
     return (
@@ -170,70 +234,114 @@ const UserRoleAssign: React.FC = () => {
           </Descriptions>
         </Card>
 
-        {/* 角色分配 */}
-        <Card title="角色分配">
-          <Transfer
-            dataSource={transferData}
-            titles={['可选角色', '当前角色']}
-            targetKeys={targetKeys}
-            selectedKeys={selectedKeys}
-            onChange={handleChange}
-            onSelectChange={handleSelectChange}
-            render={(item) => (
-              <div>
-                <div style={{ fontWeight: 500 }}>{item.title}</div>
-                <div style={{ fontSize: 12, color: '#999' }}>
-                  {item.description}
-                  {item.disabled && <Tag color="red" style={{ marginLeft: 8 }}>已禁用</Tag>}
-                </div>
-              </div>
-            )}
-            listStyle={{
-              width: 400,
-              height: 500,
-            }}
-            showSearch
-            filterOption={(inputValue, item) =>
-              item.title.toLowerCase().indexOf(inputValue.toLowerCase()) !== -1 ||
-              item.description.toLowerCase().indexOf(inputValue.toLowerCase()) !== -1
-            }
-          />
-        </Card>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} lg={16}>
+            <Card
+              title="角色分配"
+              extra={(
+                <Space>
+                  <Text type="secondary">已选 {targetKeys.length} 项</Text>
+                  <Button
+                    size="small"
+                    icon={<ReloadOutlined />}
+                    onClick={handleReset}
+                    disabled={!hasChanges}
+                  >
+                    恢复初始
+                  </Button>
+                </Space>
+              )}
+            >
+              <Transfer
+                dataSource={transferData}
+                titles={['可选角色', '当前角色']}
+                targetKeys={targetKeys}
+                selectedKeys={selectedKeys}
+                onChange={handleChange}
+                onSelectChange={handleSelectChange}
+                render={(item) => (
+                  <Space size={6} wrap>
+                    <Text strong>{item.title}</Text>
+                    <Tag color={ROLE_TYPE_COLOR[item.roleType] || 'default'}>
+                      {item.roleType}
+                    </Tag>
+                    {item.status !== 'enabled' && <Tag color="default">已禁用</Tag>}
+                    {item.isProtected && <Tag color="red">保护角色</Tag>}
+                    <Text type="secondary" style={{ fontSize: 11 }}>
+                      {item.description}
+                    </Text>
+                  </Space>
+                )}
+                listStyle={{
+                  width: 340,
+                  height: 460,
+                }}
+                showSearch
+                filterOption={(inputValue, item) =>
+                  item.title.toLowerCase().includes(inputValue.toLowerCase())
+                  || item.description.toLowerCase().includes(inputValue.toLowerCase())
+                }
+              />
+              <Alert
+                message="分配规则"
+                description="禁用角色不允许新分配，但如果用户当前已拥有该角色，仍允许移除；保存为覆盖式更新。"
+                type="info"
+                showIcon
+                style={{ marginTop: 12 }}
+              />
+            </Card>
+          </Col>
 
-        {/* 权限预览 */}
-        <Card title="权限预览" size="small">
-          <Alert
-            message="分配后该用户将拥有以下权限"
-            type="info"
-            showIcon
-            style={{ marginBottom: 16 }}
-          />
-          <Row gutter={16}>
-            <Col span={8}>
-              <Statistic
-                title="菜单资源"
-                value={permissionStats.menuCount}
-                suffix="项"
-              />
-            </Col>
-            <Col span={8}>
-              <Statistic
-                title="API资源"
-                value={permissionStats.apiCount}
-                suffix="项"
-              />
-            </Col>
-            <Col span={8}>
-              <Statistic
-                title="操作权限"
-                value={permissionStats.actionCount}
-                suffix="项"
-              />
-            </Col>
-          </Row>
-        </Card>
+          <Col xs={24} lg={8}>
+            <Card
+              title="分配预览"
+              extra={<Badge count={selectedRoles.length} style={{ backgroundColor: '#1890ff' }} />}
+            >
+              {selectedRoles.length > 0 ? (
+                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                  <Space wrap>
+                    {selectedRoles.map((role) => (
+                      <Tag key={role.key} color={ROLE_TYPE_COLOR[role.roleType] || 'default'}>
+                        {role.title}
+                      </Tag>
+                    ))}
+                  </Space>
+                  <Divider style={{ margin: '8px 0' }} />
+                  <Row gutter={[8, 8]}>
+                    <Col span={12}>
+                      <Statistic title="系统角色" value={roleStats.systemCount} />
+                    </Col>
+                    <Col span={12}>
+                      <Statistic title="业务角色" value={roleStats.businessCount} />
+                    </Col>
+                    <Col span={12}>
+                      <Statistic title="自定义角色" value={roleStats.customCount} />
+                    </Col>
+                    <Col span={12}>
+                      <Statistic title="保护角色" value={roleStats.protectedCount} />
+                    </Col>
+                    <Col span={12}>
+                      <Statistic title="新增" value={roleStats.addedCount} />
+                    </Col>
+                    <Col span={12}>
+                      <Statistic title="移除" value={roleStats.removedCount} />
+                    </Col>
+                  </Row>
+                  {roleStats.disabledCount > 0 && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      message={`当前角色中包含 ${roleStats.disabledCount} 个已禁用角色`}
+                    />
+                  )}
+                </Space>
+              ) : (
+                <Empty description="未分配任何角色" />
+              )}
+            </Card>
+          </Col>
+        </Row>
 
-        {/* 操作按钮 */}
         <Card>
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
             <Button
@@ -247,6 +355,7 @@ const UserRoleAssign: React.FC = () => {
               icon={<SaveOutlined />}
               onClick={handleSave}
               loading={setUserRolesMutation.isPending}
+              disabled={!hasChanges}
             >
               保存并应用
             </Button>

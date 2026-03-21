@@ -1,28 +1,24 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import {
-  PageContainer,
-  ProTable,
-  type ProColumns,
-  type ActionType,
-  type ProFormInstance,
-} from '@ant-design/pro-components';
+import { PageContainer, ProTable, type ActionType, type ProColumns } from '@ant-design/pro-components';
 import {
   Alert,
   App as AntdApp,
   Button,
   Card,
+  Col,
   DatePicker,
   Descriptions,
   Drawer,
   Form,
   Input,
+  InputNumber,
   Modal,
+  Row,
   Select,
   Space,
   Statistic,
   Tag,
-  Tooltip,
 } from 'antd';
 import {
   CalendarOutlined,
@@ -31,27 +27,28 @@ import {
   EditOutlined,
   FieldTimeOutlined,
   PlusOutlined,
-  ReloadOutlined,
   ScheduleOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
-import dayjs from 'dayjs';
+import dayjs, { type Dayjs } from 'dayjs';
 import {
   fetchPayrollCycles,
   type PayrollCycleListParams,
   type PayCycleCreateParams,
   type PayCycleUpdateParams,
   useCreatePayrollCycleMutation,
-  useUpdatePayrollCycleMutation,
   useDeletePayrollCycleMutation,
+  useUpdatePayrollCycleMutation,
 } from '@services/queries/payroll';
-import type { PagedResponse, PayrollCycleDto } from '../../types/openapi';
 import { getPagedRecords } from '@services/api';
+import type { PagedResponse, PayrollCycleDto } from '../../types/openapi';
 
-const payrollTypeEnum: Record<string, { text: string; color: string }> = {
-  full_time: { text: '全职', color: 'blue' },
-  part_time: { text: '兼职', color: 'gold' },
-  contractor: { text: '外包', color: 'purple' },
+const cycleMainTypeEnum: Record<string, { text: string }> = {
+  monthly: { text: '标准月度' },
+  custom: { text: '自定义' },
+  full_time: { text: '全职' },
+  part_time: { text: '兼职' },
+  contractor: { text: '合同工' },
 };
 
 const cycleTypeEnum: Record<string, { text: string }> = {
@@ -59,25 +56,97 @@ const cycleTypeEnum: Record<string, { text: string }> = {
   semi_monthly: { text: '半月' },
   weekly: { text: '周度' },
   biweekly: { text: '双周' },
+  custom: { text: '自定义' },
 };
 
 const cycleStatusEnum: Record<string, { text: string; color: string }> = {
-  active: { text: '启用', color: 'success' },
-  inactive: { text: '停用', color: 'default' },
-  archived: { text: '归档', color: 'default' },
-  draft: { text: '草稿', color: 'warning' },
+  draft: { text: '草稿', color: 'default' },
   open: { text: '开放', color: 'processing' },
-  closed: { text: '关闭', color: 'default' },
+  closed: { text: '停用', color: 'warning' },
+  archived: { text: '归档', color: 'default' },
 };
 
-const formatDateTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—');
+const statusTransitions: Record<string, string[]> = {
+  draft: ['open', 'archived'],
+  open: ['closed'],
+  closed: ['open', 'archived'],
+  archived: [],
+};
 
-const formatDay = (value?: number | string) => {
-  if (value === undefined || value === null) return '—';
+const statusAlias: Record<string, string> = {
+  active: 'open',
+  inactive: 'closed',
+};
+
+type CycleFormValues = {
+  type: string;
+  periodLabel: string;
+  cycleCode?: string;
+  cycleName: string;
+  cycleType: string;
+  startDate?: Dayjs;
+  endDate?: Dayjs;
+  cutoffDate?: Dayjs;
+  payDay?: number;
+  leadDays?: number;
+  graceDays?: number;
+  timezone?: string;
+  description?: string;
+  status: string;
+};
+
+const normalizeStatus = (status?: string) => {
+  const raw = status?.trim().toLowerCase();
+  if (!raw) return undefined;
+  return statusAlias[raw] ?? raw;
+};
+
+const normalizeText = (value?: string) => {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+};
+
+const getCycleDisplayName = (cycle?: PayrollCycleDto): string =>
+  cycle?.cycleName || cycle?.periodLabel || '未命名周期';
+
+const getCycleTypeText = (cycle?: PayrollCycleDto): string => {
+  const cycleType = (cycle?.cycleType || '').trim().toLowerCase();
+  if (cycleTypeEnum[cycleType]) return cycleTypeEnum[cycleType].text;
+  const mainType = (cycle?.type || '').trim().toLowerCase();
+  if (cycleMainTypeEnum[mainType]) return cycleMainTypeEnum[mainType].text;
+  return cycle?.cycleType || cycle?.type || '未配置';
+};
+
+const getMainTypeText = (type?: string) => {
+  const key = (type || '').trim().toLowerCase();
+  return cycleMainTypeEnum[key]?.text || type || '未配置';
+};
+
+const getStatusMeta = (status?: string) => cycleStatusEnum[normalizeStatus(status) ?? ''];
+
+const formatDateTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '未记录');
+
+const formatDay = (value?: number | string, emptyText = '未配置') => {
+  if (value === undefined || value === null || value === '') return emptyText;
   if (typeof value === 'number') return `${value}`;
   const parsed = dayjs(value);
   if (parsed.isValid()) return parsed.format('MM-DD');
-  return value;
+  return String(value);
+};
+
+const formatPeriodRange = (startDate?: string, endDate?: string): string => {
+  if (!startDate && !endDate) return '未配置';
+  const start = startDate ? dayjs(startDate).format('YYYY-MM-DD') : '未配置';
+  const end = endDate ? dayjs(endDate).format('YYYY-MM-DD') : '未配置';
+  return `${start} ~ ${end}`;
+};
+
+const formatExecutionTimeFriendly = (value?: string, status?: string): string => {
+  if (value) return formatDateTime(value);
+  const normalized = normalizeStatus(status);
+  if (normalized === 'open') return '待调度';
+  if (normalized === 'closed' || normalized === 'draft') return '未启用';
+  return '未配置';
 };
 
 const CyclesPage: React.FC = () => {
@@ -86,23 +155,18 @@ const CyclesPage: React.FC = () => {
   const [queryParams, setQueryParams] = useState<PayrollCycleListParams>(() => ({
     current: Number(searchParams.get('page') || '1'),
     pageSize: Number(searchParams.get('size') || '10'),
-    payrollType: searchParams.get('payrollType') || undefined,
-    cycleType: searchParams.get('cycleType') || undefined,
+    periodLabel: searchParams.get('periodLabel') || searchParams.get('keyword') || undefined,
     status: searchParams.get('status') || undefined,
-    keyword: searchParams.get('keyword') || undefined,
   }));
   const actionRef = useRef<ActionType>();
-  const formRef = useRef<ProFormInstance>();
   const [latestData, setLatestData] = useState<PagedResponse<PayrollCycleDto>>();
   const [detail, setDetail] = useState<PayrollCycleDto | undefined>();
 
-  // CRUD 状态
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<PayrollCycleDto | null>(null);
   const [modalType, setModalType] = useState<'create' | 'edit'>('create');
-  const [form] = Form.useForm();
+  const [form] = Form.useForm<CycleFormValues>();
 
-  // Mutations
   const createMutation = useCreatePayrollCycleMutation();
   const updateMutation = useUpdatePayrollCycleMutation();
   const deleteMutation = useDeletePayrollCycleMutation();
@@ -111,44 +175,56 @@ const CyclesPage: React.FC = () => {
     const next = new URLSearchParams();
     if (params.current) next.set('page', String(params.current));
     if (params.pageSize) next.set('size', String(params.pageSize));
-    if (params.keyword) next.set('keyword', params.keyword);
-    if (params.payrollType) next.set('payrollType', params.payrollType);
-    if (params.cycleType) next.set('cycleType', params.cycleType);
+    if (params.periodLabel) next.set('periodLabel', params.periodLabel);
     if (params.status) next.set('status', params.status);
     setSearchParams(next);
   };
 
-  // 打开新增 Modal
   const handleCreate = () => {
     setModalType('create');
     setEditingRecord(null);
     form.resetFields();
-    form.setFieldsValue({ status: 'draft' });
-    setIsModalOpen(true);
-  };
-
-  // 打开编辑 Modal
-  const handleEdit = (record: PayrollCycleDto) => {
-    setModalType('edit');
-    setEditingRecord(record);
+    const defaultPeriod = dayjs().format('YYYY-MM');
     form.setFieldsValue({
-      type: record.payrollType,
-      periodLabel: record.cycleName || record.periodLabel,
-      startDate: record.startDate ? dayjs(record.startDate) : undefined,
-      endDate: record.endDate ? dayjs(record.endDate) : undefined,
-      cutoffDate: record.cutoffDate ? dayjs(record.cutoffDate) : undefined,
-      status: record.status,
+      type: 'monthly',
+      cycleType: 'monthly',
+      status: 'draft',
+      timezone: 'UTC+8',
+      periodLabel: defaultPeriod,
+      cycleName: `${dayjs().format('YYYY年MM月')}发薪周期`,
     });
     setIsModalOpen(true);
   };
 
-  // 删除确认
+  const handleEdit = (record: PayrollCycleDto) => {
+    setModalType('edit');
+    setEditingRecord(record);
+    const normalizedCycleType = (record.cycleType || '').toLowerCase();
+    form.setFieldsValue({
+      type: record.type || 'monthly',
+      periodLabel: record.periodLabel || '',
+      cycleCode: record.cycleCode,
+      cycleName: record.cycleName || record.periodLabel || '',
+      cycleType: cycleTypeEnum[normalizedCycleType] ? normalizedCycleType : 'monthly',
+      startDate: record.startDate ? dayjs(record.startDate) : undefined,
+      endDate: record.endDate ? dayjs(record.endDate) : undefined,
+      cutoffDate: record.cutoffDate ? dayjs(record.cutoffDate) : undefined,
+      payDay: record.payDay,
+      leadDays: record.leadDays,
+      graceDays: record.graceDays,
+      timezone: record.timezone || 'UTC+8',
+      description: record.description || undefined,
+      status: normalizeStatus(record.status) || 'draft',
+    });
+    setIsModalOpen(true);
+  };
+
   const handleDelete = (record: PayrollCycleDto) => {
     if (!record.id) return;
 
     Modal.confirm({
       title: '确认删除',
-      content: `确定要删除发薪周期「${record.cycleName || record.periodLabel}」吗？只能删除草稿状态的周期。`,
+      content: `确定删除发薪周期「${getCycleDisplayName(record)}」吗？仅草稿状态可删除。`,
       okText: '确认删除',
       okType: 'danger',
       cancelText: '取消',
@@ -165,160 +241,193 @@ const CyclesPage: React.FC = () => {
     });
   };
 
-  // 提交表单
+  const validateDateRange = (values: CycleFormValues) => {
+    if (values.startDate && values.endDate && values.startDate.isAfter(values.endDate, 'day')) {
+      throw new Error('开始日期不能晚于结束日期');
+    }
+    if (values.cutoffDate && values.startDate && values.cutoffDate.isBefore(values.startDate, 'day')) {
+      throw new Error('截数日不能早于开始日期');
+    }
+    if (values.cutoffDate && values.endDate && values.cutoffDate.isAfter(values.endDate, 'day')) {
+      throw new Error('截数日不能晚于结束日期');
+    }
+  };
+
   const handleSubmit = async () => {
     try {
       const values = await form.validateFields();
+      validateDateRange(values);
+
+      const params: PayCycleCreateParams = {
+        type: values.type,
+        periodLabel: values.periodLabel,
+        cycleCode: normalizeText(values.cycleCode),
+        cycleName: normalizeText(values.cycleName),
+        cycleType: values.cycleType,
+        startDate: values.startDate?.format('YYYY-MM-DD'),
+        endDate: values.endDate?.format('YYYY-MM-DD'),
+        cutoffDate: values.cutoffDate?.format('YYYY-MM-DD'),
+        payDay: values.payDay,
+        leadDays: values.leadDays,
+        graceDays: values.graceDays,
+        timezone: normalizeText(values.timezone),
+        description: normalizeText(values.description),
+        status: values.status || 'draft',
+      };
 
       if (modalType === 'create') {
-        const params: PayCycleCreateParams = {
-          type: values.type,
-          periodLabel: values.periodLabel,
-          startDate: values.startDate?.format('YYYY-MM-DD'),
-          endDate: values.endDate?.format('YYYY-MM-DD'),
-          cutoffDate: values.cutoffDate?.format('YYYY-MM-DD'),
-          status: values.status || 'draft',
-        };
         await createMutation.mutateAsync(params);
         message.success('创建成功');
       } else if (editingRecord?.id) {
-        const params: PayCycleUpdateParams = {
+        const updateParams: PayCycleUpdateParams = {
+          ...params,
           id: editingRecord.id,
-          type: values.type,
-          periodLabel: values.periodLabel,
-          startDate: values.startDate?.format('YYYY-MM-DD'),
-          endDate: values.endDate?.format('YYYY-MM-DD'),
-          cutoffDate: values.cutoffDate?.format('YYYY-MM-DD'),
-          status: values.status,
         };
-        await updateMutation.mutateAsync({ id: editingRecord.id, params });
+        await updateMutation.mutateAsync({ id: editingRecord.id, params: updateParams });
         message.success('更新成功');
       }
 
       setIsModalOpen(false);
       actionRef.current?.reload();
     } catch (error: any) {
-      if (error?.errorFields) {
-        return; // 表单验证错误
-      }
-      const msg = error?.response?.data?.message || error?.message || '操作失败';
+      if (error?.errorFields) return;
+      const msg = error?.message || error?.response?.data?.message || '操作失败';
       message.error(msg);
     }
   };
 
- const summary = useMemo(() => {
+  const summary = useMemo(() => {
     const records = getPagedRecords(latestData);
     const total = latestData?.total ?? 0;
-    const active = records.filter((item) => {
-      const status = (item.status ?? '').toLowerCase();
-      return status === 'active' || status === 'open';
-    }).length;
-    const inactive = records.filter((item) => {
-      const status = (item.status ?? '').toLowerCase();
-      return status === 'inactive' || status === 'closed';
-    }).length;
+    const active = records.filter((item) => normalizeStatus(item.status) === 'open').length;
+    const inactive = records.filter((item) => normalizeStatus(item.status) === 'closed').length;
     const nextExecutions = records
-      .map((item) => item.nextExecutionTime ?? item.startDate ?? null)
+      .map((item) => item.nextExecutionTime ?? null)
       .filter((value): value is string => Boolean(value))
       .map((value) => dayjs(value))
-      .filter((d) => d.isValid())
+      .filter((dateValue) => dateValue.isValid())
       .sort((a, b) => (a.isBefore(b) ? -1 : 1));
-    const nextExecutionLabel = nextExecutions[0]?.format('YYYY-MM-DD HH:mm') ?? '—';
+    const nextExecutionLabel = nextExecutions[0]?.format('YYYY-MM-DD HH:mm') ?? '未配置';
     return { total, active, inactive, nextExecutionLabel };
   }, [latestData]);
 
+  const summaryCards = useMemo(
+    () => [
+      {
+        key: 'total',
+        title: '周期数量',
+        value: summary.total,
+        prefix: <CalendarOutlined />,
+      },
+      {
+        key: 'active',
+        title: '启用周期',
+        value: summary.active,
+        prefix: <ClockCircleOutlined />,
+        valueStyle: { color: '#52c41a' },
+      },
+      {
+        key: 'inactive',
+        title: '停用周期',
+        value: summary.inactive,
+        prefix: <WarningOutlined />,
+        valueStyle: { color: '#faad14' },
+      },
+      {
+        key: 'next',
+        title: '最近执行时间',
+        value: summary.nextExecutionLabel,
+        prefix: <FieldTimeOutlined />,
+        valueStyle: { fontSize: 13 },
+      },
+    ],
+    [summary],
+  );
+
+  const statusOptions = useMemo(() => {
+    if (modalType === 'create') {
+      return ['draft', 'open'].map((value) => ({
+        label: cycleStatusEnum[value].text,
+        value,
+      }));
+    }
+    const current = normalizeStatus(editingRecord?.status) || 'draft';
+    const options = [current, ...(statusTransitions[current] || [])];
+    return Array.from(new Set(options)).map((value) => ({
+      label: cycleStatusEnum[value]?.text || value,
+      value,
+    }));
+  }, [modalType, editingRecord]);
+
   const columns: ProColumns<PayrollCycleDto>[] = [
     {
-      title: '关键字',
-      dataIndex: 'keyword',
+      title: '周期标签',
+      dataIndex: 'periodLabel',
       hideInTable: true,
-      fieldProps: { placeholder: '周期名称/编码/备注' },
+      fieldProps: { placeholder: '如：2025-01' },
     },
     {
       title: '周期名称',
       dataIndex: 'cycleName',
-      width: 200,
+      width: 240,
       render: (_, record) => (
         <Space direction="vertical" size={2} style={{ width: '100%' }}>
           <Space>
             <ScheduleOutlined />
-            <span style={{ fontWeight: 600 }}>{record.cycleName || '未命名周期'}</span>
+            <span style={{ fontWeight: 600 }}>{getCycleDisplayName(record)}</span>
           </Space>
-          {record.cycleCode && <Tag>{record.cycleCode}</Tag>}
+          <Space size={6}>
+            {record.periodLabel && <Tag>{record.periodLabel}</Tag>}
+            {record.cycleCode && <Tag color="blue">{record.cycleCode}</Tag>}
+          </Space>
         </Space>
       ),
-    },
-    {
-      title: '用工类型',
-      dataIndex: 'payrollType',
-      width: 120,
-      valueType: 'select',
-      valueEnum: Object.fromEntries(Object.entries(payrollTypeEnum).map(([k, v]) => [k, { text: v.text }])),
-      render: (_, record) => {
-        const meta = payrollTypeEnum[record.payrollType ?? ''];
-        return meta ? <Tag color={meta.color}>{meta.text}</Tag> : record.payrollType || '—';
-      },
-    },
-    {
-      title: '期间范围',
-      dataIndex: 'startDate',
-      width: 220,
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      search: false,
-      render: (_, record) => {
-        const start = record.startDate ? dayjs(record.startDate).format('YYYY-MM-DD') : '—';
-        const end = record.endDate ? dayjs(record.endDate).format('YYYY-MM-DD') : '—';
-        return `${start} ~ ${end}`;
-      },
     },
     {
       title: '周期类型',
       dataIndex: 'cycleType',
       width: 120,
-      valueType: 'select',
-      valueEnum: Object.fromEntries(Object.entries(cycleTypeEnum).map(([k, v]) => [k, { text: v.text }])),
-      render: (_, record) => cycleTypeEnum[record.cycleType ?? '']?.text ?? record.cycleType ?? '—',
+      hideInSearch: true,
+      render: (_, record) => getCycleTypeText(record),
+    },
+    {
+      title: '期间范围',
+      dataIndex: 'startDate',
+      width: 220,
+      search: false,
+      render: (_, record) => formatPeriodRange(record.startDate, record.endDate),
     },
     {
       title: '截数日',
       dataIndex: 'cutoffDay',
-      width: 100,
+      width: 110,
+      search: false,
       render: (_, record) => formatDay(record.cutoffDay ?? record.cutoffDate),
     },
     {
       title: '发薪日',
       dataIndex: 'payDay',
-      width: 100,
-      render: (_, record) => formatDay(record.payDay ?? record.payDate),
-    },
-    {
-      title: '时区',
-      dataIndex: 'timezone',
-      width: 140,
-      render: (value) => value || 'UTC+8',
+      width: 110,
+      search: false,
+      render: (_, record) => formatDay(record.payDay),
     },
     {
       title: '状态',
       dataIndex: 'status',
       width: 120,
       valueType: 'select',
-      valueEnum: Object.fromEntries(Object.entries(cycleStatusEnum).map(([k, v]) => [k, { text: v.text }])),
+      valueEnum: Object.fromEntries(Object.entries(cycleStatusEnum).map(([key, meta]) => [key, { text: meta.text }])),
       render: (_, record) => {
-        const meta = cycleStatusEnum[record.status ?? ''];
-        return meta ? <Tag color={meta.color}>{meta.text}</Tag> : record.status || '—';
+        const meta = getStatusMeta(record.status);
+        return meta ? <Tag color={meta.color}>{meta.text}</Tag> : record.status || '未配置';
       },
     },
     {
-      title: '下次执行',
-      dataIndex: 'nextExecutionTime',
-      width: 180,
-      render: (_, record) => formatDateTime(record.nextExecutionTime),
-    },
-    {
-      title: '最近执行',
-      dataIndex: 'lastExecutionTime',
-      width: 180,
-      render: (_, record) => formatDateTime(record.lastExecutionTime),
+      title: '更新时间',
+      dataIndex: 'updatedAt',
+      width: 170,
+      search: false,
+      render: (_, record) => formatDateTime(record.updatedAt),
     },
     {
       title: '操作',
@@ -331,7 +440,7 @@ const CyclesPage: React.FC = () => {
         <Button key="edit" type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
           编辑
         </Button>,
-        record.status === 'draft' && (
+        normalizeStatus(record.status) === 'draft' && (
           <Button
             key="delete"
             type="link"
@@ -350,111 +459,151 @@ const CyclesPage: React.FC = () => {
     <PageContainer
       header={{
         title: '发薪周期管理',
-        breadcrumb: {},
-        extra: [
-          <Tooltip key="refresh" title="刷新列表">
-            <Button icon={<ReloadOutlined />} onClick={() => actionRef.current?.reload()} />
-          </Tooltip>,
-        ],
       }}
+      content={(
+        <Row gutter={[16, 16]}>
+          {summaryCards.map((item) => (
+            <Col key={item.key} xs={24} sm={12} md={12} lg={6}>
+              <Card size="small">
+                <Statistic
+                  title={item.title}
+                  value={item.value}
+                  prefix={item.prefix}
+                  valueStyle={item.valueStyle}
+                />
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      )}
     >
-      <Space direction="vertical" size={16} style={{ width: '100%', padding: 24 }}>
-        {/* 统计卡片 - 单行显示 */}
-        <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
-          <Card size="small" style={{ flex: '0 0 auto', width: 160 }}>
-            <Statistic title="周期数量" value={summary.total} prefix={<CalendarOutlined />} />
-          </Card>
-          <Card size="small" style={{ flex: '0 0 auto', width: 160 }}>
-            <Statistic title="启用周期" value={summary.active} prefix={<ClockCircleOutlined />} valueStyle={{ color: '#52c41a' }} />
-          </Card>
-          <Card size="small" style={{ flex: '0 0 auto', width: 160 }}>
-            <Statistic title="停用周期" value={summary.inactive} prefix={<WarningOutlined />} valueStyle={{ color: '#faad14' }} />
-          </Card>
-          <Card size="small" style={{ flex: '0 0 auto', width: 180 }}>
-            <Statistic title="最近执行时间" value={summary.nextExecutionLabel} prefix={<FieldTimeOutlined />} valueStyle={{ fontSize: 13 }} />
-          </Card>
-        </div>
+      <ProTable<PayrollCycleDto>
+        cardBordered
+        headerTitle="周期列表"
+        columns={columns}
+        actionRef={actionRef}
+        scroll={{ x: 1280 }}
+        rowKey={(record) =>
+          String(record.id ?? `${record.type ?? record.cycleType ?? 'cycle'}-${record.periodLabel ?? ''}`)
+        }
+        request={async (params) => {
+          const nextParams: PayrollCycleListParams = {
+            current: params.current || 1,
+            pageSize: params.pageSize || 10,
+            periodLabel: params.periodLabel,
+            status: params.status,
+          };
+          setQueryParams(nextParams);
+          updateUrlParams(nextParams);
 
-        <ProTable<PayrollCycleDto>
-          columns={columns}
-          actionRef={actionRef}
-          formRef={formRef}
-          scroll={{ x: 1200 }}
-          rowKey={(record) => String(record.id ?? record.cycleCode ?? Math.random())}
-          request={async (params) => {
-            const nextParams: PayrollCycleListParams = {
-              current: params.current || 1,
-              pageSize: params.pageSize || 10,
-              keyword: params.keyword,
-              payrollType: params.payrollType,
-              cycleType: params.cycleType,
-              status: params.status,
+          try {
+            const data = await fetchPayrollCycles(nextParams);
+            setLatestData(data);
+            return {
+              data: getPagedRecords(data),
+              success: true,
+              total: data.total ?? 0,
             };
-            setQueryParams(nextParams);
-            updateUrlParams(nextParams);
+          } catch (error: any) {
+            const msg = error?.response?.data?.message || error?.message || '发薪周期加载失败';
+            message.error(msg);
+            setLatestData(undefined);
+            return {
+              data: [],
+              success: false,
+              total: 0,
+            };
+          }
+        }}
+        search={{ labelWidth: 'auto', collapseRender: false, optionRender: (_, __, dom) => dom }}
+        pagination={{
+          current: queryParams.current,
+          pageSize: queryParams.pageSize,
+          showSizeChanger: true,
+          showQuickJumper: true,
+          showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条/共 ${total} 条`,
+        }}
+        locale={{ emptyText: '暂无发薪周期' }}
+        toolBarRender={() => [
+          <Button key="create" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+            新增周期
+          </Button>,
+        ]}
+        options={{ reload: true, density: true, setting: true }}
+      />
 
-            try {
-              const data = await fetchPayrollCycles(nextParams);
-              setLatestData(data);
-              return {
-                data: getPagedRecords(data),
-                success: true,
-                total: data.total ?? 0,
-              };
-            } catch (error: any) {
-              const msg = error?.response?.data?.message || error?.message || '发薪周期加载失败';
-              message.error(msg);
-              setLatestData(undefined);
-              return {
-                data: [],
-                success: false,
-                total: 0,
-              };
-            }
-          }}
-          search={{ labelWidth: 'auto', collapseRender: false, optionRender: (_, __, dom) => dom }}
-          pagination={{ current: queryParams.current, pageSize: queryParams.pageSize, showSizeChanger: true, showQuickJumper: true }}
-          locale={{ emptyText: '暂无发薪周期' }}
-          toolBarRender={() => [
-            <Button key="create" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-              新增周期
-            </Button>,
-          ]}
-        />
-      </Space>
-
-      {/* 新增/编辑 Modal */}
       <Modal
         title={modalType === 'create' ? '新增发薪周期' : '编辑发薪周期'}
         open={isModalOpen}
         onOk={handleSubmit}
         onCancel={() => setIsModalOpen(false)}
         confirmLoading={createMutation.isPending || updateMutation.isPending}
-        width={560}
-        destroyOnHidden
+        width={760}
+        forceRender
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
-          <Form.Item
-            name="type"
-            label="用工类型"
-            rules={[{ required: true, message: '请选择用工类型' }]}
-          >
-            <Select
-              placeholder="请选择用工类型"
-              options={Object.entries(payrollTypeEnum).map(([key, value]) => ({
-                label: value.text,
-                value: key,
-              }))}
-            />
-          </Form.Item>
-
-          <Form.Item
-            name="periodLabel"
-            label="周期名称"
-            rules={[{ required: true, message: '请输入周期名称' }]}
-          >
-            <Input placeholder="如：2024年1月、2024年第一季度" />
-          </Form.Item>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                name="type"
+                label="主类型"
+                rules={[{ required: true, message: '请选择主类型' }]}
+              >
+                <Select
+                  placeholder="请选择主类型"
+                  options={Object.entries(cycleMainTypeEnum).map(([key, value]) => ({
+                    label: value.text,
+                    value: key,
+                  }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="cycleType"
+                label="周期类型"
+                rules={[{ required: true, message: '请选择周期类型' }]}
+              >
+                <Select
+                  placeholder="请选择周期类型"
+                  options={Object.entries(cycleTypeEnum).map(([key, value]) => ({
+                    label: value.text,
+                    value: key,
+                  }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="periodLabel"
+                label="周期标签"
+                rules={[
+                  { required: true, message: '请输入周期标签' },
+                  { pattern: /^\d{4}-\d{2}$/, message: '格式需为 YYYY-MM' },
+                ]}
+              >
+                <Input placeholder="如：2025-01" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                name="cycleCode"
+                label="周期编码"
+                tooltip="不填将自动生成，建议仅使用字母、数字、下划线"
+              >
+                <Input placeholder="如：CN_MAIN_2025_01" />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item
+                name="cycleName"
+                label="周期名称"
+                rules={[{ required: true, message: '请输入周期名称' }]}
+              >
+                <Input placeholder="如：2025年1月全员薪资周期" />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Form.Item label="期间范围">
             <Space style={{ width: '100%' }}>
@@ -468,58 +617,84 @@ const CyclesPage: React.FC = () => {
             </Space>
           </Form.Item>
 
-          <Form.Item name="cutoffDate" label="截数日">
-            <DatePicker placeholder="选择截数日" style={{ width: '100%' }} />
-          </Form.Item>
-
-          <Form.Item name="status" label="状态">
-            <Select
-              placeholder="请选择状态"
-              options={Object.entries(cycleStatusEnum).map(([key, value]) => ({
-                label: value.text,
-                value: key,
-              }))}
-            />
-          </Form.Item>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item name="cutoffDate" label="截数日">
+                <DatePicker placeholder="选择截数日" style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="payDay" label="发薪日">
+                <InputNumber min={1} max={31} style={{ width: '100%' }} placeholder="1-31" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="timezone" label="时区">
+                <Input placeholder="如：UTC+8" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="leadDays" label="提前天数">
+                <InputNumber min={0} max={365} style={{ width: '100%' }} placeholder="0-365" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="graceDays" label="宽限天数">
+                <InputNumber min={0} max={365} style={{ width: '100%' }} placeholder="0-365" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item name="status" label="状态" rules={[{ required: true, message: '请选择状态' }]}>
+                <Select placeholder="请选择状态" options={statusOptions} />
+              </Form.Item>
+            </Col>
+            <Col span={24}>
+              <Form.Item name="description" label="描述">
+                <Input.TextArea rows={3} maxLength={500} placeholder="可填写本周期的规则说明、适用范围等" />
+              </Form.Item>
+            </Col>
+          </Row>
         </Form>
       </Modal>
 
       <Drawer
-        width={520}
-        title="周期详情"
+        width={620}
+        title={detail ? `周期详情 · ${getCycleDisplayName(detail)}` : '周期详情'}
+        extra={detail?.cycleCode ? <Tag color="blue">{detail.cycleCode}</Tag> : undefined}
         open={Boolean(detail)}
         onClose={() => setDetail(undefined)}
         destroyOnHidden
       >
         {detail ? (
           <Space direction="vertical" size={16} style={{ width: '100%' }}>
-            <Descriptions column={1} bordered size="small">
-              <Descriptions.Item label="周期名称">{detail.cycleName || '—'}</Descriptions.Item>
-              <Descriptions.Item label="周期编码">{detail.cycleCode || '—'}</Descriptions.Item>
-              <Descriptions.Item label="用工类型">
-                {payrollTypeEnum[detail.payrollType ?? '']?.text ?? detail.payrollType ?? '—'}
+            <Descriptions column={2} bordered size="small">
+              <Descriptions.Item label="周期名称" span={2}>
+                {getCycleDisplayName(detail)}
               </Descriptions.Item>
-              <Descriptions.Item label="周期类型">
-                {cycleTypeEnum[detail.cycleType ?? '']?.text ?? detail.cycleType ?? '—'}
+              <Descriptions.Item label="周期标签">{detail.periodLabel || '未配置'}</Descriptions.Item>
+              <Descriptions.Item label="周期编码">{detail.cycleCode || '未配置'}</Descriptions.Item>
+              <Descriptions.Item label="主类型">{getMainTypeText(detail.type)}</Descriptions.Item>
+              <Descriptions.Item label="周期类型">{getCycleTypeText(detail)}</Descriptions.Item>
+              <Descriptions.Item label="状态">
+                {getStatusMeta(detail.status)?.text || detail.status || '未配置'}
+              </Descriptions.Item>
+              <Descriptions.Item label="期间范围" span={2}>
+                {formatPeriodRange(detail.startDate, detail.endDate)}
               </Descriptions.Item>
               <Descriptions.Item label="截数日">{formatDay(detail.cutoffDay ?? detail.cutoffDate)}</Descriptions.Item>
-              <Descriptions.Item label="发薪日">{formatDay(detail.payDay ?? detail.payDate)}</Descriptions.Item>
-              <Descriptions.Item label="期间范围">
-                {detail.startDate || detail.endDate
-                  ? `${detail.startDate ? dayjs(detail.startDate).format('YYYY-MM-DD') : '—'} ~ ${
-                      detail.endDate ? dayjs(detail.endDate).format('YYYY-MM-DD') : '—'
-                    }`
-                  : '—'}
-              </Descriptions.Item>
+              <Descriptions.Item label="发薪日">{formatDay(detail.payDay)}</Descriptions.Item>
               <Descriptions.Item label="提前天数">{formatDay(detail.leadDays)}</Descriptions.Item>
               <Descriptions.Item label="宽限天数">{formatDay(detail.graceDays)}</Descriptions.Item>
-              <Descriptions.Item label="时区">{detail.timezone || 'UTC+8'}</Descriptions.Item>
-              <Descriptions.Item label="状态">
-                {cycleStatusEnum[detail.status ?? '']?.text ?? detail.status ?? '—'}
+              <Descriptions.Item label="时区">{detail.timezone || '未配置'}</Descriptions.Item>
+              <Descriptions.Item label="下次执行">
+                {formatExecutionTimeFriendly(detail.nextExecutionTime, detail.status)}
               </Descriptions.Item>
-              <Descriptions.Item label="下次执行">{formatDateTime(detail.nextExecutionTime)}</Descriptions.Item>
-              <Descriptions.Item label="最近执行">{formatDateTime(detail.lastExecutionTime)}</Descriptions.Item>
-              <Descriptions.Item label="描述">{detail.description || '—'}</Descriptions.Item>
+              <Descriptions.Item label="最近执行">
+                {formatExecutionTimeFriendly(detail.lastExecutionTime, detail.status)}
+              </Descriptions.Item>
+              <Descriptions.Item label="描述" span={2}>
+                {detail.description || '未配置'}
+              </Descriptions.Item>
               <Descriptions.Item label="创建时间">{formatDateTime(detail.createdAt)}</Descriptions.Item>
               <Descriptions.Item label="更新时间">{formatDateTime(detail.updatedAt)}</Descriptions.Item>
             </Descriptions>
@@ -527,8 +702,8 @@ const CyclesPage: React.FC = () => {
             <Alert
               type="info"
               showIcon
-              message="提示"
-              description="发薪周期的执行计划由后台批处理触发，若需调整，请通过“停用 + 编辑”后重新启用。"
+              message="执行提示"
+              description="推荐流程：草稿配置完成后再启用。启用中的周期如需修改，请先停用再编辑，避免影响调度一致性。"
             />
           </Space>
         ) : (

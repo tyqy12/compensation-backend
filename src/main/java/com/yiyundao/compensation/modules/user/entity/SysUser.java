@@ -29,10 +29,18 @@ public class SysUser extends BaseEntity {
     @TableField("employee_id")
     private Long employeeId;
 
-    @TableField("platform_user_id")
+    @TableField(exist = false)
+    private String subjectId;
+
+    @TableField(exist = false)
+    private String provider;
+
+    @Deprecated
+    @TableField(exist = false)
     private String platformUserId;
 
-    @TableField("platform_type")
+    @Deprecated
+    @TableField(exist = false)
     private String platformType;
 
     @TableField("last_login_time")
@@ -43,4 +51,44 @@ public class SysUser extends BaseEntity {
 
     @TableField("permission_version")
     private Integer permissionVersion;
+
+    public String getSubjectId() {
+        return subjectId != null ? subjectId : platformUserId;
+    }
+
+    public void setSubjectId(String subjectId) {
+        this.subjectId = subjectId;
+        this.platformUserId = subjectId;
+    }
+
+    public String getProvider() {
+        return provider != null ? provider : platformType;
+    }
+
+    public void setProvider(String provider) {
+        this.provider = provider;
+        this.platformType = provider;
+    }
+
+    @Deprecated
+    public String getPlatformUserId() {
+        return platformUserId != null ? platformUserId : subjectId;
+    }
+
+    @Deprecated
+    public void setPlatformUserId(String platformUserId) {
+        this.platformUserId = platformUserId;
+        this.subjectId = platformUserId;
+    }
+
+    @Deprecated
+    public String getPlatformType() {
+        return platformType != null ? platformType : provider;
+    }
+
+    @Deprecated
+    public void setPlatformType(String platformType) {
+        this.platformType = platformType;
+        this.provider = platformType;
+    }
 }

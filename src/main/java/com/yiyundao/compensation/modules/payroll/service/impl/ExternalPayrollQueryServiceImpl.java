@@ -21,6 +21,8 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.SalaryItemService;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
+import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
+import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.service.EncryptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -64,6 +66,7 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
     private final SalaryItemService salaryItemService;
     private final ObjectMapper objectMapper;
     private final EncryptionService encryptionService;
+    private final ExternalIdentityService externalIdentityService;
 
     @Override
     public Page<OpenApiPayrollBatchDto> pagePtBatches(String period, String status, long page, long size) {
@@ -411,10 +414,10 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
         String ref = employeeRef.trim();
         if (ref.contains(":")) {
             String[] parts = ref.split(":", 2);
-            String platformType = parts[0];
-            String platformUserId = parts.length > 1 ? parts[1] : null;
-            if (StringUtils.hasText(platformType) && platformUserId != null && StringUtils.hasText(platformUserId)) {
-                Employee employee = employeeService.getByPlatformUserId(platformUserId.trim(), platformType.trim());
+            String provider = parts[0];
+            String subjectId = parts.length > 1 ? parts[1] : null;
+            if (StringUtils.hasText(provider) && subjectId != null && StringUtils.hasText(subjectId)) {
+                Employee employee = employeeService.getByProviderAndSubjectId(provider.trim(), subjectId.trim());
                 return employee != null ? employee.getId() : null;
             }
         }
@@ -427,8 +430,9 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
         if (employee == null) {
             return null;
         }
-        if (StringUtils.hasText(employee.getPlatformType()) && StringUtils.hasText(employee.getPlatformUserId())) {
-            return employee.getPlatformType().trim() + ":" + employee.getPlatformUserId().trim();
+        ExternalIdentity identity = externalIdentityService.findPrimaryByEmployeeId(employee.getId());
+        if (identity != null && StringUtils.hasText(identity.getProvider()) && StringUtils.hasText(identity.getSubjectId())) {
+            return identity.getProvider().trim() + ":" + identity.getSubjectId().trim();
         }
         if (StringUtils.hasText(employee.getEmployeeId())) {
             return "emp:" + employee.getEmployeeId().trim();

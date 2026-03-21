@@ -139,7 +139,7 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
           <Dropdown
             menu={{
               items: [
-                { key: 'profile', icon: <UserOutlined />, label: '个人中心' },
+                { key: 'profile', icon: <UserOutlined />, label: <Link to="/employees/me">个人中心</Link> },
                 { key: 'settings', icon: <SettingOutlined />, label: '个人设置' },
                 { type: 'divider' },
                 { key: 'logout', danger: true, label: '退出登录', onClick: () => logout.mutate() },

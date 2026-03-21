@@ -31,6 +31,11 @@ import {
   Col,
   Statistic,
   Badge,
+  Input,
+  Select,
+  Divider,
+  Empty,
+  Switch,
 } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import {
@@ -46,6 +51,53 @@ import type { SysResource, RoleInfo } from '@types/api';
 
 const { Text } = Typography;
 
+type ResourceTypeOption = 'ALL' | 'MENU' | 'VIEW' | 'ACTION' | 'API';
+
+const RESOURCE_TYPE_OPTIONS: Array<{ label: string; value: ResourceTypeOption }> = [
+  { label: '全部类型', value: 'ALL' },
+  { label: '菜单', value: 'MENU' },
+  { label: '页面', value: 'VIEW' },
+  { label: '操作', value: 'ACTION' },
+  { label: 'API', value: 'API' },
+];
+
+const RESOURCE_TYPE_LABEL: Record<string, string> = {
+  MENU: '菜单',
+  VIEW: '页面',
+  ACTION: '操作',
+  API: 'API',
+};
+
+const RESOURCE_TYPE_COLOR: Record<string, string> = {
+  MENU: 'blue',
+  VIEW: 'green',
+  ACTION: 'orange',
+  API: 'purple',
+};
+
+const ACTION_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: '查看数据', value: 'read' },
+  { label: '新增/编辑', value: 'write' },
+  { label: '删除数据', value: 'delete' },
+  { label: '全部权限', value: 'admin' },
+  { label: '导出Excel', value: 'export' },
+  { label: '导入数据', value: 'import' },
+];
+
+const collectTreeKeys = (nodes: DataNode[]): React.Key[] => {
+  const keys: React.Key[] = [];
+  const walk = (items: DataNode[]) => {
+    items.forEach((item) => {
+      keys.push(item.key);
+      if (item.children && item.children.length > 0) {
+        walk(item.children);
+      }
+    });
+  };
+  walk(nodes);
+  return keys;
+};
+
 const RolePermissionConfig: React.FC = () => {
   const navigate = useNavigate();
   const { roleId } = useParams<{ roleId: string }>();
@@ -60,6 +112,12 @@ const RolePermissionConfig: React.FC = () => {
   // 状态
   const [checkedKeys, setCheckedKeys] = useState<React.Key[]>([]);
   const [actionConfigs, setActionConfigs] = useState<Record<number, string[]>>({});
+  const [resourceKeyword, setResourceKeyword] = useState('');
+  const [resourceTypeFilter, setResourceTypeFilter] = useState<ResourceTypeOption>('ALL');
+  const [onlySelected, setOnlySelected] = useState(false);
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [leafOnlyCheckable, setLeafOnlyCheckable] = useState(true);
+  const [bulkActions, setBulkActions] = useState<string[]>([]);
 
   // 当前角色信息
   const currentRole: RoleInfo | undefined = useMemo(() => {
@@ -72,24 +130,81 @@ const RolePermissionConfig: React.FC = () => {
     return new Map(list.map((r) => [r.id, r]));
   }, [resourcesQuery.data]);
 
+  const checkedKeySet = useMemo(() => {
+    return new Set(checkedKeys.map((key) => Number(key)));
+  }, [checkedKeys]);
+
+  // 根据关键词、类型、已选状态过滤资源，同时补全父节点保证层级可读
+  const filteredResources = useMemo(() => {
+    const list = resourcesQuery.data || [];
+    if (list.length === 0) return [];
+
+    const keyword = resourceKeyword.trim().toLowerCase();
+    const noFilter = keyword.length === 0 && resourceTypeFilter === 'ALL' && !onlySelected;
+    if (noFilter) return list;
+
+    const byId = new Map<number, SysResource>(list.map((r) => [r.id, r]));
+    const match = (r: SysResource) => {
+      if (resourceTypeFilter !== 'ALL' && r.type !== resourceTypeFilter) return false;
+      if (onlySelected && !checkedKeySet.has(r.id)) return false;
+      if (!keyword) return true;
+      return (
+        (r.name || '').toLowerCase().includes(keyword)
+        || (r.code || '').toLowerCase().includes(keyword)
+        || (r.path || '').toLowerCase().includes(keyword)
+      );
+    };
+
+    const visibleIds = new Set<number>();
+    list.forEach((r) => {
+      if (!match(r)) return;
+
+      let current: SysResource | undefined = r;
+      while (current) {
+        if (visibleIds.has(current.id)) break;
+        visibleIds.add(current.id);
+        const parentId = current.parentId ?? null;
+        current = parentId != null ? byId.get(parentId) : undefined;
+      }
+    });
+
+    return list.filter((r) => visibleIds.has(r.id));
+  }, [resourcesQuery.data, resourceKeyword, resourceTypeFilter, onlySelected, checkedKeySet]);
+
+  const nonLeafIdSet = useMemo(() => {
+    const set = new Set<number>();
+    filteredResources.forEach((r) => {
+      if (r.parentId != null) {
+        set.add(r.parentId);
+      }
+    });
+    return set;
+  }, [filteredResources]);
+
   // 构建资源树
   const treeData: DataNode[] = useMemo(() => {
-    const list = resourcesQuery.data || [];
+    const list = filteredResources || [];
     const map = new Map<number, DataNode>();
 
     list.forEach((r: SysResource) => {
       map.set(r.id, {
         key: r.id,
         title: (
-          <Space size={4}>
+          <Space size={4} wrap>
             <Text strong style={{ fontSize: 13 }}>{r.name}</Text>
             <Text type="secondary" style={{ fontSize: 11 }}>({r.code})</Text>
-            {r.type === 'API' && <Tag color="purple" style={{ margin: 0, fontSize: 10 }}>API</Tag>}
-            {r.type === 'ACTION' && <Tag color="orange" style={{ margin: 0, fontSize: 10 }}>操作</Tag>}
-            {r.type === 'MENU' && <Tag color="blue" style={{ margin: 0, fontSize: 10 }}>菜单</Tag>}
+            <Tag color={RESOURCE_TYPE_COLOR[r.type] || 'default'} style={{ margin: 0, fontSize: 10 }}>
+              {RESOURCE_TYPE_LABEL[r.type] || r.type}
+            </Tag>
+            {r.path && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {r.path}
+              </Text>
+            )}
           </Space>
         ),
         children: [],
+        disableCheckbox: leafOnlyCheckable && nonLeafIdSet.has(r.id) && !checkedKeySet.has(r.id),
       });
     });
 
@@ -105,35 +220,66 @@ const RolePermissionConfig: React.FC = () => {
     });
 
     return roots;
-  }, [resourcesQuery.data]);
+  }, [filteredResources, leafOnlyCheckable, nonLeafIdSet, checkedKeySet]);
+
+  const allTreeKeys = useMemo(() => collectTreeKeys(treeData), [treeData]);
+
+  // 筛选条件变化时自动展开可见树，减少用户额外点击
+  useEffect(() => {
+    setExpandedKeys(allTreeKeys);
+  }, [allTreeKeys]);
 
   // 加载角色当前权限
   useEffect(() => {
     if (roleResourcesQuery.data) {
-      const resources = roleResourcesQuery.data as any[];
-      const ids = resources.map((r) => r.resourceId).filter((id): id is number => id != null);
-      setCheckedKeys(ids);
-
+      const resources = roleResourcesQuery.data as Array<{
+        id?: number;
+        resourceId?: number;
+        actions?: string[];
+        actionsJson?: string | null;
+      }>;
+      const ids = new Set<number>();
       const configs: Record<number, string[]> = {};
+
       resources.forEach((r) => {
+        const resourceId = r.id ?? r.resourceId;
+        if (resourceId == null) return;
+
+        ids.add(resourceId);
+
+        if (Array.isArray(r.actions)) {
+          configs[resourceId] = r.actions;
+          return;
+        }
+
         if (r.actionsJson) {
           try {
             const parsedActions = JSON.parse(r.actionsJson);
-            configs[r.resourceId] = Array.isArray(parsedActions) ? parsedActions : parsedActions.actions || [];
+            configs[resourceId] = Array.isArray(parsedActions) ? parsedActions : parsedActions.actions || [];
           } catch {}
         }
       });
+
+      setCheckedKeys(Array.from(ids));
       setActionConfigs(configs);
     }
   }, [roleResourcesQuery.data]);
 
+  const selectedResources = useMemo(() => {
+    return checkedKeys
+      .map((key) => resourceMap.get(Number(key)))
+      .filter((r): r is SysResource => !!r)
+      .sort((a, b) => (a.orderNum ?? 0) - (b.orderNum ?? 0));
+  }, [checkedKeys, resourceMap]);
+
   // Tree 勾选变化
   const handleCheck = (checked: React.Key[] | { checked: React.Key[]; halfChecked: React.Key[] }) => {
     const keys = Array.isArray(checked) ? checked : checked.checked;
-    setCheckedKeys(keys);
+    const numericKeys = keys.map((key) => Number(key));
+    setCheckedKeys(numericKeys);
 
     // 移除未勾选资源的操作配置
-    const keySet = new Set(keys.map(Number));
+    const keySet = new Set(numericKeys);
     setActionConfigs((prev) => {
       const newConfigs: Record<number, string[]> = {};
       Object.keys(prev).forEach((key) => {
@@ -153,6 +299,57 @@ const RolePermissionConfig: React.FC = () => {
       [resourceId]: actions,
     }));
   }, []);
+
+  const applyBulkActionsToSelected = useCallback(() => {
+    if (checkedKeys.length === 0) {
+      message.warning('请先选择资源');
+      return;
+    }
+
+    setActionConfigs((prev) => {
+      const next = { ...prev };
+      checkedKeys.forEach((key) => {
+        next[Number(key)] = bulkActions;
+      });
+      return next;
+    });
+    message.success(`已将 ${bulkActions.length} 个操作应用到 ${checkedKeys.length} 项资源`);
+  }, [checkedKeys, bulkActions]);
+
+  const clearActionsForSelected = useCallback(() => {
+    if (checkedKeys.length === 0) {
+      message.warning('请先选择资源');
+      return;
+    }
+
+    setActionConfigs((prev) => {
+      const next = { ...prev };
+      checkedKeys.forEach((key) => {
+        delete next[Number(key)];
+      });
+      return next;
+    });
+    message.success(`已清空 ${checkedKeys.length} 项资源的操作配置`);
+  }, [checkedKeys]);
+
+  const handleSelectAllVisible = () => {
+    const visibleIds = filteredResources.map((r) => r.id);
+    const merged = new Set<number>([...checkedKeys.map((k) => Number(k)), ...visibleIds]);
+    setCheckedKeys(Array.from(merged));
+  };
+
+  const handleClearSelected = () => {
+    setCheckedKeys([]);
+    setActionConfigs({});
+  };
+
+  const handleExpandAll = () => {
+    setExpandedKeys(allTreeKeys);
+  };
+
+  const handleCollapseAll = () => {
+    setExpandedKeys([]);
+  };
 
   // 保存权限配置
   const handleSave = async () => {
@@ -283,97 +480,163 @@ const RolePermissionConfig: React.FC = () => {
           </Descriptions>
         </Card>
 
-        {/* 资源树 */}
-        <Card
-          title="资源选择"
-          extra={
-            <Space>
-              <Text type="secondary">已选 {checkedKeys.length} 项</Text>
-              <Button
-                icon={<ReloadOutlined />}
-                size="small"
-                onClick={() => roleResourcesQuery.refetch()}
-                loading={roleResourcesQuery.isFetching}
-              >
-                刷新
-              </Button>
-            </Space>
-          }
-        >
-          <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 16, maxHeight: 500, overflowY: 'auto' }}>
-            <Tree
-              checkable
-              defaultExpandAll
-              checkedKeys={checkedKeys}
-              onCheck={handleCheck}
-              treeData={treeData}
-              height={450}
-            />
-          </div>
-        </Card>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} lg={14}>
+            <Card
+              title="资源选择"
+              extra={(
+                <Space>
+                  <Text type="secondary">已选 {checkedKeys.length} 项</Text>
+                  <Button
+                    icon={<ReloadOutlined />}
+                    size="small"
+                    onClick={() => roleResourcesQuery.refetch()}
+                    loading={roleResourcesQuery.isFetching}
+                  >
+                    刷新
+                  </Button>
+                </Space>
+              )}
+            >
+              <Space wrap style={{ marginBottom: 12 }}>
+                <Input.Search
+                  allowClear
+                  placeholder="按名称 / 编码 / 路径搜索"
+                  style={{ width: 260 }}
+                  value={resourceKeyword}
+                  onChange={(e) => setResourceKeyword(e.target.value)}
+                />
+                <Select<ResourceTypeOption>
+                  value={resourceTypeFilter}
+                  style={{ width: 140 }}
+                  options={RESOURCE_TYPE_OPTIONS}
+                  onChange={setResourceTypeFilter}
+                />
+                <Checkbox
+                  checked={onlySelected}
+                  onChange={(e) => setOnlySelected(e.target.checked)}
+                >
+                  仅看已选
+                </Checkbox>
+                <Space size={4}>
+                  <Text type="secondary">仅叶子可勾选</Text>
+                  <Switch
+                    size="small"
+                    checked={leafOnlyCheckable}
+                    onChange={setLeafOnlyCheckable}
+                  />
+                </Space>
+                <Divider type="vertical" />
+                <Button size="small" onClick={handleSelectAllVisible} disabled={filteredResources.length === 0}>
+                  全选当前结果
+                </Button>
+                <Button size="small" onClick={handleClearSelected} disabled={checkedKeys.length === 0}>
+                  清空已选
+                </Button>
+                <Button size="small" onClick={handleExpandAll} disabled={treeData.length === 0}>
+                  展开全部
+                </Button>
+                <Button size="small" onClick={handleCollapseAll} disabled={treeData.length === 0}>
+                  折叠全部
+                </Button>
+              </Space>
+              <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 12, minHeight: 520 }}>
+                {treeData.length > 0 ? (
+                  <Tree
+                    checkable
+                    showLine
+                    checkedKeys={checkedKeys}
+                    expandedKeys={expandedKeys}
+                    onExpand={(keys) => setExpandedKeys(keys)}
+                    onCheck={handleCheck}
+                    treeData={treeData}
+                    height={500}
+                  />
+                ) : (
+                  <Empty description="没有匹配的资源，请调整筛选条件" />
+                )}
+              </div>
+            </Card>
+          </Col>
 
-        {/* 操作权限配置 */}
-        {checkedKeys.length > 0 && (
-          <Card title="操作权限配置">
-            <Alert
-              message="为选中的资源配置具体的操作权限"
-              description="可以为每个资源配置不同的操作权限，如：read（读取）、write（写入）、delete（删除）等"
-              type="info"
-              showIcon
-              style={{ marginBottom: 16 }}
-            />
-            <Collapse
-              accordion
-              items={checkedKeys.map((key) => {
-                const res = resourceMap.get(Number(key));
-                if (!res) return null;
-
-                const actions = actionConfigs[Number(key)] || [];
-
-                return {
-                  key: String(key),
-                  label: (
-                    <Space>
-                      <Text strong>{res.name}</Text>
-                      <Tag color={res.type === 'API' ? 'purple' : res.type === 'ACTION' ? 'orange' : 'blue'}>
-                        {res.type}
-                      </Tag>
-                      <Text type="secondary" style={{ fontSize: 11 }}>{res.code}</Text>
-                      {actions.length > 0 && (
-                        <Space size={4}>
-                          {actions.slice(0, 3).map((action) => (
-                            <Tag key={action} color="blue" style={{ margin: 0, fontSize: 11 }}>
-                              {action}
-                            </Tag>
-                          ))}
-                          {actions.length > 3 && (
-                            <Text type="secondary" style={{ fontSize: 11 }}>
-                              +{actions.length - 3}
-                            </Text>
-                          )}
-                        </Space>
-                      )}
-                    </Space>
-                  ),
-                  children: (
+          <Col xs={24} lg={10}>
+            <Card title="操作权限配置" extra={<Text type="secondary">资源 {selectedResources.length} 项</Text>}>
+              {selectedResources.length === 0 ? (
+                <Empty description="请先在左侧选择资源" />
+              ) : (
+                <>
+                  <Alert
+                    message="为选中的资源配置具体操作权限"
+                    description="未勾选任何操作表示默认权限范围，勾选后将按你配置的动作细分控制。"
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                  />
+                  <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 12 }}>
+                    <Text type="secondary">批量设置操作（应用到当前全部已选资源）</Text>
                     <Checkbox.Group
-                      options={[
-                        { label: '查看数据', value: 'read' },
-                        { label: '新增/编辑', value: 'write' },
-                        { label: '删除数据', value: 'delete' },
-                        { label: '全部权限', value: 'admin' },
-                        { label: '导出Excel', value: 'export' },
-                        { label: '导入数据', value: 'import' },
-                      ]}
-                      value={actions}
-                      onChange={(checkedValues) => updateActionConfig(Number(key), checkedValues as string[])}
+                      options={ACTION_OPTIONS}
+                      value={bulkActions}
+                      onChange={(values) => setBulkActions(values as string[])}
                     />
-                  ),
-                };
-              }).filter(Boolean)}
-            />
-          </Card>
-        )}
+                    <Space>
+                      <Button size="small" onClick={applyBulkActionsToSelected}>
+                        应用到全部已选
+                      </Button>
+                      <Button size="small" onClick={clearActionsForSelected}>
+                        清空全部动作
+                      </Button>
+                    </Space>
+                  </Space>
+                  <Space wrap style={{ marginBottom: 12 }}>
+                    {selectedResources.slice(0, 12).map((res) => (
+                      <Tag key={res.id} color={RESOURCE_TYPE_COLOR[res.type] || 'default'}>
+                        {res.name}
+                      </Tag>
+                    ))}
+                    {selectedResources.length > 12 && (
+                      <Text type="secondary">+{selectedResources.length - 12} 项</Text>
+                    )}
+                  </Space>
+                  <div style={{ maxHeight: 430, overflowY: 'auto', paddingRight: 4 }}>
+                    <Collapse
+                      accordion
+                      items={selectedResources.map((res) => {
+                        const actions = actionConfigs[res.id] || [];
+                        return {
+                          key: String(res.id),
+                          label: (
+                            <Space wrap>
+                              <Text strong>{res.name}</Text>
+                              <Tag color={RESOURCE_TYPE_COLOR[res.type] || 'default'}>
+                                {RESOURCE_TYPE_LABEL[res.type] || res.type}
+                              </Tag>
+                              <Text type="secondary" style={{ fontSize: 11 }}>
+                                {res.code}
+                              </Text>
+                              {actions.length > 0 && (
+                                <Text type="secondary" style={{ fontSize: 11 }}>
+                                  已配置 {actions.length} 个操作
+                                </Text>
+                              )}
+                            </Space>
+                          ),
+                          children: (
+                            <Checkbox.Group
+                              options={ACTION_OPTIONS}
+                              value={actions}
+                              onChange={(checkedValues) => updateActionConfig(res.id, checkedValues as string[])}
+                            />
+                          ),
+                        };
+                      })}
+                    />
+                  </div>
+                </>
+              )}
+            </Card>
+          </Col>
+        </Row>
 
         {/* 权限统计 */}
         <Card title="权限统计" size="small">

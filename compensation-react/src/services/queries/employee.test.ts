@@ -6,9 +6,14 @@ import api from '@services/api';
 import {
   useEmployeesQuery,
   useEmployeeQuery,
+  useMyEmployeeProfileQuery,
+  useMyEmployeeChangeRequestsQuery,
   useOfflineEmployeesQuery,
+  useResignedEmployeesQuery,
   useCreateEmployeeMutation,
   useUpdateEmployeeMutation,
+  useUpdateMyEmployeeContactMutation,
+  useSubmitMyEmployeeChangeRequestMutation,
   useUpdateEmployeeStatusMutation,
   useBindPlatformMutation,
   useBatchImportEmployeesMutation,
@@ -31,6 +36,12 @@ vi.mock('@services/api', () => ({
     patch: vi.fn(),
   },
   unwrap: vi.fn((data) => data),
+  getPagedRecords: vi.fn((response) => {
+    if (!response) return [];
+    if (Array.isArray(response.list) && response.list.length > 0) return response.list;
+    if (Array.isArray(response.records) && response.records.length > 0) return response.records;
+    return [];
+  }),
 }));
 
 const mockApi = api as any;
@@ -61,8 +72,8 @@ const mockEmployee: Employee = {
   email: 'zhangsan@company.com',
   department: '技术部',
   position: '高级开发工程师',
-  platformUserId: 'wx_user_123',
-  platformType: 'wechat',
+  provider: 'wechat',
+  subjectId: 'wx_user_123',
   offline: false,
   managerId: 2,
   hireDate: '2023-01-15',
@@ -109,7 +120,7 @@ describe('Employee Queries', () => {
             department: '技术部',
             status: 'active',
             isOffline: false,
-            platformType: 'wechat',
+            provider: 'wechat',
             managerId: 2,
             sortBy: 'createTime',
             order: 'desc',
@@ -129,7 +140,7 @@ describe('Employee Queries', () => {
           department: '技术部',
           status: 'active',
           isOffline: false,
-          platformType: 'wechat',
+          provider: 'wechat',
           managerId: 2,
           sortBy: 'createTime',
           order: 'desc',
@@ -137,6 +148,69 @@ describe('Employee Queries', () => {
       });
 
       expect(result.current.data).toEqual(mockResponse.data);
+    });
+
+    it('should normalize list pagination responses for employee matching scenarios', async () => {
+      const mockResponse = {
+        data: {
+          list: [mockEmployee],
+          total: 1,
+          pageNum: 1,
+          pageSize: 10,
+          totalPages: 1,
+        },
+      };
+
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(
+        () =>
+          useEmployeesQuery({
+            current: 1,
+            pageSize: 10,
+            keyword: '王欣浩',
+          }),
+        { wrapper: createWrapper() },
+      );
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(result.current.data).toMatchObject({
+        list: [mockEmployee],
+        records: [mockEmployee],
+        total: 1,
+        current: 1,
+        pageSize: 10,
+      });
+    });
+
+    it('should pass provider query when provided', async () => {
+      const mockResponse = { data: { records: [], total: 0, current: 1, size: 10 } };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      renderHook(
+        () =>
+          useEmployeesQuery({
+            current: 1,
+            pageSize: 10,
+            provider: 'feishu',
+          }),
+        { wrapper: createWrapper() },
+      );
+
+      await waitFor(() => {
+        expect(mockApi.get).toHaveBeenCalledWith('/employee', {
+          params: {
+            page: 1,
+            size: 10,
+            provider: 'feishu',
+            sortBy: 'createTime',
+            order: 'desc',
+          },
+        });
+      });
     });
 
     it('should filter out empty parameters', async () => {
@@ -197,10 +271,52 @@ describe('Employee Queries', () => {
     });
   });
 
+  describe('employee self-service queries', () => {
+    it('should fetch current employee profile', async () => {
+      const mockResponse = { data: mockEmployee };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(() => useMyEmployeeProfileQuery(), {
+        wrapper: createWrapper(),
+      });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(mockApi.get).toHaveBeenCalledWith('/employee/me');
+      expect(result.current.data).toEqual(mockEmployee);
+    });
+
+    it('should fetch my profile change requests', async () => {
+      const mockResponse = {
+        data: {
+          records: [{ id: 1, workflowName: '员工资料变更审批', status: 'pending' }],
+          total: 1,
+        },
+      };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(
+        () => useMyEmployeeChangeRequestsQuery({ current: 2, pageSize: 20 }),
+        { wrapper: createWrapper() },
+      );
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(mockApi.get).toHaveBeenCalledWith('/employee/me/change-requests', {
+        params: { page: 2, size: 20 },
+      });
+      expect(result.current.data).toEqual(mockResponse.data);
+    });
+  });
+
   describe('useOfflineEmployeesQuery', () => {
-    it('should fetch offline employees', async () => {
-      const offlineEmployees = [{ ...mockEmployee, offline: true }];
-      const mockResponse = { data: offlineEmployees };
+    it('should fetch outside-org employees', async () => {
+      const outsideOrgEmployees = [{ ...mockEmployee, offline: true }];
+      const mockResponse = { data: outsideOrgEmployees };
       mockApi.get.mockResolvedValue(mockResponse);
 
       const { result } = renderHook(() => useOfflineEmployeesQuery(), { wrapper: createWrapper() });
@@ -210,10 +326,10 @@ describe('Employee Queries', () => {
       });
 
       expect(mockApi.get).toHaveBeenCalledWith('/employee/offline', { params: {} });
-      expect(result.current.data).toEqual(offlineEmployees);
+      expect(result.current.data).toEqual(outsideOrgEmployees);
     });
 
-    it('should fetch offline employees for specific manager', async () => {
+    it('should fetch outside-org employees for specific manager', async () => {
       const mockResponse = { data: [] };
       mockApi.get.mockResolvedValue(mockResponse);
 
@@ -221,6 +337,36 @@ describe('Employee Queries', () => {
 
       await waitFor(() => {
         expect(mockApi.get).toHaveBeenCalledWith('/employee/offline', {
+          params: { managerId: 2 },
+        });
+      });
+    });
+  });
+
+  describe('useResignedEmployeesQuery', () => {
+    it('should fetch resigned employees', async () => {
+      const resignedEmployees = [{ ...mockEmployee, status: 'inactive' }];
+      const mockResponse = { data: resignedEmployees };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(() => useResignedEmployeesQuery(), { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(result.current.isSuccess).toBe(true);
+      });
+
+      expect(mockApi.get).toHaveBeenCalledWith('/employee/resigned', { params: {} });
+      expect(result.current.data).toEqual(resignedEmployees);
+    });
+
+    it('should fetch resigned employees for specific manager', async () => {
+      const mockResponse = { data: [] };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      renderHook(() => useResignedEmployeesQuery(2), { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(mockApi.get).toHaveBeenCalledWith('/employee/resigned', {
           params: { managerId: 2 },
         });
       });
@@ -303,6 +449,27 @@ describe('Employee Mutations', () => {
       expect(mockApi.post).toHaveBeenCalledWith('/employee', mockEmployeeFormData);
       expect(mutateResult).toEqual(mockResponse.data);
     });
+
+    it('should create employee with provider/subjectId fields', async () => {
+      const mockResponse = { data: { ...mockEmployee, id: 1000 } };
+      mockApi.post.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(() => useCreateEmployeeMutation(), {
+        wrapper: createWrapper(),
+      });
+
+      await result.current.mutateAsync({
+        ...mockEmployeeFormData,
+        provider: 'wechat',
+        subjectId: 'wx_new_001',
+      });
+
+      expect(mockApi.post).toHaveBeenCalledWith('/employee', {
+        ...mockEmployeeFormData,
+        provider: 'wechat',
+        subjectId: 'wx_new_001',
+      });
+    });
   });
 
   describe('useUpdateEmployeeMutation', () => {
@@ -318,6 +485,56 @@ describe('Employee Mutations', () => {
       const mutateResult = await result.current.mutateAsync(updateData);
 
       expect(mockApi.put).toHaveBeenCalledWith('/employee/1', mockEmployeeFormData);
+      expect(mutateResult).toEqual(mockResponse.data);
+    });
+  });
+
+  describe('employee self-service mutations', () => {
+    it('should update my contact directly', async () => {
+      const mockResponse = { data: { ...mockEmployee, email: 'new-email@company.com' } };
+      mockApi.patch.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(() => useUpdateMyEmployeeContactMutation(), {
+        wrapper: createWrapper(),
+      });
+
+      const mutateResult = await result.current.mutateAsync({
+        phone: '13900001234',
+        email: 'new-email@company.com',
+      });
+
+      expect(mockApi.patch).toHaveBeenCalledWith('/employee/me/contact', {
+        phone: '13900001234',
+        email: 'new-email@company.com',
+      });
+      expect(mutateResult).toEqual(mockResponse.data);
+    });
+
+    it('should submit my sensitive change request for approval', async () => {
+      const mockResponse = {
+        data: {
+          workflowId: 88,
+          businessType: 'EMPLOYEE_PROFILE_CHANGE',
+          status: 'pending',
+        },
+      };
+      mockApi.post.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(() => useSubmitMyEmployeeChangeRequestMutation(), {
+        wrapper: createWrapper(),
+      });
+
+      const mutateResult = await result.current.mutateAsync({
+        name: '新姓名',
+        idCard: '110101199001011234',
+        reason: '证件信息修正',
+      });
+
+      expect(mockApi.post).toHaveBeenCalledWith('/employee/me/change-requests', {
+        name: '新姓名',
+        idCard: '110101199001011234',
+        reason: '证件信息修正',
+      });
       expect(mutateResult).toEqual(mockResponse.data);
     });
   });
@@ -347,8 +564,8 @@ describe('Employee Mutations', () => {
     it('should bind platform user', async () => {
       const bindData = {
         id: 1,
-        platformUserId: 'wx_new_123',
-        platformType: 'wechat' as const,
+        subjectId: 'wx_new_123',
+        provider: 'wechat' as const,
       };
       const mockResponse = { data: { success: true } };
       mockApi.post.mockResolvedValue(mockResponse);
@@ -358,8 +575,8 @@ describe('Employee Mutations', () => {
       const mutateResult = await result.current.mutateAsync(bindData);
 
       expect(mockApi.post).toHaveBeenCalledWith('/employee/1/bind-platform', {
-        platformUserId: 'wx_new_123',
-        platformType: 'wechat',
+        provider: 'wechat',
+        subjectId: 'wx_new_123',
       });
       expect(mutateResult).toEqual({ success: true });
     });
@@ -381,6 +598,27 @@ describe('Employee Mutations', () => {
 
       expect(mockApi.post).toHaveBeenCalledWith('/employee/batch-import', batchData);
       expect(mutateResult).toEqual({ success: true });
+    });
+
+    it('should keep provider/subjectId fields for batch import', async () => {
+      const batchData = {
+        employees: [
+          {
+            ...mockEmployeeFormData,
+            provider: 'dingtalk',
+            subjectId: 'ding_001',
+          },
+        ],
+      };
+      mockApi.post.mockResolvedValue({ data: { success: true } });
+
+      const { result } = renderHook(() => useBatchImportEmployeesMutation(), {
+        wrapper: createWrapper(),
+      });
+
+      await result.current.mutateAsync(batchData as any);
+
+      expect(mockApi.post).toHaveBeenCalledWith('/employee/batch-import', batchData);
     });
   });
 });

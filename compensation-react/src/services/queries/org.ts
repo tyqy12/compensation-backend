@@ -8,10 +8,27 @@ import type {
   DepartmentNode,
   OrgFetchPreviewResponse,
   OrgImportRequest,
+  OrgImportRequestItem,
   OrgImportResponse,
   EmployeePreviewDto,
 } from '@types/api';
 import { qk } from '@types/api';
+
+type OrgImportIdentityPayload = OrgImportRequestItem & Record<string, unknown>;
+
+function toOrgImportPayload(request: OrgImportRequest): Record<string, unknown> {
+  const raw = request as Record<string, unknown> & {
+    items?: OrgImportIdentityPayload[];
+  };
+  const { items, ...rest } = raw;
+
+  return {
+    ...rest,
+    items: (items ?? []).map((item) => {
+      return { ...(item as Record<string, unknown>) };
+    }),
+  };
+}
 
 export function usePlatformsQuery() {
   return useQuery({
@@ -68,7 +85,7 @@ export function useOrgCheckQuery(platform: Platform) {
       const payload = unwrap<any>(data);
       const statusValue = String(payload?.status ?? payload?.code ?? payload?.result ?? 'UNKNOWN').toUpperCase();
       return {
-        platform: (payload?.platform ?? payload?.platformType ?? platform) as Platform,
+        platform: (payload?.provider ?? payload?.platform ?? platform) as Platform,
         status: statusValue,
         message: payload?.message ?? payload?.detail ?? payload?.reason ?? null,
         detail: payload?.detail ?? payload?.error ?? null,
@@ -95,7 +112,7 @@ export function useOrgHistoryQuery() {
 
         return {
           id: item?.id,
-          platformType: (item?.platformType ?? item?.platform ?? item?.type ?? 'wechat') as Platform,
+          provider: (item?.provider ?? item?.platform ?? item?.type ?? 'wechat') as Platform,
           success,
           message: item?.message ?? item?.detail ?? null,
           syncTime: item?.syncTime ?? item?.timestamp ?? item?.time ?? new Date().toISOString(),
@@ -127,13 +144,56 @@ export function useOrgHistoryQuery() {
 }
 
 export function useOrgDepartmentTreeQuery(platform: Platform | undefined) {
+  const normalizeDepartmentNodes = (nodes: any[] | undefined, currentPlatform: Platform): DepartmentNode[] => {
+    if (!Array.isArray(nodes) || nodes.length === 0) {
+      return [];
+    }
+    let autoId = 1;
+    const parseNode = (node: any): DepartmentNode => {
+      const rawId = Number(node?.id);
+      const fallbackId = autoId++;
+      const platformDeptId = String(node?.platformDeptId ?? node?.deptId ?? node?.id ?? `dept-${fallbackId}`);
+      const childrenRaw = Array.isArray(node?.children) ? node.children : [];
+      const children = childrenRaw.map(parseNode);
+      return {
+        id: Number.isFinite(rawId) ? rawId : fallbackId,
+        provider: (node?.provider ?? node?.platform ?? currentPlatform) as Platform,
+        platformDeptId,
+        parentPlatformDeptId: node?.parentPlatformDeptId ?? node?.parentDeptId ?? null,
+        name: String(node?.name ?? node?.deptName ?? platformDeptId),
+        children,
+      };
+    };
+    return nodes.map(parseNode);
+  };
+
   return useQuery({
     queryKey: platform ? qk.orgDepartments(platform) : ['org', 'departments', 'none'],
     queryFn: async () => {
-      const { data } = await api.get('/system/org/departments/tree', {
-        params: { platform },
-      });
-      return unwrap<DepartmentNode[]>(data);
+      if (!platform) {
+        return [];
+      }
+      const { data } = await api.get('/system/org/departments/tree', { params: { platform } });
+      const localPayload = unwrap<any>(data);
+      const localRoots = Array.isArray(localPayload)
+        ? localPayload
+        : Array.isArray(localPayload?.roots)
+          ? localPayload.roots
+          : [];
+      const normalizedLocal = normalizeDepartmentNodes(localRoots, platform);
+      if (normalizedLocal.length > 0) {
+        return normalizedLocal;
+      }
+
+      // 本地未落库部门树时，回退到实时平台拉取
+      const { data: remoteData } = await api.post('/system/org/fetch-tree', { platform }, { params: { platform } });
+      const remotePayload = unwrap<any>(remoteData);
+      const remoteRoots = Array.isArray(remotePayload?.roots)
+        ? remotePayload.roots
+        : Array.isArray(remotePayload)
+          ? remotePayload
+          : [];
+      return normalizeDepartmentNodes(remoteRoots, platform);
     },
     enabled: Boolean(platform),
   });
@@ -183,16 +243,16 @@ export function useOrgFetchPreviewMutation() {
         const employeeId = String(
           item?.employeeId ?? item?.empId ?? item?.code ?? item?.id ?? `emp-${index}`,
         );
-        const platformUserId = String(
-          item?.platformUserId ?? item?.userId ?? item?.openId ?? item?.id ?? employeeId,
+        const subjectId = String(
+          item?.subjectId ?? item?.userId ?? item?.openId ?? item?.id ?? employeeId,
         );
         const departmentValue = Array.isArray(item?.departments)
           ? item.departments.join(' / ')
           : item?.department ?? item?.deptName ?? undefined;
 
         return {
-          platformType: (item?.platformType ?? item?.platform ?? platform) as Platform,
-          platformUserId,
+          provider: (item?.provider ?? item?.platform ?? platform) as Platform,
+          subjectId,
           employeeId,
           name: item?.name ?? item?.realName ?? item?.username ?? '未命名',
           phone: item?.phone ?? item?.mobile ?? undefined,
@@ -205,14 +265,20 @@ export function useOrgFetchPreviewMutation() {
               : undefined,
           position: item?.position ?? item?.title ?? undefined,
           employmentType: (item?.employmentType ?? item?.employment ?? item?.type ?? 'full_time') as EmployeePreviewDto['employmentType'],
-          rowKey: `${platformUserId}-${index}`,
+          alreadyImported: Boolean(item?.alreadyImported ?? item?.imported ?? item?.exists),
+          existingEmployeeDbId: item?.existingEmployeeDbId ?? item?.existingId ?? item?.employeeDbId ?? undefined,
+          existingEmployeeNo: item?.existingEmployeeNo ?? item?.existingEmployeeId ?? undefined,
+          importAction: item?.importAction ?? (item?.alreadyImported ? 'UPDATE' : 'CREATE'),
+          rowKey: `${subjectId}-${index}`,
           raw: item,
         };
       });
 
       return {
-        platformType: (payload?.platformType ?? payload?.platform ?? platform) as Platform,
+        provider: (payload?.provider ?? payload?.platform ?? platform) as Platform,
         totalEmployees: payload?.totalEmployees ?? employees.length,
+        newEmployees: payload?.newEmployees ?? employees.filter((item) => !item.alreadyImported).length,
+        existingEmployees: payload?.existingEmployees ?? employees.filter((item) => item.alreadyImported).length,
         employees,
         raw: payload,
       } as OrgFetchPreviewResponse;
@@ -225,7 +291,8 @@ export function useOrgImportMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (request: OrgImportRequest) => {
-      const { data } = await api.post(`/system/org/import`, request);
+      const payload = toOrgImportPayload(request);
+      const { data } = await api.post(`/system/org/import`, payload);
       return unwrap<OrgImportResponse>(data);
     },
     onSuccess: () => {

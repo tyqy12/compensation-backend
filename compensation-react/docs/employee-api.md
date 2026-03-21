@@ -42,14 +42,14 @@ Creates a new employee record in the system.
   "idCard": "110101199001011234", // Optional: ID card (will be encrypted)
   "department": "技术部", // Optional: Department
   "position": "高级工程师", // Optional: Position
-  "platformUserId": "wx123456", // Optional: Platform user ID
-  "platformType": "wechat", // Optional: Platform type (wechat/dingtalk/feishu)
+  "subjectId": "wx123456", // Optional: Platform subject ID
+  "provider": "wechat", // Optional: Platform provider (wechat/dingtalk/feishu)
   "managerId": 100, // Optional: Manager's employee ID
   "hireDate": "2024-01-15", // Optional: Hire date (YYYY-MM-DD)
   "status": "active", // Optional: Employee status (default: active)
   "bankAccount": "6222021234567890", // Optional: Bank account (will be encrypted)
   "bankName": "中国银行", // Optional: Bank name
-  "offline": false // Optional: Offline employee flag (default: false)
+  "offline": false // Optional: Outside-org employee flag (default: false)
 }
 ```
 
@@ -67,8 +67,8 @@ Creates a new employee record in the system.
     "email": "zhangsan@company.com",
     "department": "技术部",
     "position": "高级工程师",
-    "platformUserId": "wx123456",
-    "platformType": "wechat",
+    "subjectId": "wx123456",
+    "provider": "wechat",
     "managerId": 100,
     "hireDate": "2024-01-15",
     "status": "active",
@@ -138,8 +138,8 @@ Retrieves a paginated list of employees with optional filtering and sorting.
 - `keyword` (string): Search keyword (matches name or employee ID)
 - `department` (string): Filter by department
 - `status` (string): Filter by status (active/inactive/suspended)
-- `isOffline` (boolean): Filter offline employees
-- `platformType` (string): Filter by platform type (wechat/dingtalk/feishu)
+- `isOffline` (boolean): Filter outside-org employees
+- `provider` (string): Filter by platform type (wechat/dingtalk/feishu)
 - `managerId` (Long): Filter by manager ID
 - `sortBy` (string): Sort field (default: createTime)
 - `order` (string): Sort order (asc/desc, default: desc)
@@ -175,9 +175,9 @@ GET /api/employee?page=1&size=20&keyword=张&department=技术部&status=active&
 }
 ```
 
-### Offline Employees List
+### Outside-Org Employees List
 
-Retrieves a list of offline employees (not in organization structure).
+Retrieves a list of outside-org employees (not in organization structure).
 
 **Endpoint**: `GET /api/employee/offline`
 
@@ -198,6 +198,36 @@ Retrieves a list of offline employees (not in organization structure).
       "name": "李四",
       "department": "外部顾问",
       "offline": true,
+      "managerId": 100
+    }
+  ]
+}
+```
+
+---
+
+### Resigned Employees List
+
+Retrieves a list of resigned employees (`status=inactive`).
+
+**Endpoint**: `GET /api/employee/resigned`
+
+**Query Parameters**:
+
+- `managerId` (Long, optional): Filter by specific manager
+
+**Response**:
+
+```json
+{
+  "code": 200,
+  "message": "Success",
+  "data": [
+    {
+      "id": 2,
+      "employeeId": "EMP888",
+      "name": "王五",
+      "status": "inactive",
       "managerId": 100
     }
   ]
@@ -254,8 +284,8 @@ Binds an employee to a platform user account (WeChat/DingTalk/Feishu).
 
 ```json
 {
-  "platformUserId": "wx123456", // Required: Platform user ID
-  "platformType": "wechat" // Required: wechat/dingtalk/feishu
+  "subjectId": "wx123456", // Required: Platform subject ID
+  "provider": "wechat" // Required: wechat/dingtalk/feishu
 }
 ```
 
@@ -382,9 +412,9 @@ interface Employee {
   encryptedIdCard: string; // ID card (SM4 + AES encrypted)
   department: string; // Department name
   position: string; // Job position
-  platformUserId: string; // Platform user ID
-  platformType: string; // Platform type (wechat/dingtalk/feishu)
-  offline: boolean; // Offline employee flag
+  subjectId: string; // Platform subject ID
+  provider: string; // Platform type (wechat/dingtalk/feishu)
+  offline: boolean; // Outside-org employee flag
   managerId: number; // Manager's employee ID
   hireDate: string; // Hire date (YYYY-MM-DD)
   status: string; // Employee status
@@ -501,7 +531,7 @@ interface Employee {
 ### Approval Workflows
 
 - Employees with platform bindings can participate in approval workflows
-- Offline employees require manager assignment for approval routing
+- Outside-org employees require manager assignment for approval routing
 
 ### Payment Processing
 

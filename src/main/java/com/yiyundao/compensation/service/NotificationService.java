@@ -197,22 +197,22 @@ public class NotificationService {
      * 平台通知失败后的回退通知
      */
     @Async
-    public void sendFallbackNotification(String platformType, String platformUserId, String message) {
-        log.warn("平台通知失败，启用回退通知: platform={}, userId={}, message={}", platformType, platformUserId, message);
+    public void sendFallbackNotification(String provider, String subjectId, String message) {
+        log.warn("平台通知失败，启用回退通知: provider={}, subjectId={}, message={}", provider, subjectId, message);
 
         try {
             notificationRouterService.sendNotificationToPlatformUser(
-                platformType,
-                platformUserId,
+                provider,
+                subjectId,
                 NotificationType.SYSTEM_ALERT,
                 "通知发送失败",
                 message,
                 "FALLBACK",
-                platformType + "_" + platformUserId
+                provider + "_" + subjectId
             );
 
         } catch (Exception e) {
-            log.error("发送回退通知异常: platform={}, userId={}", platformType, platformUserId, e);
+            log.error("发送回退通知异常: provider={}, subjectId={}", provider, subjectId, e);
         }
     }
 

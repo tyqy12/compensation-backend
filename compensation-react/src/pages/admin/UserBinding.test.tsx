@@ -46,19 +46,19 @@ beforeEach(() => {
     data: {
       records: [
         {
-          userId: 'u1',
+          id: 1,
           username: 'alice',
-          platformType: 'wechat',
-          platformUserId: 'wx_001',
+          provider: 'wechat',
+          subjectId: 'wx_001',
           bound: true,
           employeeId: 1001,
           employeeName: '张三',
         },
         {
-          userId: 'u2',
+          id: 2,
           username: 'bob',
-          platformType: null,
-          platformUserId: null,
+          provider: null,
+          subjectId: null,
           bound: false,
           employeeId: null,
           employeeName: null,
@@ -73,19 +73,19 @@ beforeEach(() => {
       data: {
         records: [
           {
-            userId: 'u1',
+            id: 1,
             username: 'alice',
-            platformType: 'wechat',
-            platformUserId: 'wx_001',
+            provider: 'wechat',
+            subjectId: 'wx_001',
             bound: true,
             employeeId: 1001,
             employeeName: '张三',
           },
           {
-            userId: 'u2',
+            id: 2,
             username: 'bob',
-            platformType: null,
-            platformUserId: null,
+            provider: null,
+            subjectId: null,
             bound: false,
             employeeId: null,
             employeeName: null,
@@ -142,9 +142,9 @@ describe('UserBindingPage', () => {
 
     await waitFor(() => {
       expect(bindMutation).toHaveBeenCalledWith({
-        userId: 'u2',
-        platformType: 'wechat',
-        platformUserId: 'wx_999',
+        id: 2,
+        provider: 'wechat',
+        subjectId: 'wx_999',
       });
     });
   });
@@ -166,7 +166,7 @@ describe('UserBindingPage', () => {
     fireEvent.click(confirmButton);
 
     await waitFor(() => {
-      expect(unbindMutation).toHaveBeenCalledWith('u1');
+      expect(unbindMutation).toHaveBeenCalledWith(1);
     });
   });
 
@@ -191,7 +191,7 @@ describe('UserBindingPage', () => {
     fireEvent.click(screen.getByText('确定'));
 
     await waitFor(() => {
-      expect(bindEmployeeMutation).toHaveBeenCalledWith({ userId: 'u1', employeeId: 2001 });
+      expect(bindEmployeeMutation).toHaveBeenCalledWith({ id: 1, employeeId: 2001 });
     });
   });
 });

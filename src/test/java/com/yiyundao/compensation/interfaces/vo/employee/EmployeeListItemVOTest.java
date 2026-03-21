@@ -11,30 +11,30 @@ class EmployeeListItemVOTest {
     @Test
     void shouldTranslateKnownPlatformCode() {
         Employee employee = new Employee();
-        employee.setPlatformType("wechat");
+        employee.setProvider("wechat");
 
         EmployeeListItemVO vo = EmployeeListItemVO.from(employee);
 
-        assertEquals("企业微信", vo.getPlatformTypeName());
+        assertEquals("企业微信", vo.getProviderName());
     }
 
     @Test
     void shouldFallbackToOriginalPlatformCodeWhenUnknown() {
         Employee employee = new Employee();
-        employee.setPlatformType("custom_platform");
+        employee.setProvider("custom_platform");
 
         EmployeeListItemVO vo = EmployeeListItemVO.from(employee);
 
-        assertEquals("custom_platform", vo.getPlatformTypeName());
+        assertEquals("custom_platform", vo.getProviderName());
     }
 
     @Test
     void shouldKeepNullWhenPlatformCodeIsNull() {
         Employee employee = new Employee();
-        employee.setPlatformType(null);
+        employee.setProvider(null);
 
         EmployeeListItemVO vo = EmployeeListItemVO.from(employee);
 
-        assertNull(vo.getPlatformTypeName());
+        assertNull(vo.getProviderName());
     }
 }

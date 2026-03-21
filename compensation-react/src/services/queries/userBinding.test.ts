@@ -15,6 +15,7 @@ vi.mock('@services/api', () => ({
   default: {
     get: vi.fn(),
     post: vi.fn(),
+    put: vi.fn(),
     delete: vi.fn(),
   },
   unwrap: vi.fn((data) => data),
@@ -43,9 +44,9 @@ const mockUserBinding = {
   id: 1,
   employeeId: 'EMP001',
   employeeName: '张三',
-  platform: 'wecom',
-  platformUserId: 'wx_user_123',
-  platformUserName: '张三(技术部)',
+  provider: 'wechat',
+  subjectId: 'wx_user_123',
+  subjectName: '张三(技术部)',
   bindTime: '2024-01-15T10:00:00Z',
   bindStatus: 'active',
   lastSyncTime: '2024-01-15T12:00:00Z',
@@ -54,7 +55,7 @@ const mockUserBinding = {
 const mockBindingParams = {
   current: 1,
   pageSize: 10,
-  platform: 'wecom',
+  provider: 'wechat',
   bindStatus: 'active',
   keyword: '张三',
 };
@@ -89,7 +90,7 @@ describe('UserBinding Queries', () => {
         params: {
           page: 1,
           size: 10,
-          platform: 'wecom',
+          platform: 'wechat',
           bindStatus: 'active',
           keyword: '张三',
         },
@@ -107,7 +108,7 @@ describe('UserBinding Queries', () => {
           useUserBindingsQuery({
             current: 1,
             pageSize: 10,
-            platform: undefined,
+            provider: undefined,
             bindStatus: undefined,
             keyword: '',
           }),
@@ -150,8 +151,8 @@ describe('UserBinding Mutations', () => {
     it('should bind user successfully', async () => {
       const bindData = {
         employeeId: 'EMP001',
-        platform: 'wecom',
-        platformUserId: 'wx_user_456',
+        provider: 'wechat',
+        subjectId: 'wx_user_456',
       };
       const mockResponse = { data: { success: true, message: '绑定成功' } };
       mockApi.post.mockResolvedValue(mockResponse);
@@ -160,15 +161,19 @@ describe('UserBinding Mutations', () => {
 
       const mutateResult = await result.current.mutateAsync(bindData);
 
-      expect(mockApi.post).toHaveBeenCalledWith('/user-binding', bindData);
+      expect(mockApi.post).toHaveBeenCalledWith('/user-binding', {
+        employeeId: 'EMP001',
+        provider: 'wechat',
+        subjectId: 'wx_user_456',
+      });
       expect(mutateResult).toEqual(mockResponse.data);
     });
 
     it('should handle bind failure', async () => {
       const bindData = {
         employeeId: 'EMP001',
-        platform: 'wecom',
-        platformUserId: 'invalid_user',
+        provider: 'wechat',
+        subjectId: 'invalid_user',
       };
       const mockError = new Error('User not found on platform');
       mockApi.post.mockRejectedValue(mockError);
@@ -178,6 +183,26 @@ describe('UserBinding Mutations', () => {
       await expect(result.current.mutateAsync(bindData)).rejects.toThrow(
         'User not found on platform',
       );
+    });
+
+    it('should send provider/subjectId in admin mode', async () => {
+      const mockResponse = { data: null };
+      mockApi.put.mockResolvedValue(mockResponse);
+      mockApi.post.mockResolvedValue(mockResponse);
+
+      const { result } = renderHook(() => useBindUserMutation(), { wrapper: createWrapper() });
+
+      await result.current.mutateAsync({
+        id: 1001,
+        provider: 'wechat',
+        subjectId: 'wx_user_admin_001',
+      });
+
+      expect(mockApi.put).toHaveBeenCalledWith('/admin/users/1001/platform-binding', {
+        provider: 'wechat',
+        subjectId: 'wx_user_admin_001',
+      });
+      expect(mockApi.post).not.toHaveBeenCalled();
     });
 
     it('should invalidate bindings query on success', async () => {
@@ -195,8 +220,8 @@ describe('UserBinding Mutations', () => {
 
       await result.current.mutateAsync({
         employeeId: 'EMP001',
-        platform: 'wecom',
-        platformUserId: 'wx_user_456',
+        provider: 'wechat',
+        subjectId: 'wx_user_456',
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['userBindings'] });
@@ -247,10 +272,10 @@ describe('UserBinding Mutations', () => {
   describe('useBatchBindUsersMutation', () => {
     it('should batch bind users successfully', async () => {
       const batchData = {
-        platform: 'wecom',
+        provider: 'wechat',
         bindings: [
-          { employeeId: 'EMP001', platformUserId: 'wx_user_001' },
-          { employeeId: 'EMP002', platformUserId: 'wx_user_002' },
+          { employeeId: 'EMP001', subjectId: 'wx_user_001' },
+          { employeeId: 'EMP002', subjectId: 'wx_user_002' },
         ],
       };
       const mockResponse = {
@@ -273,16 +298,22 @@ describe('UserBinding Mutations', () => {
 
       const mutateResult = await result.current.mutateAsync(batchData);
 
-      expect(mockApi.post).toHaveBeenCalledWith('/user-binding/batch', batchData);
+      expect(mockApi.post).toHaveBeenCalledWith('/user-binding/batch', {
+        provider: 'wechat',
+        bindings: [
+          { employeeId: 'EMP001', subjectId: 'wx_user_001' },
+          { employeeId: 'EMP002', subjectId: 'wx_user_002' },
+        ],
+      });
       expect(mutateResult).toEqual(mockResponse.data);
     });
 
     it('should handle partial batch bind success', async () => {
       const batchData = {
-        platform: 'wecom',
+        provider: 'wechat',
         bindings: [
-          { employeeId: 'EMP001', platformUserId: 'wx_user_001' },
-          { employeeId: 'EMP002', platformUserId: 'invalid_user' },
+          { employeeId: 'EMP001', subjectId: 'wx_user_001' },
+          { employeeId: 'EMP002', subjectId: 'invalid_user' },
         ],
       };
       const mockResponse = {
@@ -311,8 +342,8 @@ describe('UserBinding Mutations', () => {
 
     it('should handle batch bind network error', async () => {
       const batchData = {
-        platform: 'wecom',
-        bindings: [{ employeeId: 'EMP001', platformUserId: 'wx_user_001' }],
+        provider: 'wechat',
+        bindings: [{ employeeId: 'EMP001', subjectId: 'wx_user_001' }],
       };
       const mockError = new Error('Network timeout');
       mockApi.post.mockRejectedValue(mockError);
@@ -338,8 +369,8 @@ describe('UserBinding Mutations', () => {
       });
 
       await result.current.mutateAsync({
-        platform: 'wecom',
-        bindings: [{ employeeId: 'EMP001', platformUserId: 'wx_user_001' }],
+        provider: 'wechat',
+        bindings: [{ employeeId: 'EMP001', subjectId: 'wx_user_001' }],
       });
 
       expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['userBindings'] });
@@ -358,12 +389,14 @@ describe('UserBinding Mutations', () => {
 
       const bindPromise = result.current.mutateAsync({
         employeeId: 'EMP001',
-        platform: 'wecom',
-        platformUserId: 'wx_user_456',
+        provider: 'wechat',
+        subjectId: 'wx_user_456',
       });
 
       // Should be loading
-      expect(result.current.isPending).toBe(true);
+      await waitFor(() => {
+        expect(result.current.isPending).toBe(true);
+      });
 
       // Resolve the promise
       resolvePromise!({ data: { success: true } });

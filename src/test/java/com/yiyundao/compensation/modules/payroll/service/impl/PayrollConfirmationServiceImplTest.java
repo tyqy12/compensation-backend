@@ -13,7 +13,9 @@ import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollConfirmationAggregateService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollProcessManager;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
@@ -33,6 +35,8 @@ class PayrollConfirmationServiceImplTest {
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         EmployeeService employeeService = Mockito.mock(EmployeeService.class);
         UserRoleService userRoleService = Mockito.mock(UserRoleService.class);
+        PayrollConfirmationAggregateService confirmationAggregateService = Mockito.mock(PayrollConfirmationAggregateService.class);
+        PayrollProcessManager payrollProcessManager = Mockito.mock(PayrollProcessManager.class);
 
         PayrollConfirmationServiceImpl service = new PayrollConfirmationServiceImpl(
                 lineService,
@@ -41,11 +45,14 @@ class PayrollConfirmationServiceImplTest {
                 sysUserService,
                 employeeService,
                 userRoleService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                confirmationAggregateService,
+                payrollProcessManager
         );
 
         PayrollBatch batch = new PayrollBatch();
         batch.setId(100L);
+        batch.setBatchRevision(1);
         batch.setConfirmationRequired(Boolean.TRUE);
         batch.setStatus(PayrollBatchStatus.CONFIRMING);
 
@@ -64,6 +71,8 @@ class PayrollConfirmationServiceImplTest {
         Assertions.assertEquals(PayrollBatchStatus.CONFIRMED, batch.getStatus());
         Assertions.assertNotNull(batch.getConfirmationCompletedTime());
         Mockito.verify(batchService).updateById(batch);
+        Mockito.verify(confirmationAggregateService).syncFromLegacyBatch(100L, 1);
+        Mockito.verify(payrollProcessManager).onConfirmationCompleted(100L, 1);
     }
 
     @Test
@@ -74,6 +83,8 @@ class PayrollConfirmationServiceImplTest {
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         EmployeeService employeeService = Mockito.mock(EmployeeService.class);
         UserRoleService userRoleService = Mockito.mock(UserRoleService.class);
+        PayrollConfirmationAggregateService confirmationAggregateService = Mockito.mock(PayrollConfirmationAggregateService.class);
+        PayrollProcessManager payrollProcessManager = Mockito.mock(PayrollProcessManager.class);
 
         PayrollConfirmationServiceImpl service = Mockito.spy(new PayrollConfirmationServiceImpl(
                 lineService,
@@ -82,7 +93,9 @@ class PayrollConfirmationServiceImplTest {
                 sysUserService,
                 employeeService,
                 userRoleService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                confirmationAggregateService,
+                payrollProcessManager
         ));
         Mockito.doNothing().when(service).refreshBatchConfirmationStatus(200L);
 
@@ -129,6 +142,8 @@ class PayrollConfirmationServiceImplTest {
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         EmployeeService employeeService = Mockito.mock(EmployeeService.class);
         UserRoleService userRoleService = Mockito.mock(UserRoleService.class);
+        PayrollConfirmationAggregateService confirmationAggregateService = Mockito.mock(PayrollConfirmationAggregateService.class);
+        PayrollProcessManager payrollProcessManager = Mockito.mock(PayrollProcessManager.class);
 
         PayrollConfirmationServiceImpl service = Mockito.spy(new PayrollConfirmationServiceImpl(
                 lineService,
@@ -137,7 +152,9 @@ class PayrollConfirmationServiceImplTest {
                 sysUserService,
                 employeeService,
                 userRoleService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                confirmationAggregateService,
+                payrollProcessManager
         ));
 
         PayrollLine line = new PayrollLine();
@@ -170,6 +187,8 @@ class PayrollConfirmationServiceImplTest {
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         EmployeeService employeeService = Mockito.mock(EmployeeService.class);
         UserRoleService userRoleService = Mockito.mock(UserRoleService.class);
+        PayrollConfirmationAggregateService confirmationAggregateService = Mockito.mock(PayrollConfirmationAggregateService.class);
+        PayrollProcessManager payrollProcessManager = Mockito.mock(PayrollProcessManager.class);
 
         PayrollConfirmationServiceImpl service = Mockito.spy(new PayrollConfirmationServiceImpl(
                 lineService,
@@ -178,7 +197,9 @@ class PayrollConfirmationServiceImplTest {
                 sysUserService,
                 employeeService,
                 userRoleService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                confirmationAggregateService,
+                payrollProcessManager
         ));
 
         PayrollLine line = new PayrollLine();

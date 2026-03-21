@@ -4,7 +4,7 @@ Date: 2025-09-27 (Initial)
 Date: 2026-01-11 (Updated)
 
 ## Summary (Initial - 2025-09-27)
-- Completed platform adapters with real API mappings for WeCom/DingTalk/Feishu and employee write logic (create/update with platformUserId → employeeId fallback).
+- Completed platform adapters with real API mappings for WeCom/DingTalk/Feishu and employee write logic (create/update with subjectId → employeeId fallback).
 - Introduced Integration Config management (encrypted DB storage, admin‑only, masked reads, connectivity test).
 - Implemented aggregated authentication: password login + WeCom/DingTalk/Feishu OAuth (first‑time unbound users are rejected by default).
 - Added token management and protections: refresh whitelist + rotation, access blacklist on logout, OAuth state storage/validation, login rate limiting.

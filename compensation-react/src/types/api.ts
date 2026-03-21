@@ -68,7 +68,7 @@ export function getPagedPageSize<T>(response: PagedResponse<T> | undefined): num
 // 部门树
 export interface DepartmentNode {
   id: number;
-  platformType: Platform;
+  provider: Platform;
   platformDeptId: string;
   parentPlatformDeptId?: string | null;
   name: string;
@@ -287,7 +287,7 @@ export interface OrgCheckResult {
 
 export interface OrgSyncHistoryItem {
   id?: string | number;
-  platformType: Platform | string;
+  provider?: Platform | string;
   success: boolean;
   message?: string | null;
   syncTime: string;
@@ -302,8 +302,8 @@ export interface OrgSyncHistoryItem {
 
 // 新增：手动同步相关类型
 export interface EmployeePreviewDto {
-  platformType: Platform | string;
-  platformUserId: string;
+  provider?: Platform | string;
+  subjectId?: string;
   employeeId: string;
   name: string;
   phone?: string;
@@ -312,13 +312,19 @@ export interface EmployeePreviewDto {
   departments?: string[];
   position?: string;
   employmentType: 'full_time' | 'part_time';
+  alreadyImported?: boolean;
+  existingEmployeeDbId?: number;
+  existingEmployeeNo?: string;
+  importAction?: 'CREATE' | 'UPDATE' | string;
   rowKey?: string;
   raw?: Record<string, unknown>;
 }
 
 export interface OrgFetchPreviewResponse {
-  platformType: Platform | string;
+  provider?: Platform | string;
   totalEmployees: number;
+  newEmployees?: number;
+  existingEmployees?: number;
   employees: EmployeePreviewDto[];
   raw?: Record<string, unknown>;
 }
@@ -331,19 +337,26 @@ export interface OrgImportRequestItem {
   department?: string;
   position?: string;
   employmentType: 'full_time' | 'part_time';
-  platformUserId: string;
-  platformType: Platform | string;
+  provider?: Platform | string;
+  subjectId?: string;
   username?: string; // 偏好用户名
 }
 
 export interface OrgImportRequest {
-  platformType: Platform | string;
+  provider?: Platform | string;
+  importMode?: 'new_only' | 'upsert' | string;
   items: OrgImportRequestItem[];
   metadata?: Record<string, unknown>;
 }
 
 export interface OrgImportResponse {
   success: number;
+  created?: number;
+  updated?: number;
+  skipped?: number;
+  importMode?: string;
+  upsertMode?: boolean;
+  skippedItems?: string[];
   failed: number;
   errors: string[];
 }
@@ -380,8 +393,8 @@ export interface PaymentRecord {
 export interface UserBindingItem {
   id: number;
   username: string;
-  platformType: Platform | null;
-  platformUserId?: string | null;
+  provider?: Platform | null;
+  subjectId?: string | null;
   email?: string | null;
   phone?: string | null;
   bound: boolean;
@@ -567,6 +580,18 @@ export const qk = {
   payrollConfirmationSummary: (batchId: string | number) => ['payroll', 'confirmations', 'summary', batchId] as const,
   payrollPendingConfirmations: (params: Record<string, unknown>) =>
     ['payroll', 'confirmations', 'pending', params] as const,
+  payrollDistributions: (params: Record<string, unknown>) =>
+    ['payroll', 'distributions', params] as const,
+  payrollDistributionDetail: (distributionId: string | number) =>
+    ['payroll', 'distributions', distributionId] as const,
+  payrollDistributionItems: (distributionId: string | number) =>
+    ['payroll', 'distributions', distributionId, 'items'] as const,
+  payrollDistributionReconciliation: (distributionId: string | number) =>
+    ['payroll', 'distributions', distributionId, 'reconciliation'] as const,
+  payrollReconciliations: (params: Record<string, unknown>) =>
+    ['payroll', 'reconciliations', params] as const,
+  payrollReconciliationDetail: (taskId: string | number) =>
+    ['payroll', 'reconciliations', taskId] as const,
   ptBatches: (params: Record<string, unknown>) => ['pt', 'payroll', 'batches', params] as const,
   ptLines: (batchId: string | number, params: Record<string, unknown>) =>
     ['pt', 'payroll', 'batches', batchId, 'lines', params] as const,

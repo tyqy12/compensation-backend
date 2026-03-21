@@ -5,7 +5,9 @@ import com.yiyundao.compensation.infrastructure.dao.SysRoleMapper;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
+import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.modules.user.service.UserBindingService;
 import lombok.RequiredArgsConstructor;
@@ -26,34 +28,40 @@ public class UserBindingServiceImpl implements UserBindingService {
     private final EmployeeService employeeService;
     private final UserRoleService userRoleService;
     private final SysRoleMapper roleMapper;
+    private final ExternalIdentityService externalIdentityService;
     private final PasswordEncoder passwordEncoder;
     private final ObjectProvider<com.yiyundao.compensation.modules.approval.service.ApprovalEngine> approvalEngineProvider;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Override
     @Transactional
-    public void bindPlatform(Long userId, String platformType, String platformUserId) {
+    public void bindPlatform(Long userId, String provider, String subjectId) {
         SysUser user = sysUserService.getById(userId);
         if (user == null) throw new IllegalArgumentException("用户不存在");
-        if (!StringUtils.hasText(platformType) || !StringUtils.hasText(platformUserId)) {
+        if (!StringUtils.hasText(provider) || !StringUtils.hasText(subjectId)) {
             throw new IllegalArgumentException("平台类型与平台用户ID不能为空");
         }
-        String pt = normalize(platformType);
-        if (pt == null) throw new IllegalArgumentException("不支持的平台类型");
+        String normalizedProvider = normalize(provider);
+        if (normalizedProvider == null) throw new IllegalArgumentException("不支持的平台类型");
+        String normalizedSubjectId = subjectId.trim();
 
-        // 1) 冲突：同一平台的该platformUserId不可重复绑定用户
-        SysUser other = sysUserService.getOne(new LambdaQueryWrapper<SysUser>()
-                .eq(SysUser::getPlatformType, pt)
-                .eq(SysUser::getPlatformUserId, platformUserId)
-                .ne(SysUser::getId, userId)
-                .last("limit 1"));
+        // 1) 冲突：同一平台的该subjectId不可重复绑定用户（基于 external_identity）
+        Long occupiedUserId = externalIdentityService.findBoundUserId(
+                normalizedProvider,
+                ExternalIdentityService.DEFAULT_TENANT_KEY,
+                ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
+                normalizedSubjectId
+        );
+        SysUser other = occupiedUserId != null && !occupiedUserId.equals(userId)
+                ? sysUserService.getById(occupiedUserId)
+                : null;
         if (other != null) {
             Long initiator = currentUserIdOrAdmin();
             java.util.Map<String, Object> data = new java.util.HashMap<>();
             data.put("userId", userId);
             data.put("employeeId", user.getEmployeeId());
-            data.put("proposedPlatformType", pt);
-            data.put("proposedPlatformUserId", platformUserId);
+            data.put("proposedProvider", normalizedProvider);
+            data.put("proposedSubjectId", normalizedSubjectId);
             data.put("snapshotUser", toJsonSafe(user));
             if (user.getEmployeeId() != null) {
                 Employee e0 = employeeService.getById(user.getEmployeeId());
@@ -70,10 +78,7 @@ public class UserBindingServiceImpl implements UserBindingService {
         }
 
         // 2) 若存在对应员工（按平台账号匹配），建立关联
-        Employee emp = employeeService.getOne(new LambdaQueryWrapper<Employee>()
-                .eq(Employee::getPlatformType, pt)
-                .eq(Employee::getPlatformUserId, platformUserId)
-                .last("limit 1"));
+        Employee emp = employeeService.getByProviderAndSubjectId(normalizedProvider, normalizedSubjectId);
         if (emp != null) {
             // 冲突：该员工是否已绑定其他用户
             SysUser bound = sysUserService.getOne(new LambdaQueryWrapper<SysUser>()
@@ -85,8 +90,8 @@ public class UserBindingServiceImpl implements UserBindingService {
                 java.util.Map<String, Object> data = new java.util.HashMap<>();
                 data.put("userId", userId);
                 data.put("employeeId", emp.getId());
-                data.put("proposedPlatformType", pt);
-                data.put("proposedPlatformUserId", platformUserId);
+                data.put("proposedProvider", normalizedProvider);
+                data.put("proposedSubjectId", normalizedSubjectId);
                 data.put("snapshotUser", toJsonSafe(user));
                 data.put("snapshotEmployee", toJsonSafe(emp));
                 Long wfId = approvalEngineProvider.getObject().startWorkflow(
@@ -99,24 +104,11 @@ public class UserBindingServiceImpl implements UserBindingService {
                 throw new IllegalStateException("员工关联冲突，已发起审批，workflowId=" + wfId);
             }
             user.setEmployeeId(emp.getId());
-            // 补齐员工平台信息（若为空）
-            if (!StringUtils.hasText(emp.getPlatformType())) emp.setPlatformType(pt);
-            if (!StringUtils.hasText(emp.getPlatformUserId())) emp.setPlatformUserId(platformUserId);
-            employeeService.updateById(emp);
-        } else if (user.getEmployeeId() != null) {
-            // 若用户已有关联员工，但员工未设置平台账号，则补齐
-            Employee e = employeeService.getById(user.getEmployeeId());
-            if (e != null) {
-                if (!StringUtils.hasText(e.getPlatformType())) e.setPlatformType(pt);
-                if (!StringUtils.hasText(e.getPlatformUserId())) e.setPlatformUserId(platformUserId);
-                employeeService.updateById(e);
-            }
         }
 
-        // 3) 更新用户平台绑定
-        user.setPlatformType(pt);
-        user.setPlatformUserId(platformUserId);
+        // 3) 更新用户绑定关系并同步 external_identity
         sysUserService.updateById(user);
+        syncIdentity(user, normalizedProvider, normalizedSubjectId, "manual");
     }
 
     @Override
@@ -135,18 +127,26 @@ public class UserBindingServiceImpl implements UserBindingService {
         if (bound != null) throw new IllegalStateException("该员工已绑定其他用户");
 
         user.setEmployeeId(employeeId);
-
-        // 双向补齐平台账号（谁有就用谁的）
-        if (StringUtils.hasText(user.getPlatformType()) && StringUtils.hasText(user.getPlatformUserId())) {
-            if (!StringUtils.hasText(emp.getPlatformType())) emp.setPlatformType(user.getPlatformType());
-            if (!StringUtils.hasText(emp.getPlatformUserId())) emp.setPlatformUserId(user.getPlatformUserId());
-            employeeService.updateById(emp);
-        } else if (StringUtils.hasText(emp.getPlatformType()) && StringUtils.hasText(emp.getPlatformUserId())) {
-            user.setPlatformType(emp.getPlatformType());
-            user.setPlatformUserId(emp.getPlatformUserId());
-        }
-
         sysUserService.updateById(user);
+
+        ExternalIdentity identity = externalIdentityService.findPrimaryByUserId(userId);
+        if (identity == null) {
+            identity = externalIdentityService.findPrimaryByEmployeeId(employeeId);
+        }
+        if (identity != null && StringUtils.hasText(identity.getSubjectId())) {
+            externalIdentityService.upsertPlatformIdentity(
+                    identity.getProvider(),
+                    identity.getTenantKey(),
+                    identity.getSubjectType(),
+                    identity.getSubjectId(),
+                    employeeId,
+                    userId,
+                    "manual",
+                    Boolean.TRUE.equals(identity.getPrimaryFlag())
+            );
+        } else if (StringUtils.hasText(emp.getProvider()) && StringUtils.hasText(emp.getSubjectId())) {
+            syncIdentity(user, emp.getProvider(), emp.getSubjectId(), "manual");
+        }
     }
 
     @Override
@@ -154,24 +154,22 @@ public class UserBindingServiceImpl implements UserBindingService {
     public void unbindPlatform(Long userId, boolean alsoUnlinkEmployee) {
         SysUser user = sysUserService.getById(userId);
         if (user == null) return;
-        String pt = user.getPlatformType();
-        String puid = user.getPlatformUserId();
-        user.setPlatformType(null);
-        user.setPlatformUserId(null);
-        sysUserService.updateById(user);
-
-        if (alsoUnlinkEmployee && user.getEmployeeId() != null) {
-            Employee emp = employeeService.getById(user.getEmployeeId());
-            if (emp != null && eq(pt, emp.getPlatformType()) && eq(puid, emp.getPlatformUserId())) {
-                emp.setPlatformType(null);
-                emp.setPlatformUserId(null);
-                employeeService.updateById(emp);
-            }
+        Long linkedEmployeeId = user.getEmployeeId();
+        ExternalIdentity identity = externalIdentityService.findPrimaryByUserId(userId);
+        if (identity == null && linkedEmployeeId != null) {
+            identity = externalIdentityService.findPrimaryByEmployeeId(linkedEmployeeId);
         }
-    }
-
-    private static boolean eq(String a, String b) {
-        return a == null ? b == null : a.equals(b);
+        if (identity != null && StringUtils.hasText(identity.getSubjectId())) {
+            externalIdentityService.deactivatePlatformIdentity(
+                    identity.getProvider(),
+                    identity.getTenantKey(),
+                    identity.getSubjectType(),
+                    identity.getSubjectId(),
+                    linkedEmployeeId,
+                    userId,
+                    "manual"
+            );
+        }
     }
 
     private String normalize(String platform) {
@@ -205,16 +203,25 @@ public class UserBindingServiceImpl implements UserBindingService {
     @Transactional
     public void ensureUserForEmployee(Employee employee, String preferredUsername) {
         if (employee == null) return;
-        // 若已有绑定用户，确保平台字段一致
+        ExternalIdentity employeeIdentity = employee.getId() != null
+                ? externalIdentityService.findPrimaryByEmployeeId(employee.getId())
+                : null;
+        String provider = StringUtils.hasText(employee.getProvider()) ? normalize(employee.getProvider()) : null;
+        String subjectId = StringUtils.hasText(employee.getSubjectId()) ? employee.getSubjectId().trim() : null;
+
         SysUser user = null;
         if (employee.getId() != null) {
             user = sysUserService.getOne(new LambdaQueryWrapper<SysUser>()
                     .eq(SysUser::getEmployeeId, employee.getId())
                     .last("limit 1"));
         }
-        if (user == null && StringUtils.hasText(employee.getPlatformType()) && StringUtils.hasText(employee.getPlatformUserId())) {
-            user = sysUserService.findByPlatform(employee.getPlatformType(), employee.getPlatformUserId());
+        if (user == null && employeeIdentity != null && employeeIdentity.getUserId() != null) {
+            user = sysUserService.getById(employeeIdentity.getUserId());
         }
+        if (user == null && StringUtils.hasText(provider) && StringUtils.hasText(subjectId)) {
+            user = sysUserService.findByPlatform(provider, subjectId);
+        }
+
         if (user == null) {
             // 创建账号
             user = new SysUser();
@@ -225,28 +232,33 @@ public class UserBindingServiceImpl implements UserBindingService {
             user.setEmail(employee.getEmail());
             user.setPhone(employee.getPhone());
             user.setEmployeeId(employee.getId());
-            user.setPlatformType(employee.getPlatformType());
-            user.setPlatformUserId(employee.getPlatformUserId());
             sysUserService.save(user);
 
             // 授予默认角色（使用 UserRoleService）
             grantDefaultUserRole(user.getId());
         } else {
-            // 回填关联与平台字段
+            // 回填关联关系
             boolean changed = false;
             if (employee.getId() != null && (user.getEmployeeId() == null || !user.getEmployeeId().equals(employee.getId()))) {
                 user.setEmployeeId(employee.getId());
                 changed = true;
             }
-            if (StringUtils.hasText(employee.getPlatformType()) && !StringUtils.hasText(user.getPlatformType())) {
-                user.setPlatformType(employee.getPlatformType());
-                changed = true;
-            }
-            if (StringUtils.hasText(employee.getPlatformUserId()) && !StringUtils.hasText(user.getPlatformUserId())) {
-                user.setPlatformUserId(employee.getPlatformUserId());
-                changed = true;
-            }
             if (changed) sysUserService.updateById(user);
+        }
+
+        if (employeeIdentity != null && StringUtils.hasText(employeeIdentity.getSubjectId())) {
+            externalIdentityService.upsertPlatformIdentity(
+                    employeeIdentity.getProvider(),
+                    employeeIdentity.getTenantKey(),
+                    employeeIdentity.getSubjectType(),
+                    employeeIdentity.getSubjectId(),
+                    employee.getId(),
+                    user.getId(),
+                    "sync",
+                    Boolean.TRUE.equals(employeeIdentity.getPrimaryFlag())
+            );
+        } else if (StringUtils.hasText(provider) && StringUtils.hasText(subjectId)) {
+            syncIdentity(user, provider, subjectId, "sync");
         }
     }
 
@@ -275,8 +287,15 @@ public class UserBindingServiceImpl implements UserBindingService {
         if (StringUtils.hasText(e.getEmployeeId())) return ensureUnique(e.getEmployeeId().toLowerCase());
         if (StringUtils.hasText(e.getPhone())) return ensureUnique(e.getPhone());
         if (StringUtils.hasText(e.getEmail())) return ensureUnique(e.getEmail().toLowerCase());
-        if (StringUtils.hasText(e.getPlatformUserId()))
-            return ensureUnique(((e.getPlatformType() != null ? e.getPlatformType() : "emp") + "_" + e.getPlatformUserId()).toLowerCase());
+        ExternalIdentity identity = e.getId() != null ? externalIdentityService.findPrimaryByEmployeeId(e.getId()) : null;
+        if (identity != null && StringUtils.hasText(identity.getSubjectId())) {
+            String provider = StringUtils.hasText(identity.getProvider()) ? identity.getProvider() : "emp";
+            return ensureUnique((provider + "_" + identity.getSubjectId()).toLowerCase());
+        }
+        if (StringUtils.hasText(e.getSubjectId())) {
+            String provider = StringUtils.hasText(e.getProvider()) ? e.getProvider() : "emp";
+            return ensureUnique((provider + "_" + e.getSubjectId()).toLowerCase());
+        }
         return ensureUnique(("emp_" + (e.getId() != null ? e.getId() : System.currentTimeMillis())).toLowerCase());
     }
 
@@ -312,6 +331,22 @@ public class UserBindingServiceImpl implements UserBindingService {
 
     private String toJsonSafe(Object o) {
         try { return objectMapper.writeValueAsString(o); } catch (Exception e) { return null; }
+    }
+
+    private void syncIdentity(SysUser user, String provider, String subjectId, String source) {
+        if (user == null || !StringUtils.hasText(provider) || !StringUtils.hasText(subjectId)) {
+            return;
+        }
+        externalIdentityService.upsertPlatformIdentity(
+                provider,
+                ExternalIdentityService.DEFAULT_TENANT_KEY,
+                ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
+                subjectId,
+                user.getEmployeeId(),
+                user.getId(),
+                source,
+                true
+        );
     }
 
     /**

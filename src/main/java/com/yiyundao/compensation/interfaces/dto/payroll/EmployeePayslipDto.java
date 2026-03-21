@@ -59,5 +59,9 @@ public class EmployeePayslipDto {
         private Long disputeWorkflowId;
         private List<PayrollPreviewDto.PayrollPreviewItemDto> items;
         private List<String> warnings;
+        private List<PayrollValidationIssueDto> issues;
+        private Integer blockingIssueCount;
+        private Integer reviewIssueCount;
+        private Boolean hasBlockingIssues;
     }
 }

@@ -95,8 +95,10 @@ public class PlatformOAuthService {
             WechatUserInfoResp info = webClient.get().uri(infoUrl).retrieve().bodyToMono(WechatUserInfoResp.class).block();
             if (info != null && info.getErrcode() == 0 && StringUtils.hasText(info.getUserid())) {
                 PlatformUser u = new PlatformUser();
-                u.setPlatform("wechat");
-                u.setPlatformUserId(info.getUserid());
+                u.setProvider("wechat");
+                u.setTenantKey(cfg.getCorpId());
+                u.setSubjectType("user_id");
+                u.setSubjectId(info.getUserid());
                 return u;
             }
         } catch (Exception e) {
@@ -114,10 +116,12 @@ public class PlatformOAuthService {
             DingOAuthTokenResp resp = webClient.post().uri(url).bodyValue(body).retrieve().bodyToMono(DingOAuthTokenResp.class).block();
             if (resp != null && resp.getAccessToken() != null) {
                 PlatformUser u = new PlatformUser();
-                u.setPlatform("dingtalk");
+                u.setProvider("dingtalk");
+                u.setTenantKey(cfg.getAppKey());
                 // 优先使用 openId 作为平台唯一标识
                 String pid = resp.getOpenId() != null ? resp.getOpenId() : resp.getUnionId();
-                u.setPlatformUserId(pid);
+                u.setSubjectType(resp.getOpenId() != null ? "open_id" : "union_id");
+                u.setSubjectId(pid);
                 return u;
             }
         } catch (Exception e) {
@@ -140,8 +144,10 @@ public class PlatformOAuthService {
                     .block();
             if (resp != null && resp.getCode() == 0 && resp.getData() != null && StringUtils.hasText(resp.getData().getUser_id())) {
                 PlatformUser u = new PlatformUser();
-                u.setPlatform("feishu");
-                u.setPlatformUserId(resp.getData().getUser_id());
+                u.setProvider("feishu");
+                u.setTenantKey(cfg.getAppId());
+                u.setSubjectType("user_id");
+                u.setSubjectId(resp.getData().getUser_id());
                 return u;
             }
         } catch (Exception e) {
@@ -152,9 +158,31 @@ public class PlatformOAuthService {
 
     @Data
     public static class PlatformUser {
-        private String platform;
-        private String platformUserId;
+        private String provider;
+        private String tenantKey;
+        private String subjectType;
+        private String subjectId;
         private String displayName;
+
+        @Deprecated
+        public String getPlatform() {
+            return provider;
+        }
+
+        @Deprecated
+        public void setPlatform(String platform) {
+            this.provider = platform;
+        }
+
+        @Deprecated
+        public String getPlatformUserId() {
+            return subjectId;
+        }
+
+        @Deprecated
+        public void setPlatformUserId(String platformUserId) {
+            this.subjectId = platformUserId;
+        }
     }
 
     @Data

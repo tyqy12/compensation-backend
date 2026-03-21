@@ -100,3 +100,8 @@ external-api:
   rate-limit:
     per-minute: ${EXTERNAL_API_RATE_LIMIT_PER_MINUTE:600}
     alert-cooldown-seconds: ${EXTERNAL_API_RATE_LIMIT_ALERT_COOLDOWN:300}
+
+legacy:
+  platform-field:
+    mode: reject
+    workflow-data-mode: reject

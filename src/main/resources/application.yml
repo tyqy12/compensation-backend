@@ -84,6 +84,23 @@ task:
     pool-size: 5
     thread-name-prefix: task-scheduler-
 
+payment:
+  reconciliation:
+    enabled: true
+    fixed-delay-ms: 300000
+    initial-delay-ms: 120000
+    batch-limit: 20
+    record-limit-per-batch: 200
+
 # ==================== OAuth 配置 ====================
 oauth:
   trusted-redirect-hosts: localhost:5173,127.0.0.1:5173,localhost:3000,127.0.0.1:3000
+
+# 旧平台字段渐进下线策略:
+# compat: 接受旧字段
+# warn: 接受旧字段并告警（默认）
+# reject: 拒绝旧字段输入
+legacy:
+  platform-field:
+    mode: warn
+    workflow-data-mode: warn

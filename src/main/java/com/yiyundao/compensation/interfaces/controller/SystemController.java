@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.interfaces.controller;
 
 import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -14,6 +15,8 @@ import java.util.Map;
 @RequestMapping("/system")
 @RequiredArgsConstructor
 public class SystemController {
+
+    private final LegacyPlatformFieldPolicy legacyPlatformFieldPolicy;
 
     @GetMapping("/health")
     public ApiResponse<Map<String, Object>> health() {
@@ -30,16 +33,16 @@ public class SystemController {
     public ApiResponse<Map<String, Object>> info() {
         Map<String, Object> info = new HashMap<>();
         info.put("name", "薪酬助手系统");
-        info.put("description", "支持支付宝批量转账、多平台组织同步、离线员工管理");
+        info.put("description", "支持支付宝批量转账、多平台组织同步、架构外员工管理");
         info.put("features", new String[]{
             "支付宝批量转账",
             "企业微信/钉钉/飞书集成",
-            "离线员工管理",
+            "架构外员工管理",
             "动态审批流程",
             "SM4/AES双重加密"
         });
+        info.put("legacyPlatformFieldMode", legacyPlatformFieldPolicy.getMode().name().toLowerCase());
 
         return ApiResponse.success(info);
     }
 }
-

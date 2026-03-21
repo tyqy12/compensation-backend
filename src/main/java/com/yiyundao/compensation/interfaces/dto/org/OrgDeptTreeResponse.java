@@ -5,7 +5,6 @@ import java.util.List;
 
 @Data
 public class OrgDeptTreeResponse {
-    private String platformType;
+    private String provider;
     private List<OrgDeptNodeDto> roots;
 }
-

@@ -2,6 +2,8 @@ package com.yiyundao.compensation.common.utils;
 
 import com.yiyundao.compensation.enums.SettlementAccountType;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
+import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.service.EncryptionService;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeListItemVO;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
@@ -12,9 +14,12 @@ import org.springframework.util.StringUtils;
 public class VOConverter {
 
     private final EncryptionService encryptionService;
+    private final ExternalIdentityService externalIdentityService;
 
-    public VOConverter(EncryptionService encryptionService) {
+    public VOConverter(EncryptionService encryptionService,
+                       ExternalIdentityService externalIdentityService) {
         this.encryptionService = encryptionService;
+        this.externalIdentityService = externalIdentityService;
     }
 
     public EmployeeVO toEmployeeVO(Employee employee) {
@@ -27,8 +32,9 @@ public class VOConverter {
         vo.setEmail(employee.getEmail());
         vo.setDepartment(employee.getDepartment());
         vo.setPosition(employee.getPosition());
-        vo.setPlatformUserId(employee.getPlatformUserId());
-        vo.setPlatformType(employee.getPlatformType());
+        ExternalIdentity identity = externalIdentityService.findPrimaryByEmployeeId(employee.getId());
+        vo.setSubjectId(identity != null ? identity.getSubjectId() : null);
+        vo.setProvider(identity != null ? identity.getProvider() : null);
         vo.setEmploymentType(employee.getEmploymentType());
         vo.setManagerId(employee.getManagerId());
         vo.setHireDate(employee.getHireDate());

@@ -15,4 +15,13 @@ public interface PayrollPaymentService {
      * @return 新建或已存在的支付批次，若无可支付记录则返回 null
      */
     PaymentBatch createPaymentBatch(PayrollBatch payrollBatch, SysUser approver, boolean triggerTransfer);
+
+    /**
+     * 对支付失败批次执行一键重试。
+     *
+     * @param payrollBatchId  薪资批次ID（要求状态为 pay_failed）
+     * @param triggerTransfer 是否立即触发发放
+     * @return 最新支付批次
+     */
+    PaymentBatch retryFailedPayment(Long payrollBatchId, boolean triggerTransfer);
 }

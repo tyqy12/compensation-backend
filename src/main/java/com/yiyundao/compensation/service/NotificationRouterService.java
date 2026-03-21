@@ -6,7 +6,9 @@ import com.yiyundao.compensation.enums.NotificationType;
 import com.yiyundao.compensation.interfaces.adapter.NotificationAdapter;
 import com.yiyundao.compensation.modules.notification.entity.NotificationRecord;
 import com.yiyundao.compensation.modules.notification.service.NotificationRecordService;
+import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +30,7 @@ public class NotificationRouterService {
 
     private final NotificationRecordService notificationRecordService;
     private final SysUserService sysUserService;
+    private final ExternalIdentityService externalIdentityService;
     private final Map<NotificationChannel, NotificationAdapter> adapters;
 
     /**
@@ -59,17 +62,17 @@ public class NotificationRouterService {
     /**
      * 发送通知给平台用户
      */
-    public void sendNotificationToPlatformUser(String platformType, String platformUserId,
+    public void sendNotificationToPlatformUser(String provider, String subjectId,
                                              NotificationType type, String title, String content,
                                              String businessType, String businessKey) {
-        NotificationChannel channel = convertPlatformToChannel(platformType);
+        NotificationChannel channel = convertPlatformToChannel(provider);
         if (channel == null) {
-            log.warn("不支持的平台类型: {}", platformType);
+            log.warn("不支持的平台类型: {}", provider);
             return;
         }
 
         NotificationRecord record = createNotificationRecord(
-            type, channel, platformUserId, title, content, businessType, businessKey);
+            type, channel, subjectId, title, content, businessType, businessKey);
 
         // 保存通知记录
         notificationRecordService.save(record);
@@ -85,8 +88,9 @@ public class NotificationRouterService {
         List<NotificationChannel> channels = new ArrayList<>();
 
         // 优先使用用户绑定的平台
-        if (StringUtils.hasText(user.getPlatformType())) {
-            NotificationChannel platformChannel = convertPlatformToChannel(user.getPlatformType());
+        ExternalIdentity primaryIdentity = externalIdentityService.findPrimaryByUserId(user.getId());
+        if (primaryIdentity != null && StringUtils.hasText(primaryIdentity.getProvider())) {
+            NotificationChannel platformChannel = convertPlatformToChannel(primaryIdentity.getProvider());
             if (platformChannel != null) {
                 channels.add(platformChannel);
             }
@@ -123,10 +127,10 @@ public class NotificationRouterService {
     /**
      * 平台类型转换为通知渠道
      */
-    private NotificationChannel convertPlatformToChannel(String platformType) {
-        if (platformType == null) return null;
+    private NotificationChannel convertPlatformToChannel(String provider) {
+        if (provider == null) return null;
 
-        return switch (platformType.toLowerCase()) {
+        return switch (provider.toLowerCase()) {
             case "wechat" -> NotificationChannel.WECHAT;
             case "dingtalk" -> NotificationChannel.DINGTALK;
             case "feishu" -> NotificationChannel.FEISHU;
@@ -188,10 +192,34 @@ public class NotificationRouterService {
      */
     private String getRecipientId(SysUser user, NotificationChannel channel) {
         return switch (channel) {
-            case WECHAT, DINGTALK, FEISHU -> user.getPlatformUserId();
+            case WECHAT, DINGTALK, FEISHU -> resolvePlatformRecipientId(user.getId(), channel);
             case SMS -> user.getPhone();
             case EMAIL -> user.getEmail();
             case SYSTEM -> user.getId().toString();
+        };
+    }
+
+    private String resolvePlatformRecipientId(Long userId, NotificationChannel channel) {
+        if (userId == null) {
+            return null;
+        }
+        String provider = providerForChannel(channel);
+        if (!StringUtils.hasText(provider)) {
+            return null;
+        }
+        ExternalIdentity identity = externalIdentityService.findByUserIdAndProvider(userId, provider);
+        return identity != null ? identity.getSubjectId() : null;
+    }
+
+    private String providerForChannel(NotificationChannel channel) {
+        if (channel == null) {
+            return null;
+        }
+        return switch (channel) {
+            case WECHAT -> "wechat";
+            case DINGTALK -> "dingtalk";
+            case FEISHU -> "feishu";
+            default -> null;
         };
     }
 

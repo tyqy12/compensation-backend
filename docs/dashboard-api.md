@@ -21,7 +21,7 @@
   - 员工总数：`employee` 当前记录（逻辑删除自动过滤）
   - 支付总额：`payment_record` 当月内 `status=success` 的 `amount` 汇总
   - 待处理批次：`payment_batch` 中 `status in (submitted, approved)` 当前数量；变化率对比本月与上月新增待处理批次数
-  - 用户绑定率：`sys_user` 中 `platformType`、`platformUserId` 非空的用户 / 总用户；变化为与上月末绑定率差
+  - 用户绑定率：`external_identity` 中 `status=active` 且 `user_id` 非空的去重用户数 / 总用户；变化为与上月末绑定率差
 
 ## 2) 系统与组件状态
 - 方法：`GET /dashboard/status`
@@ -64,4 +64,3 @@
 - 控制器：`src/main/java/com/yiyundao/compensation/interfaces/controller/dashboard/DashboardController.java`
 - 服务聚合：`src/main/java/com/yiyundao/compensation/modules/dashboard/service/DashboardService.java`
 - DTO：`src/main/java/com/yiyundao/compensation/dto/dashboard/`
-

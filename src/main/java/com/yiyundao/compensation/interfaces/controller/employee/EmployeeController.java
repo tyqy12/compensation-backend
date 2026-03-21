@@ -15,12 +15,14 @@ import com.yiyundao.compensation.interfaces.vo.employee.EmployeeListItemVO;
 import com.yiyundao.compensation.interfaces.vo.payment.PaymentRecordItemVO;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
+import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -34,11 +36,17 @@ public class EmployeeController {
 
     private final EmployeeService employeeService;
     private final AuditLogService auditLogService;
+    private final LegacyPlatformFieldPolicy legacyPlatformFieldPolicy;
 
     @PostMapping
     @SecurityAnnotations.IsHrOrAdmin
     @Operation(summary = "创建员工", description = "新增员工信息，自动创建关联账号")
     public ApiResponse<EmployeeVO> create(@Valid @RequestBody EmployeeCreateRequest req) {
+        legacyPlatformFieldPolicy.handleLegacyInput(
+                "employee_controller_create",
+                req.getLegacyPlatformType(),
+                req.getLegacyPlatformUserId()
+        );
         Employee e = mapToEntity(req);
         return ApiResponse.success(employeeService.createEmployeeWithUser(e, req.getUsername()));
     }
@@ -96,12 +104,31 @@ public class EmployeeController {
             @RequestParam(required = false) String department,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Boolean isOffline,
-            @RequestParam(required = false) String platformType,
+            @RequestParam(required = false) String provider,
             @RequestParam(required = false) Long managerId,
             @RequestParam(required = false, defaultValue = "createTime") String sortBy,
-            @RequestParam(required = false, defaultValue = "desc") String order
+            @RequestParam(required = false, defaultValue = "desc") String order,
+            HttpServletRequest request
     ) {
-        return ApiResponse.success(employeeService.pageEmployees(page, size, keyword, department, status, isOffline, platformType, managerId, sortBy, order));
+        String legacyPlatformType = request.getParameter("platformType");
+        legacyPlatformFieldPolicy.handleLegacyInput(
+                "employee_controller_page_query",
+                legacyPlatformType,
+                null
+        );
+        String resolvedProvider = StringUtils.hasText(provider) ? provider : null;
+        return ApiResponse.success(employeeService.pageEmployees(
+                page,
+                size,
+                keyword,
+                department,
+                status,
+                isOffline,
+                resolvedProvider,
+                managerId,
+                sortBy,
+                order
+        ));
     }
 
     @PatchMapping("/{id}/status")
@@ -116,6 +143,11 @@ public class EmployeeController {
     @SecurityAnnotations.IsHrOrAdmin
     @Operation(summary = "绑定平台用户", description = "绑定企业微信/钉钉/飞书平台用户。冲突时自动发起审批流程，返回审批信息便于追溯")
     public ApiResponse<BindPlatformResult> bindPlatform(@PathVariable Long id, @Valid @RequestBody BindPlatformRequest req) {
+        legacyPlatformFieldPolicy.handleLegacyInput(
+                "employee_controller_bind_platform",
+                req.getLegacyPlatformType(),
+                req.getLegacyPlatformUserId()
+        );
         BindPlatformResult result = employeeService.bindPlatform(id, req);
         return ApiResponse.success(result);
     }
@@ -130,9 +162,15 @@ public class EmployeeController {
     }
 
     @GetMapping("/offline")
-    @Operation(summary = "获取离线员工列表", description = "获取所有离线员工或指定管理员的离线员工")
+    @Operation(summary = "获取架构外员工列表", description = "获取所有架构外员工或指定管理员的架构外员工")
     public ApiResponse<List<EmployeeVO>> offlineList(@RequestParam(required = false) Long managerId) {
         return ApiResponse.success(employeeService.getOfflineEmployees(managerId));
+    }
+
+    @GetMapping("/resigned")
+    @Operation(summary = "获取离职员工列表", description = "获取所有离职员工或指定管理员的离职员工")
+    public ApiResponse<List<EmployeeVO>> resignedList(@RequestParam(required = false) Long managerId) {
+        return ApiResponse.success(employeeService.getResignedEmployees(managerId));
     }
 
     @SecurityAnnotations.IsAdmin
@@ -178,6 +216,13 @@ public class EmployeeController {
     @SecurityAnnotations.IsHrOrAdmin
     @Operation(summary = "批量导入员工", description = "批量导入员工信息，跳过重复工号")
     public ApiResponse<Void> batchImport(@Valid @RequestBody BatchImportRequest req) {
+        for (EmployeeCreateRequest item : req.getEmployees()) {
+            legacyPlatformFieldPolicy.handleLegacyInput(
+                    "employee_controller_batch_import",
+                    item.getLegacyPlatformType(),
+                    item.getLegacyPlatformUserId()
+            );
+        }
         List<Employee> list = req.getEmployees().stream().map(this::mapToEntity).toList();
         employeeService.batchImport(list);
         return ApiResponse.success(null);
@@ -193,8 +238,8 @@ public class EmployeeController {
         e.setDepartment(req.getDepartment());
         e.setPosition(req.getPosition());
         e.setEmploymentType(req.getEmploymentType());
-        e.setPlatformUserId(req.getPlatformUserId());
-        e.setPlatformType(req.getPlatformType());
+        e.setSubjectId(req.getSubjectId());
+        e.setProvider(req.getProvider());
         e.setManagerId(req.getManagerId());
         e.setHireDate(req.getHireDate());
         e.setStatus(req.getStatus());

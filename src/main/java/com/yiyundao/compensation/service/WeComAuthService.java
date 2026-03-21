@@ -30,6 +30,9 @@ public class WeComAuthService {
 
     private static final String PLATFORM = "wechat"; // internal platform code reuse
     private static final String API_BASE = "https://qyapi.weixin.qq.com/cgi-bin";
+    private static final String TRUSTED_REDIRECT_HOSTS_CONFIG_KEY = "oauth.trusted.redirect.hosts";
+    private static final String TRUSTED_REDIRECT_HOSTS_PROPERTY = "oauth.trusted-redirect-hosts";
+    private static final String TRUSTED_REDIRECT_HOSTS_ENV = "OAUTH_TRUSTED_REDIRECT_HOSTS";
 
     @Data
     public static class AuthorizeOut { private String url; private String state; private String channel; }
@@ -180,23 +183,75 @@ public class WeComAuthService {
     private void validateRedirectUri(String redirectUri) {
         try {
             URI uri = URI.create(redirectUri);
+            String scheme = uri.getScheme();
             String host = uri.getHost();
             int port = uri.getPort();
-            if (!StringUtils.hasText(host)) throw new IllegalArgumentException("redirectUri invalid");
-            String allow = sysConfigService.getString("oauth.trusted.redirect.hosts", null);
-            if (!StringUtils.hasText(allow)) allow = env.getProperty("OAUTH_TRUSTED_REDIRECT_HOSTS");
-            if (!StringUtils.hasText(allow)) throw new IllegalStateException("trusted hosts not configured");
-            Set<String> hosts = new HashSet<>();
-            for (String it : allow.split(",")) {
-                if (StringUtils.hasText(it)) hosts.add(it.trim());
+            if (!StringUtils.hasText(scheme) || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
+                throw new IllegalArgumentException("redirectUri scheme not allowed");
             }
-            String hp = port > 0 ? host + ":" + port : host;
-            if (!(hosts.contains(hp) || hosts.contains(host))) {
+            if (!StringUtils.hasText(host)) {
+                throw new IllegalArgumentException("redirectUri invalid");
+            }
+            Set<String> trustedHosts = resolveTrustedRedirectHosts();
+            if (trustedHosts.isEmpty()) {
+                throw new IllegalStateException("trusted hosts not configured");
+            }
+            String normalizedHost = host.toLowerCase(Locale.ROOT);
+            String hostWithPort = port > 0 ? normalizedHost + ":" + port : normalizedHost;
+            if (!(trustedHosts.contains(hostWithPort) || trustedHosts.contains(normalizedHost))) {
                 throw new IllegalArgumentException("redirect host not trusted");
             }
         } catch (Exception e) {
             throw new IllegalArgumentException("redirectUri validation failed: " + e.getMessage());
         }
+    }
+
+    private Set<String> resolveTrustedRedirectHosts() {
+        String allow = sysConfigService.getString(TRUSTED_REDIRECT_HOSTS_CONFIG_KEY, null);
+        if (!StringUtils.hasText(allow)) {
+            // Spring Boot 官方推荐使用 canonical kebab-case key 读取配置
+            allow = env.getProperty(TRUSTED_REDIRECT_HOSTS_PROPERTY);
+        }
+        if (!StringUtils.hasText(allow)) {
+            allow = env.getProperty(TRUSTED_REDIRECT_HOSTS_CONFIG_KEY);
+        }
+        if (!StringUtils.hasText(allow)) {
+            allow = env.getProperty(TRUSTED_REDIRECT_HOSTS_ENV);
+        }
+        Set<String> trustedHosts = new LinkedHashSet<>();
+        if (!StringUtils.hasText(allow)) {
+            return trustedHosts;
+        }
+        for (String item : allow.split(",")) {
+            String normalized = normalizeTrustedHost(item);
+            if (StringUtils.hasText(normalized)) {
+                trustedHosts.add(normalized);
+            }
+        }
+        return trustedHosts;
+    }
+
+    private String normalizeTrustedHost(String item) {
+        if (!StringUtils.hasText(item)) {
+            return null;
+        }
+        String token = item.trim();
+        if (!StringUtils.hasText(token)) {
+            return null;
+        }
+        if (token.contains("://")) {
+            URI uri = URI.create(token);
+            if (!StringUtils.hasText(uri.getHost())) {
+                return null;
+            }
+            String host = uri.getHost().toLowerCase(Locale.ROOT);
+            return uri.getPort() > 0 ? host + ":" + uri.getPort() : host;
+        }
+        String normalized = token;
+        while (normalized.endsWith("/")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+        return normalized.toLowerCase(Locale.ROOT);
     }
 
     private WechatConfigDto getWeComConfig() {

@@ -100,3 +100,8 @@ external-api:
 # OAuth 信任重定向域名（开发环境）
 oauth:
   trusted-redirect-hosts: localhost:5173,127.0.0.1:5173,localhost:3000,127.0.0.1:3000
+
+legacy:
+  platform-field:
+    mode: reject
+    workflow-data-mode: reject

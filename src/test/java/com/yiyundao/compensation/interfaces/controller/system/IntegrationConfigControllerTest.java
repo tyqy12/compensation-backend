@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.config.FileStorageProperties;
 import com.yiyundao.compensation.interfaces.dto.config.IntegrationConfigDetailDto;
+import com.yiyundao.compensation.interfaces.dto.config.IntegrationConfigListDto;
 import com.yiyundao.compensation.interfaces.dto.config.YunzhanghuConfigDto;
 import com.yiyundao.compensation.modules.system.entity.IntegrationConfig;
 import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
@@ -145,5 +146,23 @@ class IntegrationConfigControllerTest {
         assertEquals("******", masked.getDes3Key());
         assertEquals("******", masked.getRsaPrivateKey());
         assertEquals("******", masked.getRsaPublicKey());
+    }
+
+    @Test
+    @DisplayName("GET 列表: 单个平台探活抛 Error 时应降级 unknown，不能导致接口失败")
+    void listConfigs_shouldGracefullyHandleHealthCheckError() {
+        when(alipayService.checkAlipayConnection()).thenThrow(new NoClassDefFoundError("mock-missing-sdk"));
+
+        ApiResponse<java.util.List<IntegrationConfigListDto>> response = controller.listConfigs(request);
+
+        assertEquals(0, response.getCode());
+        assertNotNull(response.getData());
+
+        IntegrationConfigListDto alipayItem = response.getData().stream()
+                .filter(item -> "alipay".equals(item.getPlatformType()))
+                .findFirst()
+                .orElseThrow();
+
+        assertEquals("unknown", alipayItem.getConnectionStatus());
     }
 }

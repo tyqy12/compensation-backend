@@ -9,6 +9,7 @@ import com.yiyundao.compensation.interfaces.dto.auth.OAuthAuthorizeResponse;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
+import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.security.JwtTokenProvider;
 import com.yiyundao.compensation.service.PlatformOAuthService;
@@ -38,6 +39,7 @@ public class AuthController {
     private final PlatformOAuthService platformOAuthService;
     private final WeComAuthService weComAuthService;
     private final AuditLogService auditLogService;
+    private final ExternalIdentityService externalIdentityService;
     private final com.yiyundao.compensation.service.AuthTokenService authTokenService;
     private final com.yiyundao.compensation.service.LoginRateLimiterService loginRateLimiterService;
 
@@ -88,14 +90,11 @@ public class AuthController {
     public ApiResponse<OAuthAuthorizeResponse> authorize(@RequestParam String platform,
                                                          @RequestParam(required = false, defaultValue = "web") String channel,
                                                          @RequestParam String redirectUri) {
-        if ("wecom".equalsIgnoreCase(platform) || "wechat".equalsIgnoreCase(platform)) {
-            WeComAuthService.AuthorizeOut a = weComAuthService.buildAuthorize(channel, redirectUri);
-            OAuthAuthorizeResponse out = new OAuthAuthorizeResponse();
-            out.setUrl(a.getUrl());
-            out.setState(a.getState());
-            return ApiResponse.success(out);
+        String normalized = normalizeOAuthPlatform(platform);
+        if (normalized == null) {
+            return ApiResponse.error(ErrorCode.PARAM_INVALID, "不支持的OAuth平台，支持：wechat|dingtalk|feishu");
         }
-        PlatformOAuthService.Authorize a = platformOAuthService.buildAuthorize(platform, redirectUri);
+        PlatformOAuthService.Authorize a = platformOAuthService.buildAuthorize(normalized, redirectUri);
         OAuthAuthorizeResponse out = new OAuthAuthorizeResponse();
         out.setUrl(a.getUrl());
         out.setState(a.getState());
@@ -109,48 +108,36 @@ public class AuthController {
                                                     HttpServletRequest request) {
         long begin = System.currentTimeMillis();
         try {
-            // 校验并消费state，失败拒绝
-	            if (!StringUtils.hasText(state) || !authTokenService.consumeOAuthState(platform, state)) {
-	                audit("OAuth登录-" + platform, null, request, false, "invalid state", begin);
-	                return ApiResponse.error(ErrorCode.PARAM_INVALID, "非法请求(state)");
-	            }
-            // 企业微信专用回调
-            if ("wecom".equalsIgnoreCase(platform) || "wechat".equalsIgnoreCase(platform)) {
-                WeComAuthService.TokenUser tuser = weComAuthService.exchangeCode(code, state);
-	                if (tuser == null || !StringUtils.hasText(tuser.getUserid())) {
-	                    audit("企业微信登录", null, request, false, "exchange failed", begin);
-	                    return ApiResponse.error(ErrorCode.FORBIDDEN, "需要先完成账号绑定");
-	                }
-                SysUser user = sysUserService.findByPlatform("wechat", tuser.getUserid());
-                if (user == null) user = sysUserService.findByPlatform("wecom", tuser.getUserid());
-	                if (user == null) {
-	                    audit("企业微信登录", null, request, false, "not bound", begin);
-	                    return ApiResponse.error(ErrorCode.FORBIDDEN, "需要先完成账号绑定");
-	                }
-                List<GrantedAuthority> authorities = getAuthoritiesFromUser(user);
-                String token = jwtTokenProvider.generateToken(user.getUsername());
-                String refresh = jwtTokenProvider.generateRefreshToken(user.getUsername());
-                LoginResponse resp = new LoginResponse();
-                resp.setToken(token); resp.setRefreshToken(refresh);
-                resp.setUsername(user.getUsername());
-                resp.setRoles(authorities.stream().map(GrantedAuthority::getAuthority).filter(a->a.startsWith("ROLE_")).collect(Collectors.toList()));
-                java.util.Date exp = jwtTokenProvider.getExpiration(refresh);
-                if (exp != null) { long ttl = exp.getTime() - System.currentTimeMillis(); authTokenService.storeRefreshToken(user.getUsername(), refresh, ttl); }
-                audit("企业微信登录", user.getUsername(), request, true, null, begin);
-                return ApiResponse.success(resp);
+            String normalized = normalizeOAuthPlatform(platform);
+            if (normalized == null) {
+                return ApiResponse.error(ErrorCode.PARAM_INVALID, "不支持的OAuth平台，支持：wechat|dingtalk|feishu");
             }
-	            PlatformOAuthService.PlatformUser puser = platformOAuthService.exchangeCode(platform, code);
-	            if (puser == null || !StringUtils.hasText(puser.getPlatformUserId())) {
-	                audit(platform + "登录", null, request, false, "exchange failed", begin);
+            // 校验并消费state，失败拒绝
+            if (!StringUtils.hasText(state) || !authTokenService.consumeOAuthState(normalized, state)) {
+                audit("OAuth登录-" + platform, null, request, false, "invalid state", begin);
+                return ApiResponse.error(ErrorCode.PARAM_INVALID, "非法请求(state)");
+            }
+	            PlatformOAuthService.PlatformUser puser = platformOAuthService.exchangeCode(normalized, code);
+	            if (puser == null || !StringUtils.hasText(puser.getSubjectId())) {
+	                audit(normalized + "登录", null, request, false, "exchange failed", begin);
 	                return ApiResponse.error(ErrorCode.UNAUTHORIZED, "第三方登录失败");
 	            }
-            // 找绑定用户
-            SysUser user = sysUserService.getOne(new LambdaQueryWrapper<SysUser>()
-                    .eq(SysUser::getPlatformType, platform)
-                    .eq(SysUser::getPlatformUserId, puser.getPlatformUserId())
-                    .last("limit 1"));
+            // 找绑定用户：统一从 external_identity 查询
+            String tenantKey = StringUtils.hasText(puser.getTenantKey())
+                    ? puser.getTenantKey()
+                    : ExternalIdentityService.DEFAULT_TENANT_KEY;
+            String subjectType = StringUtils.hasText(puser.getSubjectType())
+                    ? puser.getSubjectType()
+                    : ExternalIdentityService.DEFAULT_SUBJECT_TYPE;
+            Long userId = externalIdentityService.findBoundUserId(
+                    normalized,
+                    tenantKey,
+                    subjectType,
+                    puser.getSubjectId()
+            );
+            SysUser user = userId != null ? sysUserService.getById(userId) : null;
 	            if (user == null) {
-	                audit(platform + "登录", null, request, false, "not bound", begin);
+	                audit(normalized + "登录", null, request, false, "not bound", begin);
 	                return ApiResponse.error(ErrorCode.FORBIDDEN, "未绑定该第三方账号，请联系管理员绑定后再登录");
 	            }
             List<GrantedAuthority> authorities = getAuthoritiesFromUser(user);
@@ -167,7 +154,7 @@ public class AuthController {
                 long ttl = exp.getTime() - System.currentTimeMillis();
                 authTokenService.storeRefreshToken(user.getUsername(), refresh, ttl);
             }
-            audit(platform + "登录", user.getUsername(), request, true, null, begin);
+            audit(normalized + "登录", user.getUsername(), request, true, null, begin);
             return ApiResponse.success(resp);
         } catch (Exception e) {
             log.error("oauth callback error for platform: {}", platform, e);
@@ -317,5 +304,19 @@ public class AuthController {
             log.error("重置密码失败", e);
             return ApiResponse.error("重置密码失败: " + e.getMessage());
         }
+    }
+
+    private String normalizeOAuthPlatform(String platform) {
+        if (!StringUtils.hasText(platform)) {
+            return null;
+        }
+        String normalized = platform.trim().toLowerCase();
+        if ("wecom".equals(normalized)) {
+            return null;
+        }
+        return switch (normalized) {
+            case "wechat", "dingtalk", "feishu" -> normalized;
+            default -> null;
+        };
     }
 }

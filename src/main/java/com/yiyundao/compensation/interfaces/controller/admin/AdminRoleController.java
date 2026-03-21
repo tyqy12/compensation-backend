@@ -9,7 +9,9 @@ import com.yiyundao.compensation.modules.rbac.entity.SysRole;
 import com.yiyundao.compensation.modules.rbac.entity.SysUserRole;
 import com.yiyundao.compensation.modules.rbac.service.ResourceService;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
+import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
@@ -32,6 +34,7 @@ public class AdminRoleController {
     private final UserRoleService userRoleService;
     private final SysUserService sysUserService;
     private final EmployeeService employeeService;
+    private final ExternalIdentityService externalIdentityService;
 
     // 用户拥有角色列表
     @GetMapping("/users/{id}/roles")
@@ -126,6 +129,27 @@ public class AdminRoleController {
 
         // 批量查询用户角色关联（优化性能）
         java.util.Set<Long> userIds = users.stream().map(com.yiyundao.compensation.modules.user.entity.SysUser::getId).collect(java.util.stream.Collectors.toSet());
+        java.util.Map<Long, ExternalIdentity> userIdentityMap = new java.util.HashMap<>();
+        if (!userIds.isEmpty()) {
+            java.util.List<ExternalIdentity> identities = externalIdentityService.list(new LambdaQueryWrapper<ExternalIdentity>()
+                    .select(
+                            ExternalIdentity::getId,
+                            ExternalIdentity::getUserId,
+                            ExternalIdentity::getProvider,
+                            ExternalIdentity::getSubjectId,
+                            ExternalIdentity::getLastSeenAt
+                    )
+                    .in(ExternalIdentity::getUserId, userIds)
+                    .eq(ExternalIdentity::getStatus, ExternalIdentityService.STATUS_ACTIVE)
+                    .orderByDesc(ExternalIdentity::getPrimaryFlag)
+                    .orderByDesc(ExternalIdentity::getLastSeenAt)
+                    .orderByDesc(ExternalIdentity::getId));
+            for (ExternalIdentity identity : identities) {
+                if (identity.getUserId() != null) {
+                    userIdentityMap.putIfAbsent(identity.getUserId(), identity);
+                }
+            }
+        }
         java.util.Map<Long, java.util.List<Long>> userRoleIdsMap = new java.util.HashMap<>();
         if (!userIds.isEmpty()) {
             java.util.List<SysUserRole> userRoles = userRoleMapper.selectList(
@@ -151,7 +175,11 @@ public class AdminRoleController {
             var dto = new com.yiyundao.compensation.interfaces.dto.admin.UserAggregateDto();
             dto.setUserId(u.getId()); dto.setUsername(u.getUsername()); dto.setRealName(u.getRealName());
             dto.setEmail(u.getEmail()); dto.setPhone(u.getPhone());
-            dto.setPlatformType(u.getPlatformType()); dto.setPlatformUserId(u.getPlatformUserId());
+            ExternalIdentity identity = userIdentityMap.get(u.getId());
+            if (identity != null) {
+                dto.setProvider(identity.getProvider());
+                dto.setSubjectId(identity.getSubjectId());
+            }
 
             // 从关联表查询角色编码（确保数据一致性）
             java.util.List<Long> roleIdList = userRoleIdsMap.getOrDefault(u.getId(), java.util.List.of());

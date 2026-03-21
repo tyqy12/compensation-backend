@@ -1,12 +1,19 @@
 import React from 'react';
 import { Button, Card, Form, Input, Typography } from 'antd';
-import { Link } from 'react-router-dom';
 import { useLoginMutation } from '@services/queries/auth';
 import { authorizeWecom } from '@services/auth';
 import { isWeComEnv } from '@services/wecom';
 import { QrcodeOutlined } from '@ant-design/icons';
 import { App as AntdApp } from 'antd';
 import { toMessage } from '@utils/error';
+
+const resolveWecomRedirectUri = () => {
+  const configured = (import.meta as any).env.VITE_OAUTH_REDIRECT_URI_WECHAT as string | undefined;
+  if (configured && configured.trim()) {
+    return configured.trim();
+  }
+  return `${window.location.origin}/oauth/callback/wechat`;
+};
 
 const Login: React.FC = () => {
   const login = useLoginMutation();
@@ -41,7 +48,7 @@ const Login: React.FC = () => {
                 try {
                   setAuthLoading(true);
                   const channel: 'wecom' | 'web' = isWeComEnv() ? 'wecom' : 'web';
-                  const redirectUri = `${window.location.origin}/oauth/callback/wecom`;
+                  const redirectUri = resolveWecomRedirectUri();
                   const { url } = await authorizeWecom(channel, redirectUri);
                   window.location.href = url;
                 } catch (e) {
@@ -54,9 +61,6 @@ const Login: React.FC = () => {
               企业微信登录
             </Button>
           </Form.Item>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 0 }}>
-            或使用 OAuth 登录 → <Link to="/oauth/callback/wecom">企业微信（模拟）</Link>
-          </Typography.Paragraph>
         </Form>
       </Card>
     </div>

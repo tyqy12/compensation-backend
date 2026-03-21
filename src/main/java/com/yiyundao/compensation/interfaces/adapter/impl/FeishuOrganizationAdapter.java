@@ -88,7 +88,8 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
                         total += page.getData().getItems().size();
                         for (FeishuUser u : page.getData().getItems()) {
                             try {
-                                Employee existing = employeeServiceProvider.getObject().getByPlatformUserId(u.getUser_id(), PLATFORM_TYPE);
+                                Employee existing = employeeServiceProvider.getObject()
+                                        .getByProviderAndSubjectId(PLATFORM_TYPE, u.getUser_id());
                                 Employee candidate = convertToEmployee(u, deptNameMap);
                                 if (existing == null) {
                                     if (candidate.getEmployeeId() != null) {
@@ -211,7 +212,8 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
                     if (page.getData().getItems() != null) {
                         for (FeishuUser u : page.getData().getItems()) {
                             com.yiyundao.compensation.interfaces.dto.org.OrgMemberPreviewDto m = new com.yiyundao.compensation.interfaces.dto.org.OrgMemberPreviewDto();
-                            m.setPlatformUserId(u.getUser_id());
+                            m.setProvider(PLATFORM_TYPE);
+                            m.setSubjectId(u.getUser_id());
                             m.setName(u.getName());
                             m.setPhone(u.getMobile());
                             m.setEmail(u.getEmail());
@@ -561,8 +563,8 @@ public class FeishuOrganizationAdapter implements OrganizationAdapter {
         e.setPhone(u.getMobile());
         String email = u.getEnterprise_email() != null ? u.getEnterprise_email() : u.getEmail();
         e.setEmail(email);
-        e.setPlatformUserId(u.getUser_id());
-        e.setPlatformType(PLATFORM_TYPE);
+        e.setSubjectId(u.getUser_id());
+        e.setProvider(PLATFORM_TYPE);
         if (deptNameMap != null && u.getDepartment_ids() != null && !u.getDepartment_ids().isEmpty()) {
             e.setDepartment(deptNameMap.getOrDefault(u.getDepartment_ids().get(0), null));
         }

@@ -15,7 +15,7 @@ public class OfflineEmployeeAdminController {
 
     private final EmployeeService employeeService;
 
-    // 设置/取消离线标记
+    // 设置/取消架构外标记
     @PatchMapping("/{id}/offline")
     public ApiResponse<Void> setOffline(@PathVariable Long id, @RequestParam boolean value) {
         Employee e = new Employee();
@@ -24,11 +24,10 @@ public class OfflineEmployeeAdminController {
         return ApiResponse.success(null);
     }
 
-    // 指定离线员工负责人
+    // 指定架构外员工负责人
     @PutMapping("/{id}/manager")
     public ApiResponse<Void> setManager(@PathVariable Long id, @RequestParam Long managerId) {
         employeeService.setOfflineManager(id, managerId);
         return ApiResponse.success(null);
     }
 }
-

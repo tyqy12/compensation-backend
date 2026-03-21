@@ -2,6 +2,10 @@ package com.yiyundao.compensation.interfaces.controller.payment;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.infrastructure.dao.EmployeeMapper;
+import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.payment.dto.PaymentBatchTransferValidationDto;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
 import com.yiyundao.compensation.enums.PaymentStatus;
@@ -11,6 +15,7 @@ import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.modules.payment.service.SettlementService;
+import com.yiyundao.compensation.service.EncryptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -30,6 +36,8 @@ public class PaymentBatchController {
     private final PaymentRecordService paymentRecordService;
     private final SettlementService settlementService;
     private final AuditLogService auditLogService;
+    private final EmployeeMapper employeeMapper;
+    private final EncryptionService encryptionService;
 
     // 分页查询支付批次
     @GetMapping
@@ -69,7 +77,17 @@ public class PaymentBatchController {
             st = PaymentStatus.fromCode(status);
         }
         List<PaymentRecord> list = paymentRecordService.getByBatchNo(batchNo, st);
-        return ApiResponse.success(list.stream().map(PaymentRecordItemVO::from).collect(Collectors.toList()));
+        Set<Long> employeeIds = list.stream()
+                .map(PaymentRecord::getEmployeeId)
+                .filter(id -> id != null)
+                .collect(Collectors.toSet());
+        Map<Long, Employee> employeeMap = employeeIds.isEmpty()
+                ? Map.of()
+                : employeeMapper.selectBatchIds(employeeIds).stream()
+                .collect(Collectors.toMap(Employee::getId, employee -> employee));
+        return ApiResponse.success(list.stream()
+                .map(record -> PaymentRecordItemVO.from(record, employeeMap.get(record.getEmployeeId()), encryptionService))
+                .collect(Collectors.toList()));
     }
 
     // 启动批量转账（异步）
@@ -83,6 +101,18 @@ public class PaymentBatchController {
                 return ApiResponse.error("批次不存在");
             }
 
+            PaymentBatchTransferValidationDto validation = settlementService.validateBatchForTransfer(batchNo, true);
+            if (!Boolean.TRUE.equals(validation.getPass())) {
+                String failMsg = String.format("批次校验未通过：%d条风险记录，请先修复收款信息后再重试",
+                        validation.getBlockedCount() == null ? 0 : validation.getBlockedCount());
+                audit("启动批量转账", null, batchNo, "PAYMENT", false, failMsg, begin);
+                return ApiResponse.error(
+                        ErrorCode.BUSINESS_ERROR.getCode(),
+                        failMsg,
+                        Map.of("validation", validation)
+                );
+            }
+
             settlementService.batchTransfer(batchNo);
             audit("启动批量转账", null, batchNo, "PAYMENT", true,
                     "amount=" + batch.getTotalAmount() + ",count=" + batch.getTotalCount(), begin);
@@ -91,6 +121,12 @@ public class PaymentBatchController {
             audit("启动批量转账", null, batchNo, "PAYMENT", false, e.getMessage(), begin);
             return ApiResponse.error("启动失败: " + e.getMessage());
         }
+    }
+
+    @GetMapping("/{batchNo}/precheck")
+    public ApiResponse<PaymentBatchTransferValidationDto> precheck(@PathVariable String batchNo,
+                                                                   @RequestParam(defaultValue = "true") boolean persistFailure) {
+        return ApiResponse.success(settlementService.validateBatchForTransfer(batchNo, persistFailure));
     }
 
     private void audit(String operation, String username, String batchNo, String businessType, boolean success, String detail, long begin) {

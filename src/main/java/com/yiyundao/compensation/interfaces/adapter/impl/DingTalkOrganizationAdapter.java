@@ -93,7 +93,8 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
                         total += page.getUserlist().size();
                         for (DingUser user : page.getUserlist()) {
                             try {
-                                Employee existing = employeeServiceProvider.getObject().getByPlatformUserId(user.getUserid(), PLATFORM_TYPE);
+                                Employee existing = employeeServiceProvider.getObject()
+                                        .getByProviderAndSubjectId(PLATFORM_TYPE, user.getUserid());
                                 Employee candidate = convertToEmployee(user, deptNameMap);
                                 if (existing == null) {
                                     if (candidate.getEmployeeId() != null) {
@@ -216,7 +217,8 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
                     if (page.getUserlist() != null) {
                         for (DingUser u : page.getUserlist()) {
                             com.yiyundao.compensation.interfaces.dto.org.OrgMemberPreviewDto m = new com.yiyundao.compensation.interfaces.dto.org.OrgMemberPreviewDto();
-                            m.setPlatformUserId(u.getUserid());
+                            m.setProvider(PLATFORM_TYPE);
+                            m.setSubjectId(u.getUserid());
                             m.setName(u.getName());
                             m.setPhone(u.getMobile());
                             m.setEmail(u.getEmail());
@@ -512,8 +514,8 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
         e.setName(user.getName());
         e.setPhone(user.getMobile());
         e.setEmail(user.getEmail());
-        e.setPlatformUserId(user.getUserid());
-        e.setPlatformType(PLATFORM_TYPE);
+        e.setSubjectId(user.getUserid());
+        e.setProvider(PLATFORM_TYPE);
         if (deptNameMap != null && user.getDepartment() != null && !user.getDepartment().isEmpty()) {
             String name = deptNameMap.getOrDefault(user.getDepartment().get(0), null);
             e.setDepartment(name);

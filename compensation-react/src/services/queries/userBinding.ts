@@ -3,7 +3,7 @@ import api, { unwrap } from '@services/api';
 import type { UserBindingItem, Platform, PageParams, PagedResponse } from '../../types/api';
 
 export interface UserBindingParams extends PageParams {
-  platformType?: Platform;
+  provider?: Platform;
   bound?: boolean;
   username?: string;
   current?: number;
@@ -19,14 +19,14 @@ export function useUserBindingsQuery(params: any) {
         ? {
             page: params.current ?? params.page ?? 1,
             size: params.pageSize ?? params.size ?? 10,
-            platform: params.platformType ?? params.platform,
+            platform: params.provider ?? params.platform,
             bindStatus: params.bindStatus ?? (params.bound ? 'active' : undefined),
             keyword: params.keyword ?? params.username,
           }
         : {
             current: params.current,
             pageSize: params.pageSize,
-            platformType: params.platformType ?? params.platform,
+            provider: params.provider,
             bound: params.bound ?? (params.bindStatus === 'active'),
             username: params.username ?? params.keyword,
           };
@@ -36,12 +36,6 @@ export function useUserBindingsQuery(params: any) {
           ([, value]) => value !== undefined && value !== null && value !== '',
         ),
       );
-
-      if (!isTest) {
-        if (cleanParams.platformType && !cleanParams.platform) {
-          (cleanParams as any).platform = cleanParams.platformType;
-        }
-      }
 
       const { data } = await api.get(
         isTest ? '/user-binding' : '/admin/user-bindings',
@@ -58,19 +52,25 @@ export function useBindUserMutation() {
   return useMutation({
     mutationFn: async (payload: any) => {
       const isTest = (import.meta as any).env?.MODE === 'test';
-      if (isTest) {
-        const { employeeId, platform, platformUserId } = payload || {};
+      const hasAdminPayload = payload?.id !== undefined && payload?.id !== null;
+      if (isTest && !hasAdminPayload) {
+        const { employeeId } = payload || {};
+        const { provider, subjectId } = payload || {};
         const { data } = await api.post('/user-binding', {
           employeeId,
-          platform,
-          platformUserId,
+          provider,
+          subjectId,
         });
         return unwrap<any>(data);
       }
-      const { id, platformType, platformUserId } = payload || {};
+      const { id, provider, subjectId } = (payload || {}) as {
+        id?: number;
+        provider?: string;
+        subjectId?: string;
+      };
       const { data } = await api.put(`/admin/users/${id}/platform-binding`, {
-        platformType,
-        platformUserId,
+        provider,
+        subjectId,
       });
       return unwrap<void>(data);
     },
@@ -120,9 +120,16 @@ export function useBindEmployeeMutation() {
 export function useBatchBindUsersMutation() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (payload: { platform: Platform; bindings: Array<{ employeeId: string; platformUserId: string }> }) => {
+    mutationFn: async (payload: {
+      provider: Platform;
+      bindings: Array<{ employeeId: string; subjectId: string }>;
+    }) => {
       const isTest = (import.meta as any).env?.MODE === 'test';
-      const { data } = await api.post(isTest ? '/user-binding/batch' : '/admin/user-bindings/batch', payload as any);
+      const requestBody = payload;
+      const { data } = await api.post(
+        isTest ? '/user-binding/batch' : '/admin/user-bindings/batch',
+        requestBody as any,
+      );
       return unwrap<any>(data);
     },
     onSuccess: () => {

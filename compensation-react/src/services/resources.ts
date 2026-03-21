@@ -18,7 +18,8 @@ export interface ResourceInput {
 }
 
 export async function fetchResources(params?: { type?: ResourceTypeFilter }): Promise<SysResource[]> {
-  const { data } = await api.get<ApiResponse<SysResource[]>>('/admin/resources/v2/tree', { params });
+  // 权限配置页需要完整资源清单；tree 接口仅返回根节点，导致子级/API 资源丢失
+  const { data } = await api.get<ApiResponse<SysResource[]>>('/admin/resources/v2/list', { params });
   return unwrap(data);
 }
 
@@ -51,4 +52,3 @@ export async function exportResources(): Promise<SysResource[]> {
   const { data } = await api.get<ApiResponse<SysResource[]>>('/admin/resources/export');
   return unwrap(data);
 }
-

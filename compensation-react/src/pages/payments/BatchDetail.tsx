@@ -246,13 +246,45 @@ const BatchDetail: React.FC = () => {
     return items;
   };
 
+  const renderProviderTag = (providerCode?: string) => {
+    const normalizedCode = (providerCode || 'alipay').trim().toLowerCase();
+    if (normalizedCode === 'alipay') {
+      return <Tag color="blue">支付宝</Tag>;
+    }
+    if (normalizedCode === 'yunzhanghu') {
+      return <Tag color="geekblue">云账户</Tag>;
+    }
+    return <Tag>{normalizedCode || '-'}</Tag>;
+  };
+
   // 支付记录表格列定义
   const columns: ProColumns<PaymentRecord>[] = [
     {
       title: '记录ID',
       dataIndex: 'id',
-      width: 100,
+      width: 90,
       search: false,
+    },
+    {
+      title: '员工',
+      dataIndex: 'employeeName',
+      width: 150,
+      search: false,
+      render: (_, record) => record.employeeName || `#${record.employeeId ?? '-'}`,
+    },
+    {
+      title: '收款人',
+      dataIndex: 'recipientName',
+      width: 120,
+      search: false,
+      render: (_, record) => record.recipientName || '-',
+    },
+    {
+      title: '收款账号',
+      dataIndex: 'recipientAccountMasked',
+      width: 170,
+      search: false,
+      render: (_, record) => record.recipientAccountMasked || '-',
     },
     {
       title: '支付金额',
@@ -289,22 +321,30 @@ const BatchDetail: React.FC = () => {
       },
     },
     {
+      title: '打款渠道',
+      dataIndex: 'providerCode',
+      width: 120,
+      search: false,
+      render: (_, record) => renderProviderTag(record.providerCode),
+    },
+    {
       title: '商户订单号',
-      dataIndex: 'alipayOrderNo',
+      dataIndex: 'providerOrderNo',
       width: 180,
       copyable: true,
       ellipsis: true,
       search: false,
+      render: (_, record) => record.providerOrderNo || record.alipayOrderNo || '-',
     },
     {
-      title: '支付宝交易号',
-      dataIndex: 'alipayTradeNo',
+      title: '渠道流水号',
+      dataIndex: 'providerTradeNo',
       width: 200,
       copyable: true,
       ellipsis: true,
       search: false,
-      render: (_, record) => record.alipayTradeNo ? (
-        <Text code>{record.alipayTradeNo}</Text>
+      render: (_, record) => (record.providerTradeNo || record.alipayTradeNo) ? (
+        <Text code>{record.providerTradeNo || record.alipayTradeNo}</Text>
       ) : (
         <Text type="secondary">-</Text>
       ),
@@ -327,6 +367,17 @@ const BatchDetail: React.FC = () => {
         }
         return <Text type="secondary">-</Text>;
       },
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'createTime',
+      width: 160,
+      search: false,
+      render: (_, record) => record.createTime ? (
+        <Text>{dayjs(record.createTime).format('MM-DD HH:mm:ss')}</Text>
+      ) : (
+        <Text type="secondary">-</Text>
+      ),
     },
     {
       title: '支付时间',

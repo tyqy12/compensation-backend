@@ -79,7 +79,7 @@ describe('OrgSync 组织同步', () => {
     mockUseOrgHistoryQuery.mockReturnValue({
       data: [
         {
-          platformType: 'wechat',
+          provider: 'wechat',
           success: true,
           message: '同步成功',
           syncTime: '2025-09-29T12:23:08.092Z',
@@ -100,14 +100,14 @@ describe('OrgSync 组织同步', () => {
       data: [
         {
           id: 1,
-          platformType: 'wechat',
+          provider: 'wechat',
           platformDeptId: '1',
           parentPlatformDeptId: null,
           name: '总部',
           children: [
             {
               id: 2,
-              platformType: 'wechat',
+              provider: 'wechat',
               platformDeptId: '1-1',
               parentPlatformDeptId: '1',
               name: '技术部',

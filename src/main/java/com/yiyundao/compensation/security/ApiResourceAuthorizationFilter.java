@@ -22,6 +22,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Comparator;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -160,38 +161,85 @@ public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
             lastLoadTs.set(now);
         }
 
-        for (SysResource r : apiResourcesCache) {
-            if (!StringUtils.hasText(r.getPath())) continue;
-            String pattern = r.getPath();
+        return apiResourcesCache.stream()
+                .filter(resource -> matchesApiResource(resource, method, uri, servletPath))
+                .max(Comparator
+                        .comparingInt((SysResource resource) -> patternSpecificityScore(resourceMatchPattern(resource, uri, servletPath)))
+                        .thenComparing(resource -> resourceMatchPattern(resource, uri, servletPath), Comparator.nullsLast(String::compareTo))
+                )
+                .orElse(null);
+    }
 
-            // 方法匹配（propsJson.method）
-            String requiredMethod = extractMethod(r.getPropsJson());
-            if (requiredMethod != null && !requiredMethod.equalsIgnoreCase(method)) continue;
+    private boolean matchesApiResource(SysResource resource, String method, String uri, String servletPath) {
+        if (resource == null || !StringUtils.hasText(resource.getPath())) {
+            return false;
+        }
 
-            if (pathMatcher.match(pattern, uri)) {
-                return r;
+        String requiredMethod = extractMethod(resource.getPropsJson());
+        if (requiredMethod != null && !requiredMethod.equalsIgnoreCase(method)) {
+            return false;
+        }
+
+        String pattern = resourceMatchPattern(resource, uri, servletPath);
+        return pattern != null;
+    }
+
+    private String resourceMatchPattern(SysResource resource, String uri, String servletPath) {
+        if (resource == null || !StringUtils.hasText(resource.getPath())) {
+            return null;
+        }
+
+        String pattern = resource.getPath();
+        if (pathMatcher.match(pattern, uri)) {
+            return pattern;
+        }
+
+        if (!pattern.startsWith("/api")) {
+            if (pathMatcher.match(pattern, servletPath)) {
+                return pattern;
             }
-
-            // 兼容资源路径未包含 context-path (/api) 的情况
-            if (!pattern.startsWith("/api")) {
-                if (pathMatcher.match(pattern, servletPath)) {
-                    return r;
-                }
-                String normalized = pattern.startsWith("/") ? "/api" + pattern : "/api/" + pattern;
-                if (pathMatcher.match(normalized, uri)) {
-                    return r;
-                }
-            } else {
-                String withoutPrefix = pattern.substring(4);
-                if (!withoutPrefix.startsWith("/")) {
-                    withoutPrefix = "/" + withoutPrefix;
-                }
-                if (pathMatcher.match(withoutPrefix, servletPath)) {
-                    return r;
-                }
+            String normalized = pattern.startsWith("/") ? "/api" + pattern : "/api/" + pattern;
+            if (pathMatcher.match(normalized, uri)) {
+                return normalized;
             }
+            return null;
+        }
+
+        String withoutPrefix = pattern.substring(4);
+        if (!withoutPrefix.startsWith("/")) {
+            withoutPrefix = "/" + withoutPrefix;
+        }
+        if (pathMatcher.match(withoutPrefix, servletPath)) {
+            return withoutPrefix;
         }
         return null;
+    }
+
+    private int patternSpecificityScore(String pattern) {
+        if (!StringUtils.hasText(pattern)) {
+            return Integer.MIN_VALUE;
+        }
+
+        int wildcardCount = 0;
+        int variableCount = 0;
+        int staticSegmentCount = 0;
+
+        for (String rawSegment : pattern.split("/")) {
+            if (!StringUtils.hasText(rawSegment)) {
+                continue;
+            }
+            if (rawSegment.contains("*")) {
+                wildcardCount++;
+                continue;
+            }
+            if (rawSegment.startsWith("{") && rawSegment.endsWith("}")) {
+                variableCount++;
+                continue;
+            }
+            staticSegmentCount++;
+        }
+
+        return staticSegmentCount * 1000 - variableCount * 100 - wildcardCount * 10 + pattern.length();
     }
 
     /**

@@ -27,7 +27,7 @@
 ## 3. 资源定义
 ### payslip（工资条）对象
 - id: string（或 long）
-- employeeRef: { employeeId | platformType+platformUserId }
+- employeeRef: { employeeId | provider+subjectId }
 - period: YYYY-MM
 - employmentType: part_time
 - items: [{ code, name, amount, type, taxable, showOnPayslip, order }]
@@ -82,7 +82,7 @@ Response 200：
 ### 4.3 批次下工资行
 GET `/api/v1/payroll/batches/{id}/lines`
 Query：
-- employeeRef（可选）= employeeId 或 `platformType:platformUserId`
+- employeeRef（可选）= employeeId 或 `provider:subjectId`
 - page=1 size=50
 Response 200：
 ```

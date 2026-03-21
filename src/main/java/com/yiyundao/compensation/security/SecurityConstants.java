@@ -133,7 +133,7 @@ public final class SecurityConstants {
     public static final String CONFIG_ADHOC_APPROVAL_FLOW = "adhoc.approval.flow";
 
     /**
-     * 离线员工审批流程配置键
+     * 架构外员工审批流程配置键
      */
     public static final String CONFIG_OFFLINE_APPROVAL_FLOW = "offline.approval.flow";
 

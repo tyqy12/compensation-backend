@@ -43,9 +43,14 @@ export interface AdminUserAggregateItem {
   userId: number;
   username: string;
   realName?: string | null;
+  roles?: string;
+  employeeId?: number | null;
+  employeeNo?: string | null;
   employeeName?: string | null;
   email?: string | null;
   phone?: string | null;
+  provider?: string | null;
+  subjectId?: string | null;
 }
 
 export interface UserAggregateQueryParams {
@@ -193,9 +198,21 @@ export async function getRoleResourcesOld(roleId: number): Promise<RoleResource[
 export async function putRoleResources(
   roleId: number,
   body: { resourceIds: number[]; actions: Record<string, string[]> },
-): Promise<{ workflowId: number }> {
-  const { data } = await api.put<ApiResponse<{ workflowId: number }>>(`/admin/roles/${roleId}/resources`, body);
-  return unwrap(data);
+): Promise<{ workflowId: number | null }> {
+  const resources = (body.resourceIds || []).map((resourceId) => ({
+    resourceId,
+    actions: body.actions?.[String(resourceId)] || [],
+  }));
+
+  // 后端当前契约为 RoleResourceAssignRequest（resources + replaceExisting）
+  const request: RoleResourceAssignRequest = {
+    resources,
+    replaceExisting: true,
+  };
+
+  const { data } = await api.put<ApiResponse<void>>(`/admin/roles/${roleId}/permissions`, request);
+  unwrap(data);
+  return { workflowId: null };
 }
 
 export async function getUserResources(userId: number): Promise<UserResource[]> {

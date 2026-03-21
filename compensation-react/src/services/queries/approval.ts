@@ -248,7 +248,7 @@ export function getWorkflowTypeInfo(type: ApprovalWorkflowType) {
   const typeMap: Record<ApprovalWorkflowType, { text: string; color: 'blue' | 'purple' | 'orange'; icon: string }> = {
     BATCH: { text: '批量支付', color: 'blue', icon: '📊' },
     ADHOC: { text: '临时支付', color: 'orange', icon: '💸' },
-    OFFLINE: { text: '离线员工', color: 'purple', icon: '👤' },
+    OFFLINE: { text: '架构外员工', color: 'purple', icon: '👤' },
   };
   return typeMap[type] || { text: type, color: 'blue', icon: '📋' };
 }

@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import api, { unwrap } from '@services/api';
+import api, { getPagedRecords, unwrap } from '@services/api';
 import type { PageParams } from '@/types/api';
 import type {
   EmployeeVO,
@@ -22,7 +22,7 @@ export interface EmployeeQueryParams extends PageParams {
   department?: string;
   status?: 'active' | 'inactive' | 'suspended';
   isOffline?: boolean;
-  platformType?: 'wechat' | 'dingtalk' | 'feishu';
+  provider?: 'wechat' | 'dingtalk' | 'feishu';
   managerId?: number;
   sortBy?: string;
   order?: 'asc' | 'desc';
@@ -69,11 +69,37 @@ export interface EmployeePayslipRecord {
   updateTime?: string;
 }
 
+export interface EmployeeSelfContactUpdateData {
+  phone?: string;
+  email?: string;
+}
+
+export interface EmployeeSelfSensitiveChangeData {
+  name?: string;
+  idCard?: string;
+  settlementAccountType?: 'bank_card' | 'alipay' | 'wechat' | 'other';
+  settlementAccount?: string;
+  settlementAccountName?: string;
+  bankAccount?: string;
+  bankName?: string;
+  bankBranchName?: string;
+  reason?: string;
+}
+
+export interface EmployeeSelfChangeRequestSubmitResult {
+  workflowId: number;
+  businessType: string;
+  status: string;
+}
+
 // 员工创建/更新数据
 export type EmployeeFormData = EmployeeCreateRequest & Partial<EmployeeUpdateRequest>;
 
-// 平台绑定数据
-export type PlatformBindData = BindPlatformRequest;
+// 平台绑定数据（统一使用 provider/subjectId）
+export interface PlatformBindData extends BindPlatformRequest {
+  provider?: string;
+  subjectId?: string;
+}
 
 // 状态更新数据
 export interface StatusUpdateData {
@@ -91,7 +117,7 @@ function cleanEmployeeQueryParams(params: EmployeeQueryParams) {
     department: params.department,
     status: params.status,
     isOffline: params.isOffline,
-    platformType: params.platformType,
+    provider: params.provider,
     managerId: params.managerId,
     sortBy: params.sortBy || 'createTime',
     order: params.order || 'desc',
@@ -103,7 +129,20 @@ function cleanEmployeeQueryParams(params: EmployeeQueryParams) {
 
 export async function fetchEmployees(params: EmployeeQueryParams): Promise<PagedResponse<Employee>> {
   const { data } = await api.get('/employee', { params: cleanEmployeeQueryParams(params) });
-  return unwrap<PagedResponse<Employee>>(data);
+  const raw = unwrap<PagedResponse<Employee>>(data);
+
+  if (raw.records) {
+    return raw;
+  }
+
+  const records = getPagedRecords(raw);
+  return {
+    ...raw,
+    records,
+    current: raw.current ?? raw.pageNum ?? params.current ?? 1,
+    size: raw.size ?? raw.pageSize ?? params.pageSize ?? 10,
+    pageSize: raw.pageSize ?? raw.size ?? params.pageSize ?? 10,
+  };
 }
 
 // 查询员工列表
@@ -127,13 +166,85 @@ export function useEmployeeQuery(id: string | number, options?: { enabled?: bool
   });
 }
 
-// 查询离线员工列表
+// 查询当前登录用户绑定的员工资料
+export function useMyEmployeeProfileQuery(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['employee', 'me'],
+    queryFn: async () => {
+      const { data } = await api.get('/employee/me');
+      return unwrap<Employee>(data);
+    },
+    enabled: options?.enabled !== false,
+  });
+}
+
+// 当前员工更新联系方式（直改）
+export function useUpdateMyEmployeeContactMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (contactData: EmployeeSelfContactUpdateData) => {
+      const { data } = await api.patch('/employee/me/contact', contactData);
+      return unwrap<Employee>(data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee', 'me'] });
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+    },
+  });
+}
+
+// 当前员工提交敏感资料变更申请（走审批）
+export function useSubmitMyEmployeeChangeRequestMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (changeData: EmployeeSelfSensitiveChangeData) => {
+      const { data } = await api.post('/employee/me/change-requests', changeData);
+      return unwrap<EmployeeSelfChangeRequestSubmitResult>(data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['employee', 'me', 'changeRequests'] });
+    },
+  });
+}
+
+// 查询当前员工提交的敏感资料变更申请记录
+export function useMyEmployeeChangeRequestsQuery(
+  params: { current: number; pageSize: number },
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: ['employee', 'me', 'changeRequests', params],
+    queryFn: async () => {
+      const { data } = await api.get('/employee/me/change-requests', {
+        params: { page: params.current, size: params.pageSize },
+      });
+      return unwrap<PagedResponse<EmployeeApprovalRecord>>(data);
+    },
+    enabled: options?.enabled !== false,
+  });
+}
+
+// 查询架构外员工列表
 export function useOfflineEmployeesQuery(managerId?: number) {
   return useQuery({
     queryKey: ['employees', 'offline', managerId],
     queryFn: async () => {
       const params = managerId ? { managerId } : {};
       const { data } = await api.get('/employee/offline', { params });
+      return unwrap<Employee[]>(data);
+    },
+  });
+}
+
+// 查询离职员工列表
+export function useResignedEmployeesQuery(managerId?: number) {
+  return useQuery({
+    queryKey: ['employees', 'resigned', managerId],
+    queryFn: async () => {
+      const params = managerId ? { managerId } : {};
+      const { data } = await api.get('/employee/resigned', { params });
       return unwrap<Employee[]>(data);
     },
   });
@@ -206,7 +317,7 @@ export function useBindPlatformMutation() {
   });
 }
 
-// 设置/取消离线
+// 设置/取消架构外标记
 export function useToggleEmployeeOfflineMutation() {
   const queryClient = useQueryClient();
 

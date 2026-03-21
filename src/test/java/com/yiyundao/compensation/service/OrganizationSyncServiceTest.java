@@ -1,0 +1,101 @@
+package com.yiyundao.compensation.service;
+
+import com.yiyundao.compensation.interfaces.adapter.OrganizationAdapter;
+import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
+import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.employee.service.EmployeeService;
+import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
+import com.yiyundao.compensation.modules.user.service.UserBindingService;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.util.Collections;
+
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class OrganizationSyncServiceTest {
+
+    @Mock
+    private NotificationService notificationService;
+    @Mock
+    private IntegrationConfigService integrationConfigService;
+    @Mock
+    private EmployeeService employeeService;
+    @Mock
+    private UserBindingService userBindingService;
+
+    private OrganizationSyncService organizationSyncService;
+
+    @BeforeEach
+    void setUp() {
+        organizationSyncService = new OrganizationSyncService(
+                Collections.<OrganizationAdapter>emptyList(),
+                notificationService,
+                integrationConfigService,
+                employeeService,
+                userBindingService
+        );
+    }
+
+    @Test
+    void importOneShouldLookupExistingEmployeeByProviderAndSubjectId() {
+        Employee incoming = new Employee();
+        incoming.setProvider("wechat");
+        incoming.setSubjectId("wx_user_1001");
+        incoming.setName("张三");
+
+        Employee existing = new Employee();
+        existing.setId(11L);
+
+        EmployeeVO updatedVo = new EmployeeVO();
+        updatedVo.setId(11L);
+
+        Employee target = new Employee();
+        target.setId(11L);
+
+        when(employeeService.getByProviderAndSubjectId("wechat", "wx_user_1001")).thenReturn(existing);
+        when(employeeService.updateEmployee(any(Long.class), any(Employee.class))).thenReturn(updatedVo);
+        when(employeeService.getById(11L)).thenReturn(target);
+
+        Employee result = organizationSyncService.importOne(incoming, "zhangsan");
+
+        assertSame(target, result);
+        verify(employeeService).getByProviderAndSubjectId("wechat", "wx_user_1001");
+        verify(employeeService).updateEmployee(any(Long.class), any(Employee.class));
+        verify(employeeService, never()).createEmployee(any(Employee.class));
+        verify(userBindingService).ensureUserForEmployee(target, "zhangsan");
+    }
+
+    @Test
+    void importOneShouldCreateEmployeeWhenProviderSubjectNotFound() {
+        Employee incoming = new Employee();
+        incoming.setProvider("feishu");
+        incoming.setSubjectId("fs_user_2001");
+        incoming.setName("李四");
+
+        EmployeeVO createdVo = new EmployeeVO();
+        createdVo.setId(21L);
+
+        Employee target = new Employee();
+        target.setId(21L);
+
+        when(employeeService.getByProviderAndSubjectId("feishu", "fs_user_2001")).thenReturn(null);
+        when(employeeService.createEmployee(incoming)).thenReturn(createdVo);
+        when(employeeService.getById(21L)).thenReturn(target);
+
+        Employee result = organizationSyncService.importOne(incoming, null);
+
+        assertSame(target, result);
+        verify(employeeService).getByProviderAndSubjectId("feishu", "fs_user_2001");
+        verify(employeeService).createEmployee(incoming);
+        verify(userBindingService).ensureUserForEmployee(target, null);
+    }
+}

@@ -4,7 +4,8 @@ import lombok.Data;
 
 @Data
 public class OrgMemberPreviewDto {
-    private String platformUserId;
+    private String provider;
+    private String subjectId;
     private String name;
     private String employeeId; // 预览阶段通常为空，供编辑
     private String phone;
@@ -12,4 +13,3 @@ public class OrgMemberPreviewDto {
     private String position;
     private String employmentType; // full_time/part_time，可编辑
 }
-

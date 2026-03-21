@@ -311,8 +311,10 @@ const Dashboard: React.FC = () => {
                     <Card
                       hoverable
                       style={{ textAlign: 'center', border: '1px solid #f0f0f0' }}
-                      bodyStyle={{
-                        padding: smallScreen ? '12px 4px' : '16px 8px',
+                      styles={{
+                        body: {
+                          padding: smallScreen ? '12px 4px' : '16px 8px',
+                        },
                       }}
                     >
                       <div

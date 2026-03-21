@@ -2,12 +2,10 @@
  * 用户权限配置页
  *
  * 设计原则：
- * - 使用 Tree 组件展示资源树
- * - 支持勾选资源节点
- * - 选中资源后，下方展开操作权限配置区域
- * - 提示信息：非管理员需要审批
- *
- * 遵循 Ant Design 设计规范
+ * - 左侧资源树 + 右侧操作配置，提高信息密度
+ * - 支持关键词搜索、类型筛选、仅看已选
+ * - 支持批量设置操作权限
+ * - 继承权限只读展示，不会提交为个性化权限
  */
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
@@ -29,6 +27,11 @@ import {
   Row,
   Col,
   Statistic,
+  Input,
+  Select,
+  Divider,
+  Empty,
+  Switch,
 } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import {
@@ -37,11 +40,81 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { useResourcesQuery } from '@services/queries/resources';
-import { useUserAggregateSearchQuery, useUserResourcesQuery, usePutUserResourcesMutation } from '@services/queries/adminAuth';
+import {
+  useUserAggregateSearchQuery,
+  useUserResourcesQuery,
+  useUserAggregateResourcesQuery,
+  usePutUserResourcesMutation,
+} from '@services/queries/adminAuth';
 import { useRolesQuery } from '@services/queries/roles';
 import type { SysResource } from '@types/api';
 
 const { Text } = Typography;
+
+type ResourceTypeOption = 'ALL' | 'MENU' | 'VIEW' | 'ACTION' | 'API';
+
+const RESOURCE_TYPE_OPTIONS: Array<{ label: string; value: ResourceTypeOption }> = [
+  { label: '全部类型', value: 'ALL' },
+  { label: '菜单', value: 'MENU' },
+  { label: '页面', value: 'VIEW' },
+  { label: '操作', value: 'ACTION' },
+  { label: 'API', value: 'API' },
+];
+
+const RESOURCE_TYPE_LABEL: Record<string, string> = {
+  MENU: '菜单',
+  VIEW: '页面',
+  ACTION: '操作',
+  API: 'API',
+};
+
+const RESOURCE_TYPE_COLOR: Record<string, string> = {
+  MENU: 'blue',
+  VIEW: 'green',
+  ACTION: 'orange',
+  API: 'purple',
+};
+
+const ACTION_OPTIONS: Array<{ label: string; value: string }> = [
+  { label: '查看数据', value: 'read' },
+  { label: '新增/编辑', value: 'write' },
+  { label: '删除数据', value: 'delete' },
+  { label: '全部权限', value: 'admin' },
+  { label: '导出Excel', value: 'export' },
+  { label: '导入数据', value: 'import' },
+];
+
+const parseActions = (actions?: string[] | null, actionsJson?: string | null): string[] => {
+  if (Array.isArray(actions)) {
+    return actions;
+  }
+  if (!actionsJson) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(actionsJson);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    return Array.isArray(parsed?.actions) ? parsed.actions : [];
+  } catch {
+    return [];
+  }
+};
+
+const collectTreeKeys = (nodes: DataNode[]): React.Key[] => {
+  const keys: React.Key[] = [];
+  const walk = (items: DataNode[]) => {
+    items.forEach((item) => {
+      keys.push(item.key);
+      if (item.children && item.children.length > 0) {
+        walk(item.children);
+      }
+    });
+  };
+  walk(nodes);
+  return keys;
+};
 
 const UserPermissionConfig: React.FC = () => {
   const navigate = useNavigate();
@@ -52,12 +125,19 @@ const UserPermissionConfig: React.FC = () => {
   const resourcesQuery = useResourcesQuery();
   const userQuery = useUserAggregateSearchQuery({ q: '', page: 1, size: 100 });
   const userResourcesQuery = useUserResourcesQuery(userIdNum);
+  const userAggregateResourcesQuery = useUserAggregateResourcesQuery(userIdNum);
   const putUserResourcesMutation = usePutUserResourcesMutation(userIdNum);
   const rolesQuery = useRolesQuery({});
 
   // 状态
   const [checkedKeys, setCheckedKeys] = useState<React.Key[]>([]);
   const [actionConfigs, setActionConfigs] = useState<Record<number, string[]>>({});
+  const [resourceKeyword, setResourceKeyword] = useState('');
+  const [resourceTypeFilter, setResourceTypeFilter] = useState<ResourceTypeOption>('ALL');
+  const [onlySelected, setOnlySelected] = useState(false);
+  const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
+  const [leafOnlyCheckable, setLeafOnlyCheckable] = useState(true);
+  const [bulkActions, setBulkActions] = useState<string[]>([]);
 
   // 动态创建角色代码到名称的映射表
   const roleNameMap = useMemo(() => {
@@ -85,24 +165,105 @@ const UserPermissionConfig: React.FC = () => {
     return new Map(list.map((r) => [r.id, r]));
   }, [resourcesQuery.data]);
 
+  const personalizedResourceIdSet = useMemo(() => {
+    const resources = userResourcesQuery.data || [];
+    return new Set(
+      resources.map((r) => r.resourceId).filter((id): id is number => id != null),
+    );
+  }, [userResourcesQuery.data]);
+
+  const inheritedResourceIds = useMemo(() => {
+    const aggregateResources = userAggregateResourcesQuery.data || [];
+    const aggregateIds = new Set(
+      aggregateResources.map((r) => r.resourceId).filter((id): id is number => id != null),
+    );
+    return Array.from(aggregateIds).filter((id) => !personalizedResourceIdSet.has(id));
+  }, [userAggregateResourcesQuery.data, personalizedResourceIdSet]);
+
+  const inheritedResourceIdSet = useMemo(
+    () => new Set(inheritedResourceIds),
+    [inheritedResourceIds],
+  );
+
+  const checkedKeySet = useMemo(() => {
+    return new Set(checkedKeys.map((key) => Number(key)));
+  }, [checkedKeys]);
+
+  // 根据关键词、类型、已选状态过滤资源，同时补全父节点保证层级可读
+  const filteredResources = useMemo(() => {
+    const list = resourcesQuery.data || [];
+    if (list.length === 0) return [];
+
+    const keyword = resourceKeyword.trim().toLowerCase();
+    const noFilter = keyword.length === 0 && resourceTypeFilter === 'ALL' && !onlySelected;
+    if (noFilter) return list;
+
+    const byId = new Map<number, SysResource>(list.map((r) => [r.id, r]));
+    const match = (r: SysResource) => {
+      if (resourceTypeFilter !== 'ALL' && r.type !== resourceTypeFilter) return false;
+      if (onlySelected && !checkedKeySet.has(r.id)) return false;
+      if (!keyword) return true;
+      return (
+        (r.name || '').toLowerCase().includes(keyword)
+        || (r.code || '').toLowerCase().includes(keyword)
+        || (r.path || '').toLowerCase().includes(keyword)
+      );
+    };
+
+    const visibleIds = new Set<number>();
+    list.forEach((r) => {
+      if (!match(r)) return;
+
+      let current: SysResource | undefined = r;
+      while (current) {
+        if (visibleIds.has(current.id)) break;
+        visibleIds.add(current.id);
+        const parentId = current.parentId ?? null;
+        current = parentId != null ? byId.get(parentId) : undefined;
+      }
+    });
+
+    return list.filter((r) => visibleIds.has(r.id));
+  }, [resourcesQuery.data, resourceKeyword, resourceTypeFilter, onlySelected, checkedKeySet]);
+
+  const nonLeafIdSet = useMemo(() => {
+    const set = new Set<number>();
+    filteredResources.forEach((r) => {
+      if (r.parentId != null) {
+        set.add(r.parentId);
+      }
+    });
+    return set;
+  }, [filteredResources]);
+
   // 构建资源树
   const treeData: DataNode[] = useMemo(() => {
-    const list = resourcesQuery.data || [];
+    const list = filteredResources || [];
     const map = new Map<number, DataNode>();
 
     list.forEach((r: SysResource) => {
       map.set(r.id, {
         key: r.id,
         title: (
-          <Space size={4}>
+          <Space size={4} wrap>
             <Text strong style={{ fontSize: 13 }}>{r.name}</Text>
             <Text type="secondary" style={{ fontSize: 11 }}>({r.code})</Text>
-            {r.type === 'API' && <Tag color="purple" style={{ margin: 0, fontSize: 10 }}>API</Tag>}
-            {r.type === 'ACTION' && <Tag color="orange" style={{ margin: 0, fontSize: 10 }}>操作</Tag>}
-            {r.type === 'MENU' && <Tag color="blue" style={{ margin: 0, fontSize: 10 }}>菜单</Tag>}
+            <Tag color={RESOURCE_TYPE_COLOR[r.type] || 'default'} style={{ margin: 0, fontSize: 10 }}>
+              {RESOURCE_TYPE_LABEL[r.type] || r.type}
+            </Tag>
+            {inheritedResourceIdSet.has(r.id) && (
+              <Tag color="cyan" style={{ margin: 0, fontSize: 10 }}>继承</Tag>
+            )}
+            {r.path && (
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                {r.path}
+              </Text>
+            )}
           </Space>
         ),
         children: [],
+        disableCheckbox: inheritedResourceIdSet.has(r.id)
+          || (leafOnlyCheckable && nonLeafIdSet.has(r.id) && !checkedKeySet.has(r.id)),
       });
     });
 
@@ -118,35 +279,60 @@ const UserPermissionConfig: React.FC = () => {
     });
 
     return roots;
-  }, [resourcesQuery.data]);
+  }, [filteredResources, inheritedResourceIdSet, leafOnlyCheckable, nonLeafIdSet, checkedKeySet]);
 
-  // 加载用户当前权限
+  const allTreeKeys = useMemo(() => collectTreeKeys(treeData), [treeData]);
+
+  // 筛选条件变化时自动展开可见树
   useEffect(() => {
-    if (userResourcesQuery.data) {
-      const resources = userResourcesQuery.data as any[];
-      const ids = resources.map((r) => r.resourceId).filter((id): id is number => id != null);
-      setCheckedKeys(ids);
+    setExpandedKeys(allTreeKeys);
+  }, [allTreeKeys]);
+
+  // 加载用户当前有效权限（角色继承 + 个性化）
+  useEffect(() => {
+    if (userAggregateResourcesQuery.data) {
+      const resources = userAggregateResourcesQuery.data as any[];
+      const idSet = new Set<number>();
 
       const configs: Record<number, string[]> = {};
       resources.forEach((r) => {
-        if (r.actionsJson) {
-          try {
-            const parsedActions = JSON.parse(r.actionsJson);
-            configs[r.resourceId] = Array.isArray(parsedActions) ? parsedActions : parsedActions.actions || [];
-          } catch {}
+        const resourceId = r.resourceId;
+        if (resourceId == null) return;
+
+        idSet.add(resourceId);
+        const parsedActions = parseActions(r.actions, r.actionsJson);
+        if (parsedActions.length > 0) {
+          configs[resourceId] = parsedActions;
         }
       });
+
+      setCheckedKeys(Array.from(idSet));
       setActionConfigs(configs);
     }
-  }, [userResourcesQuery.data]);
+  }, [userAggregateResourcesQuery.data]);
+
+  const selectedResources = useMemo(() => {
+    return checkedKeys
+      .map((key) => resourceMap.get(Number(key)))
+      .filter((r): r is SysResource => !!r)
+      .sort((a, b) => (a.orderNum ?? 0) - (b.orderNum ?? 0));
+  }, [checkedKeys, resourceMap]);
+
+  const editableSelectedResources = useMemo(() => {
+    return selectedResources.filter((r) => !inheritedResourceIdSet.has(r.id));
+  }, [selectedResources, inheritedResourceIdSet]);
 
   // Tree 勾选变化
   const handleCheck = (checked: React.Key[] | { checked: React.Key[]; halfChecked: React.Key[] }) => {
     const keys = Array.isArray(checked) ? checked : checked.checked;
-    setCheckedKeys(keys);
+    const merged = Array.from(new Set([
+      ...keys.map((k) => Number(k)),
+      ...inheritedResourceIds,
+    ]));
+    setCheckedKeys(merged);
 
     // 移除未勾选资源的操作配置
-    const keySet = new Set(keys.map(Number));
+    const keySet = new Set(merged.map(Number));
     setActionConfigs((prev) => {
       const newConfigs: Record<number, string[]> = {};
       Object.keys(prev).forEach((key) => {
@@ -167,18 +353,81 @@ const UserPermissionConfig: React.FC = () => {
     }));
   }, []);
 
+  const handleSelectAllVisible = () => {
+    const visibleIds = filteredResources.map((r) => r.id);
+    const merged = new Set<number>([...checkedKeys.map((k) => Number(k)), ...visibleIds, ...inheritedResourceIds]);
+    setCheckedKeys(Array.from(merged));
+  };
+
+  const handleClearSelected = () => {
+    setCheckedKeys(Array.from(inheritedResourceIdSet));
+    setActionConfigs((prev) => {
+      const next = { ...prev };
+      Object.keys(next).forEach((key) => {
+        if (!inheritedResourceIdSet.has(Number(key))) {
+          delete next[Number(key)];
+        }
+      });
+      return next;
+    });
+  };
+
+  const handleExpandAll = () => {
+    setExpandedKeys(allTreeKeys);
+  };
+
+  const handleCollapseAll = () => {
+    setExpandedKeys([]);
+  };
+
+  const applyBulkActionsToSelected = useCallback(() => {
+    if (editableSelectedResources.length === 0) {
+      message.warning('没有可编辑的资源');
+      return;
+    }
+
+    setActionConfigs((prev) => {
+      const next = { ...prev };
+      editableSelectedResources.forEach((res) => {
+        next[res.id] = bulkActions;
+      });
+      return next;
+    });
+    message.success(`已将 ${bulkActions.length} 个操作应用到 ${editableSelectedResources.length} 项资源`);
+  }, [editableSelectedResources, bulkActions]);
+
+  const clearActionsForSelected = useCallback(() => {
+    if (editableSelectedResources.length === 0) {
+      message.warning('没有可编辑的资源');
+      return;
+    }
+
+    setActionConfigs((prev) => {
+      const next = { ...prev };
+      editableSelectedResources.forEach((res) => {
+        delete next[res.id];
+      });
+      return next;
+    });
+    message.success(`已清空 ${editableSelectedResources.length} 项资源的操作配置`);
+  }, [editableSelectedResources]);
+
   // 保存权限配置
   const handleSave = async () => {
     try {
+      const resourceIds = checkedKeys
+        .map(Number)
+        .filter((id) => !inheritedResourceIdSet.has(id));
+
       const actions: Record<string, string[]> = {};
       Object.entries(actionConfigs).forEach(([key, value]) => {
-        if (value.length > 0) {
+        if (value.length > 0 && !inheritedResourceIdSet.has(Number(key))) {
           actions[key] = value;
         }
       });
 
       const result = await putUserResourcesMutation.mutateAsync({
-        resourceIds: checkedKeys.map(Number),
+        resourceIds,
         actions,
       });
 
@@ -215,7 +464,12 @@ const UserPermissionConfig: React.FC = () => {
     return { menuCount, apiCount, actionCount, total: checkedKeys.length };
   }, [checkedKeys, resourceMap]);
 
-  if (resourcesQuery.isLoading || userQuery.isLoading) {
+  if (
+    resourcesQuery.isLoading
+    || userQuery.isLoading
+    || userResourcesQuery.isLoading
+    || userAggregateResourcesQuery.isLoading
+  ) {
     return (
       <PageContainer>
         <Card>
@@ -275,90 +529,181 @@ const UserPermissionConfig: React.FC = () => {
           </Descriptions>
         </Card>
 
-        {/* 提示信息 */}
         <Alert
           message="个性化授权说明"
-          description="个性化授权是为用户单独授予的资源权限，不通过角色分配。非管理员操作需要提交审批，管理员操作直接生效。"
+          description={`当前有 ${inheritedResourceIds.length} 项权限来自角色继承（标记为“继承”且不可取消/编辑），提交时仅会保存个性化权限。`}
           type="info"
           showIcon
         />
 
-        {/* 资源树 */}
-        <Card
-          title="资源选择"
-          extra={
-            <Space>
-              <Text type="secondary">已选 {checkedKeys.length} 项</Text>
-              <Button
-                icon={<ReloadOutlined />}
-                size="small"
-                onClick={() => userResourcesQuery.refetch()}
-                loading={userResourcesQuery.isFetching}
-              >
-                刷新
-              </Button>
-            </Space>
-          }
-        >
-          <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 16, maxHeight: 500, overflowY: 'auto' }}>
-            <Tree
-              checkable
-              defaultExpandAll
-              checkedKeys={checkedKeys}
-              onCheck={handleCheck}
-              treeData={treeData}
-              height={450}
-            />
-          </div>
-        </Card>
+        <Row gutter={[16, 16]}>
+          <Col xs={24} lg={14}>
+            <Card
+              title="资源选择"
+              extra={(
+                <Space>
+                  <Text type="secondary">已选 {checkedKeys.length} 项</Text>
+                  <Button
+                    icon={<ReloadOutlined />}
+                    size="small"
+                    onClick={() => {
+                      userResourcesQuery.refetch();
+                      userAggregateResourcesQuery.refetch();
+                    }}
+                    loading={userResourcesQuery.isFetching || userAggregateResourcesQuery.isFetching}
+                  >
+                    刷新
+                  </Button>
+                </Space>
+              )}
+            >
+              <Space wrap style={{ marginBottom: 12 }}>
+                <Input.Search
+                  allowClear
+                  placeholder="按名称 / 编码 / 路径搜索"
+                  style={{ width: 260 }}
+                  value={resourceKeyword}
+                  onChange={(e) => setResourceKeyword(e.target.value)}
+                />
+                <Select<ResourceTypeOption>
+                  value={resourceTypeFilter}
+                  style={{ width: 140 }}
+                  options={RESOURCE_TYPE_OPTIONS}
+                  onChange={setResourceTypeFilter}
+                />
+                <Checkbox
+                  checked={onlySelected}
+                  onChange={(e) => setOnlySelected(e.target.checked)}
+                >
+                  仅看已选
+                </Checkbox>
+                <Space size={4}>
+                  <Text type="secondary">仅叶子可勾选</Text>
+                  <Switch
+                    size="small"
+                    checked={leafOnlyCheckable}
+                    onChange={setLeafOnlyCheckable}
+                  />
+                </Space>
+                <Divider type="vertical" />
+                <Button size="small" onClick={handleSelectAllVisible} disabled={filteredResources.length === 0}>
+                  全选当前结果
+                </Button>
+                <Button size="small" onClick={handleClearSelected} disabled={checkedKeys.length === inheritedResourceIds.length}>
+                  清空个性化已选
+                </Button>
+                <Button size="small" onClick={handleExpandAll} disabled={treeData.length === 0}>
+                  展开全部
+                </Button>
+                <Button size="small" onClick={handleCollapseAll} disabled={treeData.length === 0}>
+                  折叠全部
+                </Button>
+              </Space>
 
-        {/* 操作权限配置 */}
-        {checkedKeys.length > 0 && (
-          <Card title="操作权限配置">
-            <Collapse
-              accordion
-              items={checkedKeys.map((key) => {
-                const res = resourceMap.get(Number(key));
-                if (!res) return null;
+              <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 12, minHeight: 520 }}>
+                {treeData.length > 0 ? (
+                  <Tree
+                    checkable
+                    showLine
+                    checkedKeys={checkedKeys}
+                    expandedKeys={expandedKeys}
+                    onExpand={(keys) => setExpandedKeys(keys)}
+                    onCheck={handleCheck}
+                    treeData={treeData}
+                    height={500}
+                  />
+                ) : (
+                  <Empty description="没有匹配的资源，请调整筛选条件" />
+                )}
+              </div>
+            </Card>
+          </Col>
 
-                const actions = actionConfigs[Number(key)] || [];
+          <Col xs={24} lg={10}>
+            <Card title="操作权限配置" extra={<Text type="secondary">资源 {selectedResources.length} 项</Text>}>
+              {selectedResources.length === 0 ? (
+                <Empty description="请先在左侧选择资源" />
+              ) : (
+                <>
+                  <Alert
+                    message="为个性化资源配置操作"
+                    description={`可编辑资源 ${editableSelectedResources.length} 项，继承资源仅展示不可编辑。`}
+                    type="info"
+                    showIcon
+                    style={{ marginBottom: 12 }}
+                  />
 
-                return {
-                  key: String(key),
-                  label: (
-                    <Space>
-                      <Text strong>{res.name}</Text>
-                      <Tag color={res.type === 'API' ? 'purple' : res.type === 'ACTION' ? 'orange' : 'blue'}>
-                        {res.type}
-                      </Tag>
-                      {actions.length > 0 && (
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          已配置 {actions.length} 个操作
-                        </Text>
-                      )}
-                    </Space>
-                  ),
-                  children: (
+                  <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 12 }}>
+                    <Text type="secondary">批量设置操作（仅作用于可编辑资源）</Text>
                     <Checkbox.Group
-                      options={[
-                        { label: '查看数据', value: 'read' },
-                        { label: '新增/编辑', value: 'write' },
-                        { label: '删除数据', value: 'delete' },
-                        { label: '全部权限', value: 'admin' },
-                        { label: '导出Excel', value: 'export' },
-                        { label: '导入数据', value: 'import' },
-                      ]}
-                      value={actions}
-                      onChange={(checkedValues) => updateActionConfig(Number(key), checkedValues as string[])}
+                      options={ACTION_OPTIONS}
+                      value={bulkActions}
+                      onChange={(values) => setBulkActions(values as string[])}
                     />
-                  ),
-                };
-              }).filter(Boolean)}
-            />
-          </Card>
-        )}
+                    <Space>
+                      <Button size="small" onClick={applyBulkActionsToSelected}>
+                        应用到全部可编辑
+                      </Button>
+                      <Button size="small" onClick={clearActionsForSelected}>
+                        清空全部可编辑动作
+                      </Button>
+                    </Space>
+                  </Space>
 
-        {/* 权限统计 */}
+                  <Space wrap style={{ marginBottom: 12 }}>
+                    {selectedResources.slice(0, 12).map((res) => (
+                      <Tag key={res.id} color={RESOURCE_TYPE_COLOR[res.type] || 'default'}>
+                        {res.name}
+                      </Tag>
+                    ))}
+                    {selectedResources.length > 12 && (
+                      <Text type="secondary">+{selectedResources.length - 12} 项</Text>
+                    )}
+                  </Space>
+
+                  <div style={{ maxHeight: 430, overflowY: 'auto', paddingRight: 4 }}>
+                    <Collapse
+                      accordion
+                      items={selectedResources.map((res) => {
+                        const actions = actionConfigs[res.id] || [];
+                        const isInheritedOnly = inheritedResourceIdSet.has(res.id);
+                        return {
+                          key: String(res.id),
+                          label: (
+                            <Space wrap>
+                              <Text strong>{res.name}</Text>
+                              <Tag color={RESOURCE_TYPE_COLOR[res.type] || 'default'}>
+                                {RESOURCE_TYPE_LABEL[res.type] || res.type}
+                              </Tag>
+                              {isInheritedOnly && <Tag color="cyan">继承</Tag>}
+                              <Text type="secondary" style={{ fontSize: 11 }}>
+                                {res.code}
+                              </Text>
+                              {actions.length > 0 && (
+                                <Text type="secondary" style={{ fontSize: 11 }}>
+                                  已配置 {actions.length} 个操作
+                                </Text>
+                              )}
+                            </Space>
+                          ),
+                          children: (
+                            <Checkbox.Group
+                              options={ACTION_OPTIONS}
+                              value={actions}
+                              disabled={isInheritedOnly}
+                              onChange={(checkedValues) => updateActionConfig(res.id, checkedValues as string[])}
+                            />
+                          ),
+                        };
+                      })}
+                    />
+                  </div>
+                </>
+              )}
+            </Card>
+          </Col>
+        </Row>
+
         <Card title="权限统计" size="small">
           <Row gutter={16}>
             <Col span={6}>
@@ -376,7 +721,6 @@ const UserPermissionConfig: React.FC = () => {
           </Row>
         </Card>
 
-        {/* 操作按钮 */}
         <Card>
           <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
             <Button
@@ -401,3 +745,4 @@ const UserPermissionConfig: React.FC = () => {
 };
 
 export default UserPermissionConfig;
+

@@ -24,8 +24,10 @@ import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollConfirmationAggregateService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollConfirmationService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollProcessManager;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
@@ -60,6 +62,8 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
     private final EmployeeService employeeService;
     private final UserRoleService userRoleService;
     private final ObjectMapper objectMapper;
+    private final PayrollConfirmationAggregateService confirmationAggregateService;
+    private final PayrollProcessManager payrollProcessManager;
 
     @Override
     @Transactional
@@ -317,9 +321,16 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
     @Transactional
     public void refreshBatchConfirmationStatus(Long batchId) {
         PayrollBatch batch = payrollBatchService.getById(batchId);
-        if (batch == null || Boolean.FALSE.equals(batch.getConfirmationRequired())) {
+        if (batch == null) {
             return;
         }
+
+        if (Boolean.FALSE.equals(batch.getConfirmationRequired())) {
+            confirmationAggregateService.syncFromLegacyBatch(batchId, batch.getBatchRevision());
+            payrollProcessManager.onConfirmationCompleted(batchId, batch.getBatchRevision());
+            return;
+        }
+
         List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, batchId));
         PayrollConfirmationStats stats = calcStats(lines);
@@ -340,6 +351,11 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         batch.setStatus(targetStatus);
         batch.setConfirmationCompletedTime(completedTime);
         payrollBatchService.updateById(batch);
+
+        confirmationAggregateService.syncFromLegacyBatch(batchId, batch.getBatchRevision());
+        if (targetStatus == PayrollBatchStatus.CONFIRMED) {
+            payrollProcessManager.onConfirmationCompleted(batchId, batch.getBatchRevision());
+        }
     }
 
     private boolean confirmSingleLine(PayrollLine line, SysUser operator, String signature, String comment) {

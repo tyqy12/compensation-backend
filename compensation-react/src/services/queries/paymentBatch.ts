@@ -9,6 +9,27 @@ export type PaymentBatch = PaymentBatchVO;
 // 支付记录数据类型定义
 export type PaymentRecord = PaymentRecordItemVO;
 
+export interface TransferValidationIssue {
+  recordId?: number;
+  employeeId?: number;
+  employeeName?: string;
+  providerCode?: string;
+  paymentMethod?: string;
+  recipientAccountMasked?: string;
+  errorCode?: string;
+  errorMsg?: string;
+}
+
+export interface BatchTransferValidation {
+  batchNo: string;
+  pendingCount: number;
+  passCount: number;
+  blockedCount: number;
+  pass: boolean;
+  warnings: string[];
+  blockedRecords: TransferValidationIssue[];
+}
+
 // 批次查询参数
 export interface PaymentBatchQueryParams extends PageParams {
   current?: number;
@@ -121,6 +142,13 @@ export function useTransferStatusQuery(outBizNo: string, options?: { enabled?: b
     enabled: !!outBizNo && options?.enabled !== false,
     staleTime: 10000, // 10秒内不重新请求
   });
+}
+
+export async function checkBatchTransfer(batchNo: string, persistFailure: boolean = true) {
+  const { data } = await api.get(`/payment/batch/${batchNo}/precheck`, {
+    params: { persistFailure },
+  });
+  return unwrap<BatchTransferValidation>(data);
 }
 
 // 启动批次转账

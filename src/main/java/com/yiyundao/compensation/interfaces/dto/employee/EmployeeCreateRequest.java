@@ -1,5 +1,7 @@
 package com.yiyundao.compensation.interfaces.dto.employee;
 
+import com.fasterxml.jackson.annotation.JsonAnySetter;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
@@ -21,8 +23,12 @@ public class EmployeeCreateRequest {
     private String position;
     // 用工类型: full_time / part_time
     private String employmentType;
-    private String platformUserId;
-    private String platformType;
+    private String subjectId;
+    private String provider;
+    @JsonIgnore
+    private String legacyPlatformType;
+    @JsonIgnore
+    private String legacyPlatformUserId;
     private Long managerId;
     private LocalDate hireDate;
     private String status; // 默认 active
@@ -39,4 +45,18 @@ public class EmployeeCreateRequest {
     private Boolean offline;
     // 可选：指定要创建的系统用户名（若冲突会自动追加数字）
     private String username;
+
+    @JsonAnySetter
+    public void captureLegacyPlatformFields(String key, Object value) {
+        if (value == null || key == null) {
+            return;
+        }
+        if ("platformType".equals(key)) {
+            this.legacyPlatformType = String.valueOf(value);
+            return;
+        }
+        if ("platformUserId".equals(key)) {
+            this.legacyPlatformUserId = String.valueOf(value);
+        }
+    }
 }

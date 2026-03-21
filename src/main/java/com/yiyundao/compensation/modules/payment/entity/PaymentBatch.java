@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.yiyundao.compensation.entity.BaseEntity;
 import com.yiyundao.compensation.enums.BatchStatus;
+import com.yiyundao.compensation.enums.PaymentBatchProcessStatus;
 import com.yiyundao.compensation.enums.PaymentType;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -39,6 +40,12 @@ public class PaymentBatch extends BaseEntity {
 
     private BatchStatus status;
 
+    @TableField("distribution_id")
+    private Long distributionId;
+
+    @TableField("payment_status")
+    private PaymentBatchProcessStatus paymentStatus;
+
     @TableField("submit_time")
     private LocalDateTime submitTime;
 
@@ -59,4 +66,3 @@ public class PaymentBatch extends BaseEntity {
 
     private String remark;
 }
-

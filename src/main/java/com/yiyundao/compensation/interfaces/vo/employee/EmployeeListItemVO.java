@@ -16,8 +16,8 @@ public class EmployeeListItemVO {
     private String position;
     private String status;
     private String statusName;
-    private String platformType;
-    private String platformTypeName;
+    private String provider;
+    private String providerName;
     private Boolean offline;
     private LocalDate hireDate;
     private LocalDateTime createTime;
@@ -31,8 +31,8 @@ public class EmployeeListItemVO {
         vo.setPosition(e.getPosition());
         vo.setStatus(e.getStatus());
         vo.setStatusName(translateStatus(e.getStatus()));
-        vo.setPlatformType(e.getPlatformType());
-        vo.setPlatformTypeName(translatePlatform(e.getPlatformType()));
+        vo.setProvider(e.getProvider());
+        vo.setProviderName(translatePlatform(e.getProvider()));
         vo.setOffline(e.getOffline());
         vo.setHireDate(e.getHireDate());
         vo.setCreateTime(e.getCreateTime());

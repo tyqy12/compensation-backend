@@ -17,7 +17,7 @@ import {
 } from 'antd';
 import { ReloadOutlined, WarningOutlined } from '@ant-design/icons';
 import { usePayrollLedgerQuery } from '@services/queries/payroll';
-import type { PayrollPreviewLineDto } from '@types/openapi';
+import type { PayrollPreviewLineDto, PayrollValidationIssueDto } from '@types/openapi';
 
 const { Text, Title } = Typography;
 
@@ -34,6 +34,55 @@ const EMPLOYMENT_TEXT: Record<string, string> = {
   full_time: '全职',
   part_time: '兼职',
   contractor: '外包',
+};
+
+const getIssueSeverity = (issue?: PayrollValidationIssueDto) => {
+  const severity = String(issue?.severity ?? '').toLowerCase();
+  if (severity === 'blocking' || issue?.blocking) {
+    return 'blocking';
+  }
+  if (severity === 'info') {
+    return 'info';
+  }
+  return 'review';
+};
+
+const getIssueColor = (issue?: PayrollValidationIssueDto) => {
+  const severity = getIssueSeverity(issue);
+  if (severity === 'blocking') {
+    return 'error';
+  }
+  if (severity === 'info') {
+    return 'processing';
+  }
+  return 'warning';
+};
+
+const renderIssueTags = (issues?: PayrollValidationIssueDto[], warnings?: string[]) => {
+  if (issues && issues.length > 0) {
+    return (
+      <Space size={4} wrap>
+        {issues.map((issue, idx) => (
+          <Tag color={getIssueColor(issue)} key={`${issue.code ?? issue.message ?? 'issue'}-${idx}`}>
+            {issue.message}
+          </Tag>
+        ))}
+      </Space>
+    );
+  }
+  if (warnings && warnings.length > 0) {
+    return (
+      <Space size={4} wrap>
+        {warnings.map((warning, idx) => (
+          <Tag color="warning" key={`${warning}-${idx}`}>
+            <WarningOutlined style={{ marginRight: 4 }} />
+            {warning}
+          </Tag>
+        ))}
+      </Space>
+    );
+  }
+  return <Text type="secondary">正常</Text>;
 };
 
 const columns: ProColumns<PayrollPreviewLineDto>[] = [
@@ -79,7 +128,8 @@ const columns: ProColumns<PayrollPreviewLineDto>[] = [
     dataIndex: 'deductionsAmount',
     width: 120,
     align: 'right',
-    render: (_, record) => formatCurrency(record.deductionsAmount, record.currency as any),
+    render: (_, record) =>
+      formatCurrency(record.deductionsTotal ?? record.deductionsAmount, record.currency as any),
   },
   {
     title: '个税',
@@ -103,22 +153,10 @@ const columns: ProColumns<PayrollPreviewLineDto>[] = [
     render: (_, record) => formatCurrency(record.netAmount, record.currency as any),
   },
   {
-    title: '预警',
-    dataIndex: 'warnings',
-    width: 180,
-    render: (_, record) =>
-      (record.warnings && record.warnings.length > 0)
-        ? (
-            <Space size={4} wrap>
-              {record.warnings.map((warning, idx) => (
-                <Tag color="orange" key={`${warning}-${idx}`}>
-                  <WarningOutlined style={{ marginRight: 4 }} />
-                  {warning}
-                </Tag>
-              ))}
-            </Space>
-          )
-        : <Text type="secondary">正常</Text>,
+    title: '校验问题',
+    dataIndex: 'issues',
+    width: 220,
+    render: (_, record) => renderIssueTags(record.issues, record.warnings),
   },
 ];
 
@@ -149,12 +187,16 @@ const BatchLedger: React.FC = () => {
       value: formatCurrency(ledger?.netTotal, currency),
     },
     {
-      title: '预警行数',
-      value: ledger?.linesWithWarnings ?? 0,
+      title: '阻塞员工行',
+      value: ledger?.linesWithBlockingIssues ?? 0,
     },
     {
-      title: '预警总数',
-      value: ledger?.totalWarnings ?? 0,
+      title: '阻塞问题',
+      value: ledger?.blockingIssueCount ?? 0,
+    },
+    {
+      title: '复核提醒',
+      value: ledger?.reviewIssueCount ?? 0,
     },
   ], [ledger, currency]);
 
@@ -205,13 +247,21 @@ const BatchLedger: React.FC = () => {
                 </Card>
               ))}
             </div>
-            {ledger?.warnings && ledger.warnings.length > 0 && (
+            {ledger?.issues && ledger.issues.length > 0 && (
+              <Alert
+                type={ledger.hasBlockingIssues ? 'error' : 'warning'}
+                showIcon
+                message={ledger.hasBlockingIssues ? '批次阻塞问题' : '批次复核提醒'}
+                description={renderIssueTags(ledger.issues, ledger.warnings)}
+              />
+            )}
+            {!ledger?.issues?.length && ledger?.warnings && ledger.warnings.length > 0 && (
               <Alert
                 type="warning"
                 showIcon
-                message="批次预警"
+                message="批次复核提醒"
                 description={
-                  <Space orientation="vertical" size={4} style={{ width: '100%' }}>
+                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
                     {ledger.warnings.map((warning, idx) => (
                       <Text key={`${warning}-${idx}`}>{warning}</Text>
                     ))}
@@ -236,14 +286,27 @@ const BatchLedger: React.FC = () => {
           search={false}
           pagination={{ pageSize: 20, showSizeChanger: true }}
           headerTitle="员工行明细"
-          toolBarRender={() => ledger?.linesWithWarnings ? [
-            <Tooltip key="warnings" title="存在预警的员工行">
-              <Tag color="orange">
-                <WarningOutlined style={{ marginRight: 4 }} />
-                {ledger?.linesWithWarnings} 行
-              </Tag>
-            </Tooltip>
-          ] : []}
+          toolBarRender={() => {
+            const tools = [] as React.ReactNode[];
+            if (ledger?.linesWithBlockingIssues) {
+              tools.push(
+                <Tooltip key="blocking" title="存在阻塞问题的员工行">
+                  <Tag color="error">{ledger.linesWithBlockingIssues} 行阻塞</Tag>
+                </Tooltip>,
+              );
+            }
+            if (ledger?.linesWithWarnings) {
+              tools.push(
+                <Tooltip key="warnings" title="存在复核提醒的员工行">
+                  <Tag color="warning">
+                    <WarningOutlined style={{ marginRight: 4 }} />
+                    {ledger.linesWithWarnings} 行提醒
+                  </Tag>
+                </Tooltip>,
+              );
+            }
+            return tools;
+          }}
         />
       </Space>
     </PageContainer>

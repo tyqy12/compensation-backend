@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.enums.BatchStatus;
+import com.yiyundao.compensation.enums.PaymentBatchProcessStatus;
 import com.yiyundao.compensation.enums.PaymentType;
 import com.yiyundao.compensation.infrastructure.dao.PaymentBatchMapper;
 import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
@@ -31,8 +32,22 @@ public class PaymentBatchServiceImpl extends ServiceImpl<PaymentBatchMapper, Pay
     public void updateStatus(Long batchId, BatchStatus status) {
         LambdaUpdateWrapper<PaymentBatch> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(PaymentBatch::getId, batchId)
-                    .set(PaymentBatch::getStatus, status);
+                    .set(PaymentBatch::getStatus, status)
+                    .set(PaymentBatch::getPaymentStatus, mapPaymentStatus(status));
         update(updateWrapper);
+    }
+
+    private PaymentBatchProcessStatus mapPaymentStatus(BatchStatus status) {
+        if (status == null) {
+            return null;
+        }
+        return switch (status) {
+            case DRAFT -> PaymentBatchProcessStatus.CREATED;
+            case SUBMITTED, APPROVED -> PaymentBatchProcessStatus.SUBMITTED;
+            case PROCESSING -> PaymentBatchProcessStatus.PROCESSING;
+            case COMPLETED -> PaymentBatchProcessStatus.SUCCESS;
+            case FAILED -> PaymentBatchProcessStatus.FAILED;
+        };
     }
 
     @Override
