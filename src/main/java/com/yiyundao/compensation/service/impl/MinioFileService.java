@@ -68,6 +68,8 @@ public class MinioFileService implements FileService {
 
     @Override
     public String upload(MultipartFile file, String category, String fileName) {
+        validateCategory(category);
+        validateCustomFileName(fileName);
         if (fallbackService != null) {
             return fallbackService.upload(file, category, fileName);
         }
@@ -200,5 +202,23 @@ public class MinioFileService implements FileService {
     private String generateFileName(String extension) {
         String uuid = UUID.randomUUID().toString().replace("-", "");
         return extension.isEmpty() ? uuid : uuid + "." + extension;
+    }
+
+    private void validateCategory(String category) {
+        if (category == null || category.isBlank()) {
+            throw new IllegalArgumentException("category 不能为空");
+        }
+        if (category.startsWith("/") || category.contains("\\") || category.contains("..")) {
+            throw new IllegalArgumentException("非法 category");
+        }
+    }
+
+    private void validateCustomFileName(String fileName) {
+        if (fileName == null || fileName.isEmpty()) {
+            return;
+        }
+        if (fileName.contains("/") || fileName.contains("\\") || fileName.contains("..")) {
+            throw new IllegalArgumentException("非法 fileName");
+        }
     }
 }
