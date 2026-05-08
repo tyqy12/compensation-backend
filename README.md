@@ -90,6 +90,53 @@ curl http://localhost:8080/api/system/health
 ```
 详见：docs/docker-wsl.md
 
+## Git 提交与推送说明
+
+### 提交前检查
+```bash
+# 查看当前改动，确认只提交本次任务相关文件
+git status
+
+# 查看具体差异
+git diff
+
+# 后端变更建议至少运行测试
+./mvnw -q test
+```
+
+不要提交密钥、账号密码、生产配置或本地临时文件；敏感配置请放在环境变量或未跟踪的 `application-local.yml` 中。
+
+### 提交改动
+```bash
+# 添加指定文件，避免误提交无关改动
+git add README.md
+
+# 使用 Conventional Commits 格式
+git commit -m "docs: 更新 Git 推送说明"
+```
+
+常用提交类型：`feat` 新功能、`fix` 修复、`docs` 文档、`refactor` 重构、`test` 测试、`build` 构建、`chore` 杂项。
+
+### 推送到远端
+```bash
+# 查看当前分支
+git branch --show-current
+
+# 已建立远端跟踪关系时推送
+git push
+
+# 新分支首次推送时建立 upstream
+git push -u origin <branch-name>
+```
+
+如果远端已有更新导致推送失败，先拉取并处理冲突：
+```bash
+git pull --rebase
+git push
+```
+
+多人协作时保持提交粒度清晰，PR 中说明变更目的、测试方式、配置或数据库变更，并附上必要的日志或截图。
+
 ### 常用端点（更多见 docs/auth-api.md、docs/integration.md、docs/payment-api.md、docs/approval-api.md、docs/dashboard-api.md、docs/admin-api.md、docs/org-structure.md、docs/platform-binding-approval.md、docs/employee-user-linking.md）
 - 系统：
   - `GET /api/system/health` 健康检查
