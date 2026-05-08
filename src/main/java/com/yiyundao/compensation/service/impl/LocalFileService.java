@@ -37,7 +37,7 @@ public class LocalFileService implements FileService {
         try {
             Files.createDirectories(rootLocation);
         } catch (IOException e) {
-            throw new RuntimeException("无法创建文件存储目录", e);
+            throw new RuntimeException("无法创建文件存储目录: " + rootLocation, e);
         }
     }
 
