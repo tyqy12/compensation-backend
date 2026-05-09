@@ -237,6 +237,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  `items_json` json DEFAULT NULL COMMENT '项配置JSON',\n" +
                 "  `tax_rule_json` json DEFAULT NULL COMMENT '税社保口径JSON',\n" +
                 "  `status` varchar(20) DEFAULT 'enabled' COMMENT '状态',\n" +
+                "  `data_version` bigint DEFAULT '1' COMMENT '模板数据版本号',\n" +
                 "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,\n" +
                 "  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n" +
                 "  `create_by` varchar(50) DEFAULT NULL,\n" +
@@ -246,6 +247,8 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  PRIMARY KEY (`id`),\n" +
                 "  KEY `idx_type_status` (`type`,`status`)\n" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资模板';");
+        addColumnIfMissing("salary_template", "data_version",
+                "ALTER TABLE salary_template ADD COLUMN `data_version` bigint DEFAULT '1' COMMENT '模板数据版本号' AFTER `status`");
 
         // 3) pay_cycle
         createTableIfMissing("pay_cycle",

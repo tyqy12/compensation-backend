@@ -17,7 +17,7 @@ import java.util.List;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/settlement/routing")
+@RequestMapping("/settlement/routing")
 @RequiredArgsConstructor
 public class SettlementProviderRoutingController {
 

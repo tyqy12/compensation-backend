@@ -310,6 +310,14 @@ public class PayslipServiceImpl implements PayslipService {
         try {
             return objectMapper.readValue(json, new TypeReference<List<PayrollPreviewDto.PayrollPreviewItemDto>>() {});
         } catch (Exception e) {
+            try {
+                var node = objectMapper.readTree(json);
+                if (node != null && node.isTextual()) {
+                    return objectMapper.readValue(node.asText(), new TypeReference<List<PayrollPreviewDto.PayrollPreviewItemDto>>() {});
+                }
+            } catch (Exception nested) {
+                log.warn("Failed to parse payslip items snapshot: {}", nested.getMessage());
+            }
             log.warn("Failed to parse payslip items snapshot: {}", e.getMessage());
             return Collections.emptyList();
         }

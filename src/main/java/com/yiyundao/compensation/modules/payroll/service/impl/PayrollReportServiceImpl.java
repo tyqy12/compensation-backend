@@ -233,6 +233,14 @@ public class PayrollReportServiceImpl implements PayrollReportService {
         try {
             return objectMapper.readValue(json, new TypeReference<List<PayrollPreviewDto.PayrollPreviewItemDto>>() {});
         } catch (Exception e) {
+            try {
+                var node = objectMapper.readTree(json);
+                if (node != null && node.isTextual()) {
+                    return objectMapper.readValue(node.asText(), new TypeReference<List<PayrollPreviewDto.PayrollPreviewItemDto>>() {});
+                }
+            } catch (Exception nested) {
+                log.warn("Failed to parse payroll line items: {}", nested.getMessage());
+            }
             log.warn("Failed to parse payroll line items: {}", e.getMessage());
             return Collections.emptyList();
         }

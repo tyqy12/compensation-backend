@@ -12,7 +12,7 @@ import java.util.List;
 
 @Tag(name = "文件管理")
 @RestController
-@RequestMapping("/api/v1/files")
+@RequestMapping("/v1/files")
 @RequiredArgsConstructor
 public class FileController {
 

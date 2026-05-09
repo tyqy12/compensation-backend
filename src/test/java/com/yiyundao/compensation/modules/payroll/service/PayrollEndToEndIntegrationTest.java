@@ -17,7 +17,6 @@ import com.yiyundao.compensation.enums.UserStatus;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.infrastructure.dao.PayrollImportItemMapper;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -30,14 +29,14 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
-@ActiveProfiles("dev")
+@ActiveProfiles("test")
 @Transactional
-@Disabled("Manual end-to-end scenario used during UAT")
 class PayrollEndToEndIntegrationTest {
 
     private static final BigDecimal BASE_AMOUNT = new BigDecimal("10000");
     private static final BigDecimal BONUS_AMOUNT = new BigDecimal("1500");
     private static final BigDecimal DEDUCT_AMOUNT = new BigDecimal("800");
+    private static final String SCENARIO_ID = "E2E-20240509";
 
     @Autowired
     private PayrollCalculationService payrollCalculationService;
@@ -117,7 +116,7 @@ class PayrollEndToEndIntegrationTest {
 
     private void setUpEmployee() {
         employee = new Employee();
-        employee.setEmployeeId("EMP-1001");
+        employee.setEmployeeId(SCENARIO_ID + "-EMP-1001");
         employee.setName("测试员工");
         employee.setDepartment("Finance");
         employee.setEmploymentType("full_time");
@@ -128,7 +127,7 @@ class PayrollEndToEndIntegrationTest {
 
     private void setUpSalaryItems() {
         SalaryItem base = new SalaryItem();
-        base.setCode("BASE");
+        base.setCode(SCENARIO_ID + "-BASE");
         base.setName("基本工资");
         base.setType("earning");
         base.setTaxable(true);
@@ -138,7 +137,7 @@ class PayrollEndToEndIntegrationTest {
         salaryItemService.save(base);
 
         SalaryItem bonus = new SalaryItem();
-        bonus.setCode("BONUS");
+        bonus.setCode(SCENARIO_ID + "-BONUS");
         bonus.setName("绩效奖金");
         bonus.setType("earning");
         bonus.setTaxable(true);
@@ -148,7 +147,7 @@ class PayrollEndToEndIntegrationTest {
         salaryItemService.save(bonus);
 
         SalaryItem deduct = new SalaryItem();
-        deduct.setCode("DEDUCT");
+        deduct.setCode(SCENARIO_ID + "-DEDUCT");
         deduct.setName("个人扣款");
         deduct.setType("deduction");
         deduct.setTaxable(false);
@@ -160,15 +159,15 @@ class PayrollEndToEndIntegrationTest {
 
     private void setUpTemplate() {
         template = new SalaryTemplate();
-        template.setName("FT 模板");
+        template.setName(SCENARIO_ID + " FT 模板");
         template.setType("full_time");
         template.setItemsJson("""
                 [
-                  {"code":"BASE","required":true,"min":5000,"max":20000},
-                  {"code":"BONUS","required":false,"min":0,"max":5000},
-                  {"code":"DEDUCT","required":false,"min":0,"max":5000}
+                  {"code":"%s-BASE","required":true,"min":5000,"max":20000},
+                  {"code":"%s-BONUS","required":false,"min":0,"max":5000},
+                  {"code":"%s-DEDUCT","required":false,"min":0,"max":5000}
                 ]
-                """);
+                """.formatted(SCENARIO_ID, SCENARIO_ID, SCENARIO_ID));
         template.setTaxRuleJson("""
                 {
                   "tax": {"rate": 0.1, "applyOn": "taxableEarnings"},
@@ -183,7 +182,7 @@ class PayrollEndToEndIntegrationTest {
     private void setUpPayCycle() {
         payCycle = new PayCycle();
         payCycle.setType("monthly");
-        payCycle.setPeriodLabel("2024-08");
+        payCycle.setPeriodLabel("2099-08");
         payCycle.setStatus("open");
         payCycleService.save(payCycle);
     }
@@ -191,7 +190,7 @@ class PayrollEndToEndIntegrationTest {
     private void setUpBatch() {
         batch = new PayrollBatch();
         batch.setPayCycleId(payCycle.getId());
-        batch.setPeriodLabel("2024-08");
+        batch.setPeriodLabel("2099-08");
         batch.setType("full_time");
         batch.setCurrency("CNY");
         batch.setStatus(PayrollBatchStatus.LOCKED);
@@ -199,9 +198,9 @@ class PayrollEndToEndIntegrationTest {
     }
 
     private void setUpImportItems() {
-        insertImportItem("BASE", BASE_AMOUNT, 1);
-        insertImportItem("BONUS", BONUS_AMOUNT, 2);
-        insertImportItem("DEDUCT", DEDUCT_AMOUNT, 3);
+        insertImportItem(SCENARIO_ID + "-BASE", BASE_AMOUNT, 1);
+        insertImportItem(SCENARIO_ID + "-BONUS", BONUS_AMOUNT, 2);
+        insertImportItem(SCENARIO_ID + "-DEDUCT", DEDUCT_AMOUNT, 3);
     }
 
     private void insertImportItem(String code, BigDecimal amount, int rowNo) {
@@ -218,7 +217,7 @@ class PayrollEndToEndIntegrationTest {
 
     private void setUpEmployeeUser() {
         employeeUser = new SysUser();
-        employeeUser.setUsername("emp-user");
+        employeeUser.setUsername(SCENARIO_ID + "-emp-user");
         employeeUser.setPassword("test");
         employeeUser.setRealName("测试员工");
         employeeUser.setRoles("ROLE_EMPLOYEE");

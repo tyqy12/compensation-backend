@@ -17,7 +17,7 @@ import java.util.List;
  */
 @Slf4j
 @RestController
-@RequestMapping("/api/settlement/provider-config")
+@RequestMapping("/settlement/provider-config")
 @RequiredArgsConstructor
 public class SettlementProviderConfigController {
 

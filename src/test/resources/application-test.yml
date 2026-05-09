@@ -2,7 +2,9 @@ spring:
   sql:
     init:
       mode: always
-      schema-locations: classpath:sql/schema.sql
+      schema-locations:
+        - classpath:sql/schema.sql
+        - classpath:sql/scheduled_task_schema.sql
       continue-on-error: false
 
   datasource:

@@ -983,7 +983,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         BasicCalcRule rule = new BasicCalcRule();
         if (tpl == null || tpl.getTaxRuleJson() == null || tpl.getTaxRuleJson().isBlank()) return rule;
         try {
-            var root = objectMapper.readTree(tpl.getTaxRuleJson());
+            var root = readJsonTree(tpl.getTaxRuleJson());
             // tax
             var tax = root.path("tax");
             if (!tax.isMissingNode()) {
@@ -1018,7 +1018,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
     private java.util.Map<String, ItemRule> parseItemRules(SalaryTemplate tpl) {
         if (tpl == null || tpl.getItemsJson() == null || tpl.getItemsJson().isBlank()) return java.util.Collections.emptyMap();
         try {
-            var node = objectMapper.readTree(tpl.getItemsJson());
+            var node = readJsonTree(tpl.getItemsJson());
             java.util.Map<String, ItemRule> res = new java.util.HashMap<>();
             if (node.isArray()) {
                 for (var it : node) {
@@ -1036,6 +1036,14 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
             log.warn("parseItemRules failed: {}", e.getMessage());
             return java.util.Collections.emptyMap();
         }
+    }
+
+    private com.fasterxml.jackson.databind.JsonNode readJsonTree(String json) throws com.fasterxml.jackson.core.JsonProcessingException {
+        var node = objectMapper.readTree(json);
+        if (node != null && node.isTextual()) {
+            return objectMapper.readTree(node.asText());
+        }
+        return node;
     }
 
     private PayrollPreviewDto.DiffSummaryDto buildDiff(PayrollBatch currentBatch,

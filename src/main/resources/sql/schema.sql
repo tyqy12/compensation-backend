@@ -107,6 +107,7 @@ CREATE TABLE `salary_template` (
   `items_json` json DEFAULT NULL COMMENT '项配置JSON',
   `tax_rule_json` json DEFAULT NULL COMMENT '税社保口径JSON',
   `status` varchar(20) DEFAULT 'enabled' COMMENT '状态',
+  `data_version` bigint DEFAULT '1' COMMENT '模板数据版本号',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `create_by` varchar(50) DEFAULT NULL,
