@@ -59,7 +59,7 @@ grant_type=client_credentials&scope=payroll:read payslip:read
 响应：
 ```
 {
-  "code": 200,
+  "code": 0,
   "data": {
     "accessToken": "...",
     "tokenType": "Bearer",
@@ -83,12 +83,12 @@ grant_type=client_credentials&scope=payroll:read payslip:read
 
 ### 4.2 工资行
 - `GET /api/v1/payroll/batches/{batchId}/lines`
-  - 支持 `employeeRef` 过滤：`emp:<employeeNo>` 或 `<provider>:<subjectId>`。
+  - 支持 `employeeRef` 过滤：`emp:<employeeNo>`、`<provider>:<subjectId>` 或 `<provider>:<tenantKey>:<subjectId>`；多租户同 subjectId 时使用三段式。
   - 返回 `OpenApiPayrollLineDto`：金额字段、`employeeRef`、部门数组、脱敏姓名/手机号、更新时间。
 
 ### 4.3 工资条
 - `GET /api/v1/payslips?employeeRef=...&period=YYYY-MM`
-- `GET /api/v1/payslips/{id}`
+- `GET /api/v1/payslips/{id}?employeeRef=...`
 - 返回 `OpenApiPayslipDto`：金额字段、部门、脱敏信息、明细 `items`（含 `showOnPayslip`、`order`）。
 
 ### 4.4 Scope 规则
@@ -124,4 +124,3 @@ grant_type=client_credentials&scope=payroll:read payslip:read
 - [ ] 发布前联调验证，通过 UAT 清单。
 
 如需 Mock 数据或 SDK 示例，请在飞书「薪酬项目群」@后端值班同学。
-

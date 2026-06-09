@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.service;
 
+import com.yiyundao.compensation.common.utils.SecretLogSanitizer;
 import com.yiyundao.compensation.interfaces.dto.config.WechatConfigDto;
 import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
 import com.yiyundao.compensation.modules.system.service.SysConfigService;
@@ -27,12 +28,10 @@ public class WeComAuthService {
     private final PlatformTokenCacheService platformTokenCacheService;
     private final WebClient webClient;
     private final Environment env;
+    private final TrustedRedirectUrlValidator trustedRedirectUrlValidator;
 
     private static final String PLATFORM = "wechat"; // internal platform code reuse
     private static final String API_BASE = "https://qyapi.weixin.qq.com/cgi-bin";
-    private static final String TRUSTED_REDIRECT_HOSTS_CONFIG_KEY = "oauth.trusted.redirect.hosts";
-    private static final String TRUSTED_REDIRECT_HOSTS_PROPERTY = "oauth.trusted-redirect-hosts";
-    private static final String TRUSTED_REDIRECT_HOSTS_ENV = "OAUTH_TRUSTED_REDIRECT_HOSTS";
 
     @Data
     public static class AuthorizeOut { private String url; private String state; private String channel; }
@@ -79,10 +78,15 @@ public class WeComAuthService {
         if (accessToken == null) {
             throw new IllegalStateException("wecom not configured");
         }
-        String url = API_BASE + "/auth/getuserinfo?access_token=" + accessToken + "&code=" + code;
-        WeComUserInfo resp = webClient.get().uri(url).retrieve().bodyToMono(WeComUserInfo.class).block();
+        WeComUserInfo resp;
+        try {
+            String url = API_BASE + "/auth/getuserinfo?access_token=" + accessToken + "&code=" + code;
+            resp = webClient.get().uri(url).retrieve().bodyToMono(WeComUserInfo.class).block();
+        } catch (Exception e) {
+            throw new RuntimeException("wecom userinfo error: " + SecretLogSanitizer.sanitize(e));
+        }
         if (resp == null || resp.getErrcode() != 0) {
-            throw new RuntimeException("wecom error: " + (resp != null ? resp.getErrmsg() : "null"));
+            throw new RuntimeException("wecom error: " + (resp != null ? SecretLogSanitizer.sanitize(resp.getErrmsg()) : "null"));
         }
         TokenUser tu = new TokenUser();
         tu.setUserid(resp.getUserid());
@@ -91,6 +95,7 @@ public class WeComAuthService {
     }
 
     public SignOut jsapiSignature(String url) {
+        validateJsapiUrl(url);
         String ticket = getJsapiTicket();
         WechatConfigDto cfg = getWeComConfig();
         String nonce = UUID.randomUUID().toString().replace("-", "");
@@ -104,6 +109,7 @@ public class WeComAuthService {
     }
 
     public SignOut agentJsapiSignature(String url) {
+        validateJsapiUrl(url);
         String ticket = getAgentTicket();
         WechatConfigDto cfg = getWeComConfig();
         String nonce = UUID.randomUUID().toString().replace("-", "");
@@ -122,8 +128,14 @@ public class WeComAuthService {
         if (StringUtils.hasText(cached)) return cached;
         WechatConfigDto cfg = getWeComConfig();
         if (cfg == null || !StringUtils.hasText(cfg.getCorpId()) || !StringUtils.hasText(cfg.getCorpSecret())) return null;
-        String url = API_BASE + "/gettoken?corpid=" + cfg.getCorpId() + "&corpsecret=" + cfg.getCorpSecret();
-        WeComToken r = webClient.get().uri(url).retrieve().bodyToMono(WeComToken.class).block();
+        WeComToken r;
+        try {
+            String url = API_BASE + "/gettoken?corpid=" + cfg.getCorpId() + "&corpsecret=" + cfg.getCorpSecret();
+            r = webClient.get().uri(url).retrieve().bodyToMono(WeComToken.class).block();
+        } catch (Exception e) {
+            log.warn("wecom gettoken failed: {}", SecretLogSanitizer.sanitize(e));
+            return null;
+        }
         if (r != null && r.getErrcode() == 0 && StringUtils.hasText(r.getAccess_token())) {
             int skew = Optional.ofNullable(sysConfigService.getInt("oauth.token.ttl.buffer.seconds", null))
                     .orElse(getIntEnv("CACHE_WECHAT_TTL_SKEW_SECONDS", 120));
@@ -131,7 +143,7 @@ public class WeComAuthService {
             platformTokenCacheService.setToken(PLATFORM, r.getAccess_token(), ttl);
             return r.getAccess_token();
         }
-        log.warn("wecom gettoken failed: {}", r != null ? r.getErrmsg() : "null");
+        log.warn("wecom gettoken failed: {}", r != null ? SecretLogSanitizer.sanitize(r.getErrmsg()) : "null");
         return null;
     }
 
@@ -141,8 +153,13 @@ public class WeComAuthService {
         if (StringUtils.hasText(cached)) return cached;
         String token = getAccessToken();
         if (token == null) throw new IllegalStateException("wecom not configured");
-        String url = API_BASE + "/get_jsapi_ticket?access_token=" + token;
-        JsTicket r = webClient.get().uri(url).retrieve().bodyToMono(JsTicket.class).block();
+        JsTicket r;
+        try {
+            String url = API_BASE + "/get_jsapi_ticket?access_token=" + token;
+            r = webClient.get().uri(url).retrieve().bodyToMono(JsTicket.class).block();
+        } catch (Exception e) {
+            throw new RuntimeException("wecom jsapi ticket error: " + SecretLogSanitizer.sanitize(e));
+        }
         if (r != null && r.getErrcode() == 0 && StringUtils.hasText(r.getTicket())) {
             int skew = Optional.ofNullable(sysConfigService.getInt("oauth.token.ttl.buffer.seconds", null))
                     .orElse(getIntEnv("CACHE_WECHAT_TTL_SKEW_SECONDS", 120));
@@ -150,7 +167,7 @@ public class WeComAuthService {
             platformTokenCacheService.setToken(key, r.getTicket(), ttl);
             return r.getTicket();
         }
-        throw new RuntimeException("wecom jsapi ticket error: " + (r != null ? r.getErrmsg() : "null"));
+        throw new RuntimeException("wecom jsapi ticket error: " + (r != null ? SecretLogSanitizer.sanitize(r.getErrmsg()) : "null"));
     }
 
     private String getAgentTicket() {
@@ -159,8 +176,13 @@ public class WeComAuthService {
         if (StringUtils.hasText(cached)) return cached;
         String token = getAccessToken();
         if (token == null) throw new IllegalStateException("wecom not configured");
-        String url = API_BASE + "/ticket/get?access_token=" + token + "&type=agent_config";
-        JsTicket r = webClient.get().uri(url).retrieve().bodyToMono(JsTicket.class).block();
+        JsTicket r;
+        try {
+            String url = API_BASE + "/ticket/get?access_token=" + token + "&type=agent_config";
+            r = webClient.get().uri(url).retrieve().bodyToMono(JsTicket.class).block();
+        } catch (Exception e) {
+            throw new RuntimeException("wecom agent ticket error: " + SecretLogSanitizer.sanitize(e));
+        }
         if (r != null && r.getErrcode() == 0 && StringUtils.hasText(r.getTicket())) {
             int skew = Optional.ofNullable(sysConfigService.getInt("oauth.token.ttl.buffer.seconds", null))
                     .orElse(getIntEnv("CACHE_WECHAT_TTL_SKEW_SECONDS", 120));
@@ -168,7 +190,7 @@ public class WeComAuthService {
             platformTokenCacheService.setToken(key, r.getTicket(), ttl);
             return r.getTicket();
         }
-        throw new RuntimeException("wecom agent ticket error: " + (r != null ? r.getErrmsg() : "null"));
+        throw new RuntimeException("wecom agent ticket error: " + (r != null ? SecretLogSanitizer.sanitize(r.getErrmsg()) : "null"));
     }
 
     private void validateConfig(String corpId, String agentId) {
@@ -182,76 +204,18 @@ public class WeComAuthService {
 
     private void validateRedirectUri(String redirectUri) {
         try {
-            URI uri = URI.create(redirectUri);
-            String scheme = uri.getScheme();
-            String host = uri.getHost();
-            int port = uri.getPort();
-            if (!StringUtils.hasText(scheme) || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
-                throw new IllegalArgumentException("redirectUri scheme not allowed");
-            }
-            if (!StringUtils.hasText(host)) {
-                throw new IllegalArgumentException("redirectUri invalid");
-            }
-            Set<String> trustedHosts = resolveTrustedRedirectHosts();
-            if (trustedHosts.isEmpty()) {
-                throw new IllegalStateException("trusted hosts not configured");
-            }
-            String normalizedHost = host.toLowerCase(Locale.ROOT);
-            String hostWithPort = port > 0 ? normalizedHost + ":" + port : normalizedHost;
-            if (!(trustedHosts.contains(hostWithPort) || trustedHosts.contains(normalizedHost))) {
-                throw new IllegalArgumentException("redirect host not trusted");
-            }
+            trustedRedirectUrlValidator.validateTrustedHttpUrl(redirectUri, "redirectUri");
         } catch (Exception e) {
             throw new IllegalArgumentException("redirectUri validation failed: " + e.getMessage());
         }
     }
 
-    private Set<String> resolveTrustedRedirectHosts() {
-        String allow = sysConfigService.getString(TRUSTED_REDIRECT_HOSTS_CONFIG_KEY, null);
-        if (!StringUtils.hasText(allow)) {
-            // Spring Boot 官方推荐使用 canonical kebab-case key 读取配置
-            allow = env.getProperty(TRUSTED_REDIRECT_HOSTS_PROPERTY);
+    private void validateJsapiUrl(String url) {
+        try {
+            trustedRedirectUrlValidator.validateTrustedHttpUrl(url, "jsapi url");
+        } catch (Exception e) {
+            throw new IllegalArgumentException("jsapi url validation failed: " + e.getMessage());
         }
-        if (!StringUtils.hasText(allow)) {
-            allow = env.getProperty(TRUSTED_REDIRECT_HOSTS_CONFIG_KEY);
-        }
-        if (!StringUtils.hasText(allow)) {
-            allow = env.getProperty(TRUSTED_REDIRECT_HOSTS_ENV);
-        }
-        Set<String> trustedHosts = new LinkedHashSet<>();
-        if (!StringUtils.hasText(allow)) {
-            return trustedHosts;
-        }
-        for (String item : allow.split(",")) {
-            String normalized = normalizeTrustedHost(item);
-            if (StringUtils.hasText(normalized)) {
-                trustedHosts.add(normalized);
-            }
-        }
-        return trustedHosts;
-    }
-
-    private String normalizeTrustedHost(String item) {
-        if (!StringUtils.hasText(item)) {
-            return null;
-        }
-        String token = item.trim();
-        if (!StringUtils.hasText(token)) {
-            return null;
-        }
-        if (token.contains("://")) {
-            URI uri = URI.create(token);
-            if (!StringUtils.hasText(uri.getHost())) {
-                return null;
-            }
-            String host = uri.getHost().toLowerCase(Locale.ROOT);
-            return uri.getPort() > 0 ? host + ":" + uri.getPort() : host;
-        }
-        String normalized = token;
-        while (normalized.endsWith("/")) {
-            normalized = normalized.substring(0, normalized.length() - 1);
-        }
-        return normalized.toLowerCase(Locale.ROOT);
     }
 
     private WechatConfigDto getWeComConfig() {

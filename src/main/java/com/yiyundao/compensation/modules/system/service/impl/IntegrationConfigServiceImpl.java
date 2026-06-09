@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.common.utils.DataAccessExceptionUtils;
 import com.yiyundao.compensation.infrastructure.dao.IntegrationConfigMapper;
 import com.yiyundao.compensation.interfaces.dto.config.*;
 import com.yiyundao.compensation.modules.system.entity.IntegrationConfig;
@@ -190,6 +191,10 @@ public class IntegrationConfigServiceImpl extends ServiceImpl<IntegrationConfigM
             if (cfg == null || !StringUtils.hasText(cfg.getConfigJson())) return null;
             return parseTypedConfig("encryption", cfg.getConfigJson(), EncryptionConfigDto.class);
         } catch (Exception e) {
+            if (DataAccessExceptionUtils.isResourceFailure(e)) {
+                log.warn("动态加密配置暂不可用，无法连接数据库，将使用fallback配置: {}", e.getMessage());
+                return null;
+            }
             log.error("解析加密配置失败", e);
             return null;
         }

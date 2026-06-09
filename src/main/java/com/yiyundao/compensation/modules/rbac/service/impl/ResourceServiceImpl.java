@@ -7,6 +7,7 @@ import com.yiyundao.compensation.infrastructure.dao.SysRoleResourceMapper;
 import com.yiyundao.compensation.infrastructure.dao.SysUserResourceMapper;
 import com.yiyundao.compensation.infrastructure.dao.SysUserRoleMapper;
 import com.yiyundao.compensation.modules.rbac.entity.SysResource;
+import com.yiyundao.compensation.modules.rbac.entity.SysRole;
 import com.yiyundao.compensation.modules.rbac.entity.SysRoleResource;
 import com.yiyundao.compensation.modules.rbac.entity.SysUserResource;
 import com.yiyundao.compensation.modules.rbac.service.ResourceCacheService;
@@ -131,9 +132,10 @@ public class ResourceServiceImpl extends ServiceImpl<SysResourceMapper, SysResou
             Set<Long> resourceIds = new HashSet<>();
             Map<Long, Set<String>> tmpActions = new HashMap<>();
 
-            List<Long> roleIds = userRoleMapper.selectList(new LambdaQueryWrapper<com.yiyundao.compensation.modules.rbac.entity.SysUserRole>()
-                    .eq(com.yiyundao.compensation.modules.rbac.entity.SysUserRole::getUserId, user.getId()))
-                    .stream().map(com.yiyundao.compensation.modules.rbac.entity.SysUserRole::getRoleId).toList();
+            List<Long> roleIds = userRoleService.getUserRoles(user.getId()).stream()
+                    .map(SysRole::getId)
+                    .filter(Objects::nonNull)
+                    .toList();
             if (!roleIds.isEmpty()) {
                 List<SysRoleResource> rrs = roleResourceMapper.selectList(new LambdaQueryWrapper<SysRoleResource>()
                         .in(SysRoleResource::getRoleId, roleIds));
@@ -153,15 +155,25 @@ public class ResourceServiceImpl extends ServiceImpl<SysResourceMapper, SysResou
                 resourceIds.add(ur.getResourceId());
                 if (StringUtils.hasText(ur.getActionsJson())) {
                     List<String> actions = parseActions(ur.getActionsJson());
-                    tmpActions.computeIfAbsent(ur.getResourceId(), k -> new HashSet<>()).addAll(actions);
+                    tmpActions.put(ur.getResourceId(), new HashSet<>(actions));
+                } else {
+                    tmpActions.remove(ur.getResourceId());
                 }
             }
 
             List<SysResource> list;
             if (resourceIds.isEmpty()) list = List.of();
             else {
-                list = listByIds(resourceIds);
-                list.sort(Comparator.comparing(r -> Optional.ofNullable(r.getOrderNum()).orElse(0)));
+                list = listByIds(resourceIds).stream()
+                        .filter(resource -> resource != null
+                                && "enabled".equalsIgnoreCase(resource.getStatus()))
+                        .sorted(Comparator.comparing(r -> Optional.ofNullable(r.getOrderNum()).orElse(0)))
+                        .toList();
+                Set<Long> enabledResourceIds = list.stream()
+                        .map(SysResource::getId)
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toSet());
+                tmpActions.keySet().removeIf(resourceId -> !enabledResourceIds.contains(resourceId));
             }
             Map<Long, List<String>> actions = new HashMap<>();
             tmpActions.forEach((k, v) -> actions.put(k, v.stream().sorted().toList()));

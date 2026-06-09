@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.service;
 
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.yiyundao.compensation.enums.NotificationChannel;
 import com.yiyundao.compensation.enums.NotificationStatus;
 import com.yiyundao.compensation.enums.NotificationType;
@@ -63,11 +64,16 @@ public class NotificationRouterService {
      * 发送通知给平台用户
      */
     public void sendNotificationToPlatformUser(String provider, String subjectId,
-                                             NotificationType type, String title, String content,
-                                             String businessType, String businessKey) {
-        NotificationChannel channel = convertPlatformToChannel(provider);
+                                               NotificationType type, String title, String content,
+                                               String businessType, String businessKey) {
+        String normalizedProvider = normalizeProvider(provider);
+        NotificationChannel channel = convertPlatformToChannel(normalizedProvider);
         if (channel == null) {
             log.warn("不支持的平台类型: {}", provider);
+            return;
+        }
+        if (!hasAdapter(channel)) {
+            log.warn("平台通知渠道未注册适配器: provider={}, channel={}", provider, channel);
             return;
         }
 
@@ -111,7 +117,14 @@ public class NotificationRouterService {
             channels.add(NotificationChannel.SYSTEM);
         }
 
-        return channels;
+        List<NotificationChannel> availableChannels = filterAvailableChannels(channels);
+        if (availableChannels.isEmpty() && hasAdapter(NotificationChannel.SYSTEM)) {
+            availableChannels.add(NotificationChannel.SYSTEM);
+        }
+        if (availableChannels.isEmpty()) {
+            log.warn("用户没有可用通知渠道: userId={}, type={}", user.getId(), type);
+        }
+        return availableChannels;
     }
 
     /**
@@ -128,9 +141,10 @@ public class NotificationRouterService {
      * 平台类型转换为通知渠道
      */
     private NotificationChannel convertPlatformToChannel(String provider) {
-        if (provider == null) return null;
+        String normalizedProvider = normalizeProvider(provider);
+        if (normalizedProvider == null) return null;
 
-        return switch (provider.toLowerCase()) {
+        return switch (normalizedProvider) {
             case "wechat" -> NotificationChannel.WECHAT;
             case "dingtalk" -> NotificationChannel.DINGTALK;
             case "feishu" -> NotificationChannel.FEISHU;
@@ -223,6 +237,19 @@ public class NotificationRouterService {
         };
     }
 
+    private String normalizeProvider(String provider) {
+        if (!StringUtils.hasText(provider)) {
+            return null;
+        }
+        String value = provider.trim().toLowerCase();
+        return switch (value) {
+            case "wechat", "wecom", "qywx", "wx" -> "wechat";
+            case "dingtalk", "dingding", "dd" -> "dingtalk";
+            case "feishu", "lark" -> "feishu";
+            default -> value;
+        };
+    }
+
     /**
      * 获取通知优先级
      */
@@ -244,21 +271,39 @@ public class NotificationRouterService {
         List<NotificationChannel> fallbacks = new ArrayList<>();
 
         // 如果主渠道不是短信且有手机号，添加短信作为回退
-        if (primaryChannel != NotificationChannel.SMS && StringUtils.hasText(user.getPhone())) {
+        if (primaryChannel != NotificationChannel.SMS
+                && StringUtils.hasText(user.getPhone())
+                && hasAdapter(NotificationChannel.SMS)) {
             fallbacks.add(NotificationChannel.SMS);
         }
 
         // 如果主渠道不是邮件且有邮箱，添加邮件作为回退
-        if (primaryChannel != NotificationChannel.EMAIL && StringUtils.hasText(user.getEmail())) {
+        if (primaryChannel != NotificationChannel.EMAIL
+                && StringUtils.hasText(user.getEmail())
+                && hasAdapter(NotificationChannel.EMAIL)) {
             fallbacks.add(NotificationChannel.EMAIL);
         }
 
         // 最后添加系统通知作为兜底
-        if (primaryChannel != NotificationChannel.SYSTEM) {
+        if (primaryChannel != NotificationChannel.SYSTEM && hasAdapter(NotificationChannel.SYSTEM)) {
             fallbacks.add(NotificationChannel.SYSTEM);
         }
 
         return fallbacks;
+    }
+
+    private List<NotificationChannel> filterAvailableChannels(List<NotificationChannel> channels) {
+        if (channels == null || channels.isEmpty()) {
+            return new ArrayList<>();
+        }
+        return channels.stream()
+                .filter(this::hasAdapter)
+                .distinct()
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private boolean hasAdapter(NotificationChannel channel) {
+        return channel != null && adapters.containsKey(channel);
     }
 
     /**
@@ -280,53 +325,68 @@ public class NotificationRouterService {
     private void sendNotificationAsync(NotificationRecord record) {
         // 这里可以使用消息队列或线程池异步处理
         // 暂时使用简单的异步调用
-        NotificationAdapter adapter = adapters.get(record.getChannel());
-        if (adapter == null) {
-            log.warn("未找到通知适配器: channel={}", record.getChannel());
-            return;
-        }
-
         try {
+            LocalDateTime sendTime = LocalDateTime.now();
+            if (!claimPendingRecord(record, sendTime)) {
+                log.info("通知记录已被其他任务处理，跳过发送: recordId={}", record.getId());
+                return;
+            }
             record.setStatus(NotificationStatus.SENDING);
-            record.setSendTime(LocalDateTime.now());
-            notificationRecordService.updateById(record);
+            record.setSendTime(sendTime);
+
+            NotificationAdapter adapter = adapters.get(record.getChannel());
+            if (adapter == null) {
+                record.setErrorMessage("未找到通知适配器: " + record.getChannel());
+                log.warn("未找到通知适配器: recordId={}, channel={}", record.getId(), record.getChannel());
+                applyFailedNotificationOutcome(record);
+                completeSendAndTriggerFallback(record);
+                return;
+            }
 
             NotificationAdapter.NotificationSendResult result = adapter.sendNotification(record);
 
-            if (result.isSuccess()) {
+            if (result != null && result.isSuccess()) {
                 record.setStatus(NotificationStatus.SUCCESS);
+                record.setNextRetryTime(null);
                 record.setResponseCode(result.getResponseCode());
                 record.setResponseMessage(result.getResponseMessage());
+                record.setErrorMessage(null);
             } else {
-                record.setStatus(NotificationStatus.FAILED);
-                record.setErrorMessage(result.getErrorMessage());
-
-                // 如果发送失败，尝试回退渠道
-                handleFailedNotification(record);
+                record.setErrorMessage(result == null ? "发送失败: 响应为空" : result.getErrorMessage());
+                applyFailedNotificationOutcome(record);
             }
 
-            notificationRecordService.updateById(record);
+            completeSendAndTriggerFallback(record);
 
         } catch (Exception e) {
             log.error("发送通知异常: recordId={}", record.getId(), e);
-            record.setStatus(NotificationStatus.FAILED);
             record.setErrorMessage("发送异常: " + e.getMessage());
-            notificationRecordService.updateById(record);
-
-            handleFailedNotification(record);
+            applyFailedNotificationOutcome(record);
+            completeSendAndTriggerFallback(record);
         }
+    }
+
+    private boolean claimPendingRecord(NotificationRecord record, LocalDateTime sendTime) {
+        if (record == null || record.getId() == null) {
+            return false;
+        }
+        return notificationRecordService.update(new UpdateWrapper<NotificationRecord>()
+                .eq("id", record.getId())
+                .eq("status", NotificationStatus.PENDING.getCode())
+                .set("status", NotificationStatus.SENDING.getCode())
+                .set("send_time", sendTime));
     }
 
     /**
      * 处理失败的通知
      */
-    private void handleFailedNotification(NotificationRecord record) {
+    private void applyFailedNotificationOutcome(NotificationRecord record) {
         // 如果还有重试次数，安排重试
-        if (record.getRetryCount() < record.getMaxRetry()) {
+        if (safeRetryCount(record) < safeMaxRetry(record)) {
             scheduleRetry(record);
         } else {
-            // 重试次数用完，尝试回退渠道
-            triggerFallbackNotification(record);
+            record.setStatus(NotificationStatus.FAILED);
+            record.setNextRetryTime(null);
         }
     }
 
@@ -334,17 +394,44 @@ public class NotificationRouterService {
      * 安排重试
      */
     private void scheduleRetry(NotificationRecord record) {
-        record.setRetryCount(record.getRetryCount() + 1);
+        int retryCount = safeRetryCount(record);
+        record.setRetryCount(retryCount);
         record.setStatus(NotificationStatus.RETRY);
 
         // 计算下次重试时间（指数退避）
-        int delay = (int) Math.pow(2, record.getRetryCount()) * 60; // 秒
+        int nextAttempt = retryCount + 1;
+        int delay = (int) Math.pow(2, nextAttempt) * 60; // 秒
         record.setNextRetryTime(LocalDateTime.now().plusSeconds(delay));
-
-        notificationRecordService.updateById(record);
 
         log.info("安排通知重试: recordId={}, retryCount={}, nextRetryTime={}",
             record.getId(), record.getRetryCount(), record.getNextRetryTime());
+    }
+
+    private void completeSendAndTriggerFallback(NotificationRecord record) {
+        if (!completeSendingRecord(record)) {
+            log.info("通知记录状态已变更，跳过发送结果回写: recordId={}, finalStatus={}",
+                    record.getId(), record.getStatus());
+            return;
+        }
+        if (record.getStatus() == NotificationStatus.FAILED) {
+            // 重试次数用完且终态写入成功后，才创建回退通知，避免取消后仍触发回退。
+            triggerFallbackNotification(record);
+        }
+    }
+
+    private boolean completeSendingRecord(NotificationRecord record) {
+        if (record == null || record.getId() == null || record.getStatus() == null) {
+            return false;
+        }
+        return notificationRecordService.update(new UpdateWrapper<NotificationRecord>()
+                .eq("id", record.getId())
+                .eq("status", NotificationStatus.SENDING.getCode())
+                .set("status", record.getStatus().getCode())
+                .set("retry_count", safeRetryCount(record))
+                .set("next_retry_time", record.getNextRetryTime())
+                .set("response_code", record.getResponseCode())
+                .set("response_message", record.getResponseMessage())
+                .set("error_message", record.getErrorMessage()));
     }
 
     /**
@@ -380,11 +467,31 @@ public class NotificationRouterService {
     /**
      * 创建回退通知
      */
+    public void createAndSendFallbackNotification(NotificationRecord originalRecord, NotificationChannel fallbackChannel) {
+        createFallbackNotification(originalRecord, fallbackChannel);
+    }
+
     private void createFallbackNotification(NotificationRecord originalRecord, NotificationChannel fallbackChannel) {
+        if (originalRecord == null) {
+            log.warn("原始通知记录为空，跳过创建回退通知: fallbackChannel={}", fallbackChannel);
+            return;
+        }
+        if (!hasAdapter(fallbackChannel)) {
+            log.warn("回退通知渠道未注册适配器，跳过创建: originalRecordId={}, fallbackChannel={}",
+                    originalRecord.getId(), fallbackChannel);
+            return;
+        }
+        String fallbackRecipientId = resolveFallbackRecipientId(originalRecord, fallbackChannel);
+        if (!StringUtils.hasText(fallbackRecipientId)) {
+            log.warn("回退通知缺少有效接收人，跳过创建: originalRecordId={}, fallbackChannel={}",
+                    originalRecord.getId(), fallbackChannel);
+            return;
+        }
+
         NotificationRecord fallbackRecord = new NotificationRecord();
         fallbackRecord.setNotificationType(originalRecord.getNotificationType());
         fallbackRecord.setChannel(fallbackChannel);
-        fallbackRecord.setRecipientId(originalRecord.getRecipientId());
+        fallbackRecord.setRecipientId(fallbackRecipientId);
         fallbackRecord.setRecipientName(originalRecord.getRecipientName());
         fallbackRecord.setTitle(originalRecord.getTitle());
         fallbackRecord.setContent(originalRecord.getContent() + "\n\n[通过回退渠道发送]");
@@ -400,5 +507,67 @@ public class NotificationRouterService {
 
         log.info("创建回退通知: originalRecordId={}, fallbackChannel={}, fallbackRecordId={}",
             originalRecord.getId(), fallbackChannel, fallbackRecord.getId());
+    }
+
+    private String resolveFallbackRecipientId(NotificationRecord originalRecord, NotificationChannel fallbackChannel) {
+        if (originalRecord == null || fallbackChannel == null) {
+            return null;
+        }
+        SysUser user = resolveOriginalRecipientUser(originalRecord);
+        if (user == null) {
+            return sameRecipientChannel(originalRecord.getChannel(), fallbackChannel)
+                    ? originalRecord.getRecipientId()
+                    : null;
+        }
+        return getRecipientId(user, fallbackChannel);
+    }
+
+    private SysUser resolveOriginalRecipientUser(NotificationRecord originalRecord) {
+        if (originalRecord == null || !StringUtils.hasText(originalRecord.getRecipientId())) {
+            return null;
+        }
+        if (originalRecord.getChannel() == NotificationChannel.SYSTEM) {
+            return resolveUserById(originalRecord.getRecipientId());
+        }
+        String provider = providerForChannel(originalRecord.getChannel());
+        if (!StringUtils.hasText(provider)) {
+            return null;
+        }
+        ExternalIdentity identity = externalIdentityService.findActiveIdentity(
+                provider,
+                ExternalIdentityService.DEFAULT_TENANT_KEY,
+                ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
+                originalRecord.getRecipientId()
+        );
+        if (identity == null || identity.getUserId() == null) {
+            return null;
+        }
+        return sysUserService.getById(identity.getUserId());
+    }
+
+    private SysUser resolveUserById(String recipientId) {
+        try {
+            return sysUserService.getById(Long.valueOf(recipientId));
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private boolean sameRecipientChannel(NotificationChannel originalChannel, NotificationChannel fallbackChannel) {
+        return originalChannel == fallbackChannel
+                || (originalChannel == NotificationChannel.SMS && fallbackChannel == NotificationChannel.SMS)
+                || (originalChannel == NotificationChannel.EMAIL && fallbackChannel == NotificationChannel.EMAIL);
+    }
+
+    private int safeRetryCount(NotificationRecord record) {
+        return record == null || record.getRetryCount() == null || record.getRetryCount() < 0
+                ? 0
+                : record.getRetryCount();
+    }
+
+    private int safeMaxRetry(NotificationRecord record) {
+        return record == null || record.getMaxRetry() == null || record.getMaxRetry() < 0
+                ? 3
+                : record.getMaxRetry();
     }
 }

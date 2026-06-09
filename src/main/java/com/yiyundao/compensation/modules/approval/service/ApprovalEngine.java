@@ -1,12 +1,15 @@
 package com.yiyundao.compensation.modules.approval.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.enums.ApprovalStatus;
 import com.yiyundao.compensation.enums.WorkflowType;
+import com.yiyundao.compensation.enums.UserStatus;
+import com.yiyundao.compensation.common.util.TransactionAfterCommitExecutor;
 import com.yiyundao.compensation.infrastructure.dao.ApprovalWorkflowMapper;
 import com.yiyundao.compensation.modules.approval.config.ApprovalFlowConfigManager;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalStep;
@@ -32,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -56,6 +60,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     private final ApprovalFlowConfigManager approvalFlowConfigManager;
     private final ApplicationEventPublisher eventPublisher;
     private final ExternalIdentityService externalIdentityService;
+    private final TransactionAfterCommitExecutor afterCommitExecutor;
 
     // ==================== 流程启动 ====================
 
@@ -80,21 +85,20 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
 
             // Generate steps first so we can persist workflow with non-null total_steps
             List<ApprovalStep> steps = generateApprovalSteps(workflow, workflowType, workflowData);
-            workflow.setTotalSteps(steps.size());
-            if (!steps.isEmpty()) {
-                workflow.setCurrentApproverId(steps.get(0).getApproverId());
+            if (steps.isEmpty()) {
+                throw new IllegalStateException("审批流程未生成任何有效审批步骤，请检查审批配置");
             }
+            workflow.setTotalSteps(steps.size());
+            workflow.setCurrentApproverId(steps.get(0).getApproverId());
 
             // Insert workflow now that all non-nullable fields are set
             save(workflow);
 
-            if (!steps.isEmpty()) {
-                for (ApprovalStep step : steps) {
-                    step.setWorkflowId(workflow.getId());
-                    approvalStepService.save(step);
-                }
-                sendApprovalNotification(steps.get(0));
+            for (ApprovalStep step : steps) {
+                step.setWorkflowId(workflow.getId());
+                approvalStepService.save(step);
             }
+            sendApprovalNotification(steps.get(0));
 
             return workflow.getId();
 
@@ -111,16 +115,20 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
         ApprovalWorkflow workflow = getById(workflowId);
         if (workflow == null) throw new IllegalArgumentException("审批流程不存在: " + workflowId);
         if (workflow.getStatus() != ApprovalStatus.PENDING) throw new IllegalStateException("流程不是待审批状态: " + workflow.getStatus());
-        if (!workflow.getCurrentApproverId().equals(approverId)) throw new IllegalArgumentException("无权限审批该流程");
+        if (approverId == null) throw new IllegalArgumentException("审批人不存在");
+        ensureWorkflowRoutingComplete(workflow);
+        if (!Objects.equals(workflow.getCurrentApproverId(), approverId)) throw new IllegalArgumentException("无权限审批该流程");
+        if (decision != ApprovalStatus.APPROVED && decision != ApprovalStatus.REJECTED) {
+            throw new IllegalArgumentException("无效的审批决策: " + decision);
+        }
+        if (workflow.getInitiatorId() != null && workflow.getInitiatorId().equals(approverId)) {
+            throw new IllegalArgumentException("发起人不能审批自己发起的流程");
+        }
 
         ApprovalStep currentStep = approvalStepService.getCurrentStep(workflowId, workflow.getCurrentStep());
         if (currentStep == null) throw new IllegalStateException("找不到当前审批步骤");
 
-        currentStep.setStatus(decision);
-        currentStep.setApproveTime(LocalDateTime.now());
-        currentStep.setApproveComment(comment);
-        if (decision == ApprovalStatus.REJECTED) currentStep.setRejectReason(comment);
-        approvalStepService.updateById(currentStep);
+        claimCurrentStep(workflow, currentStep, approverId, decision, comment);
 
         if (decision == ApprovalStatus.APPROVED) {
             if (workflow.getCurrentStep() < workflow.getTotalSteps()) {
@@ -137,9 +145,12 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     public void cancelWorkflow(Long workflowId, Long operatorId, String reason) {
         ApprovalWorkflow workflow = getById(workflowId);
         if (workflow == null) throw new IllegalArgumentException("审批流程不存在: " + workflowId);
-        if (!workflow.getInitiatorId().equals(operatorId)) throw new IllegalArgumentException("只有发起人可以撤销流程");
+        if (operatorId == null) throw new IllegalArgumentException("操作人不存在");
+        if (workflow.getInitiatorId() == null) throw new IllegalStateException("审批流程数据不完整，请联系管理员处理");
+        if (!Objects.equals(workflow.getInitiatorId(), operatorId)) throw new IllegalArgumentException("只有发起人可以撤销流程");
         if (workflow.getStatus() != ApprovalStatus.PENDING) throw new IllegalStateException("只能撤销待审批的流程");
-        completeWorkflow(workflow, ApprovalStatus.CANCELLED);
+        cancelCurrentStep(workflow, reason);
+        completeWorkflow(workflow, ApprovalStatus.CANCELLED, operatorId);
     }
 
     // ==================== 流程查询 ====================
@@ -159,6 +170,14 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
         return list(queryWrapper);
     }
 
+    private void ensureWorkflowRoutingComplete(ApprovalWorkflow workflow) {
+        if (workflow.getCurrentStep() == null
+                || workflow.getTotalSteps() == null
+                || workflow.getCurrentApproverId() == null) {
+            throw new IllegalStateException("审批流程数据不完整，请联系管理员处理");
+        }
+    }
+
     // ==================== 审批步骤生成 ====================
 
     /**
@@ -167,85 +186,86 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     private List<ApprovalStep> generateApprovalSteps(ApprovalWorkflow workflow, WorkflowType workflowType,
                                                       Map<String, Object> workflowData) {
         return switch (workflowType) {
-            case BATCH -> generateBatchPaymentSteps();
-            case PAYROLL_DISTRIBUTION -> generatePayrollDistributionSteps();
-            case ADHOC -> generateAdhocPaymentSteps();
-            case OFFLINE -> generateOfflineEmployeeSteps();
-            case PERMISSION -> generatePermissionSteps();
-            case PAYROLL_DISPUTE -> generatePayrollDisputeSteps();
+            case BATCH -> generateBatchPaymentSteps(workflow.getInitiatorId());
+            case PAYROLL_DISTRIBUTION -> generatePayrollDistributionSteps(workflow.getInitiatorId());
+            case ADHOC -> generateAdhocPaymentSteps(workflow.getInitiatorId());
+            case OFFLINE -> generateOfflineEmployeeSteps(workflow.getInitiatorId());
+            case PERMISSION -> generatePermissionSteps(workflow.getInitiatorId());
+            case PAYROLL_DISPUTE -> generatePayrollDisputeSteps(workflow.getInitiatorId());
         };
     }
 
     /**
      * 生成批量支付审批步骤
      */
-    private List<ApprovalStep> generateBatchPaymentSteps() {
+    private List<ApprovalStep> generateBatchPaymentSteps(Long initiatorId) {
         List<ApprovalFlowConfigManager.ApprovalStepConfig> configured = loadPayrollApprovalConfig();
         if (configured.isEmpty()) {
             configured = approvalFlowConfigManager.getDefaultSteps(WorkflowType.BATCH);
         }
-        return buildStepsFromConfig(configured);
+        return buildStepsFromConfig(configured, initiatorId);
     }
 
     /**
      * 生成薪资发放审批步骤
      */
-    private List<ApprovalStep> generatePayrollDistributionSteps() {
+    private List<ApprovalStep> generatePayrollDistributionSteps(Long initiatorId) {
         List<ApprovalFlowConfigManager.ApprovalStepConfig> configured = loadPayrollApprovalConfig();
         if (configured.isEmpty()) {
             configured = approvalFlowConfigManager.getDefaultSteps(WorkflowType.PAYROLL_DISTRIBUTION);
         }
-        return buildStepsFromConfig(configured);
+        return buildStepsFromConfig(configured, initiatorId);
     }
 
     /**
      * 生成临时支付审批步骤
      */
-    private List<ApprovalStep> generateAdhocPaymentSteps() {
+    private List<ApprovalStep> generateAdhocPaymentSteps(Long initiatorId) {
         List<ApprovalFlowConfigManager.ApprovalStepConfig> config = loadAdhocApprovalConfig();
         if (config.isEmpty()) {
             config = approvalFlowConfigManager.getDefaultSteps(WorkflowType.ADHOC);
         }
-        return buildStepsFromConfig(config);
+        return buildStepsFromConfig(config, initiatorId);
     }
 
     /**
      * 生成架构外员工审批步骤
      */
-    private List<ApprovalStep> generateOfflineEmployeeSteps() {
+    private List<ApprovalStep> generateOfflineEmployeeSteps(Long initiatorId) {
         List<ApprovalFlowConfigManager.ApprovalStepConfig> config = loadOfflineApprovalConfig();
         if (config.isEmpty()) {
             config = approvalFlowConfigManager.getDefaultSteps(WorkflowType.OFFLINE);
         }
-        return buildStepsFromConfig(config);
+        return buildStepsFromConfig(config, initiatorId);
     }
 
     /**
      * 生成权限授权审批步骤
      */
-    private List<ApprovalStep> generatePermissionSteps() {
+    private List<ApprovalStep> generatePermissionSteps(Long initiatorId) {
         List<ApprovalFlowConfigManager.ApprovalStepConfig> config = loadPermissionApprovalConfig();
         if (config.isEmpty()) {
             config = approvalFlowConfigManager.getDefaultSteps(WorkflowType.PERMISSION);
         }
-        return buildStepsFromConfig(config);
+        return buildStepsFromConfig(config, initiatorId);
     }
 
     /**
      * 生成薪酬异议审批步骤
      */
-    private List<ApprovalStep> generatePayrollDisputeSteps() {
+    private List<ApprovalStep> generatePayrollDisputeSteps(Long initiatorId) {
         List<ApprovalFlowConfigManager.ApprovalStepConfig> config = loadPayrollDisputeApprovalConfig();
         if (config.isEmpty()) {
             config = approvalFlowConfigManager.getDefaultSteps(WorkflowType.PAYROLL_DISPUTE);
         }
-        return buildStepsFromConfig(config);
+        return buildStepsFromConfig(config, initiatorId);
     }
 
     /**
      * 从配置构建审批步骤
      */
-    private List<ApprovalStep> buildStepsFromConfig(List<ApprovalFlowConfigManager.ApprovalStepConfig> configSteps) {
+    private List<ApprovalStep> buildStepsFromConfig(List<ApprovalFlowConfigManager.ApprovalStepConfig> configSteps,
+                                                    Long initiatorId) {
         if (configSteps == null || configSteps.isEmpty()) {
             return List.of();
         }
@@ -260,27 +280,25 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
             int stepNo = cfg.getStepNo() != null ? cfg.getStepNo() : lastAutoStep + 1;
             lastAutoStep = stepNo;
 
-            SysUser approver = resolveApprover(cfg);
+            SysUser approver = resolveApprover(cfg, initiatorId);
             if (approver == null) {
                 if (Boolean.TRUE.equals(cfg.getOptional())) {
                     log.info("审批步骤{}({}) 未找到审批人，已跳过(可选)", stepNo, cfg.getStepName());
                     continue;
                 }
-                approver = findFallbackAdmin();
-                if (approver == null) {
-                    log.warn("审批步骤{}({}) 未找到审批人且无管理员兜底，跳过该步骤", stepNo, cfg.getStepName());
-                    continue;
-                }
+                throw new IllegalStateException(String.format("审批步骤%d(%s)未配置有效审批人",
+                        stepNo, StringUtils.hasText(cfg.getStepName()) ? cfg.getStepName() : "未命名步骤"));
             }
 
             String approverName = Optional.ofNullable(approver.getRealName()).filter(StringUtils::hasText)
                     .orElse(approver.getUsername());
+            int actualStepNo = steps.size() + 1;
             String stepName = StringUtils.hasText(cfg.getStepName())
                     ? cfg.getStepName()
-                    : (StringUtils.hasText(cfg.getRole()) ? cfg.getRole() : "审批步骤" + stepNo);
+                    : (StringUtils.hasText(cfg.getRole()) ? cfg.getRole() : "审批步骤" + actualStepNo);
             int timeout = cfg.getTimeoutHours() != null ? cfg.getTimeoutHours() : defaultTimeout;
 
-            steps.add(createApprovalStep(stepNo, stepName, approver.getId(), approverName, timeout));
+            steps.add(createApprovalStep(actualStepNo, stepName, approver.getId(), approverName, timeout));
         }
         return steps;
     }
@@ -303,20 +321,31 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     /**
      * 解析审批人
      */
-    private SysUser resolveApprover(ApprovalFlowConfigManager.ApprovalStepConfig cfg) {
+    private SysUser resolveApprover(ApprovalFlowConfigManager.ApprovalStepConfig cfg, Long initiatorId) {
         if (cfg == null) {
             return null;
         }
+        SysUser approver;
         if (cfg.getApproverId() != null) {
-            return sysUserService.getById(cfg.getApproverId());
+            approver = sysUserService.getById(cfg.getApproverId());
+            return isValidApprover(approver, initiatorId) ? approver : null;
         }
         if (StringUtils.hasText(cfg.getApproverUsername())) {
-            return sysUserService.findByUsername(cfg.getApproverUsername().trim());
+            approver = sysUserService.findByUsername(cfg.getApproverUsername().trim());
+            return isValidApprover(approver, initiatorId) ? approver : null;
         }
         if (StringUtils.hasText(cfg.getRole())) {
-            return sysUserService.findFirstByRole(cfg.getRole().trim());
+            approver = sysUserService.findFirstByRoleExcluding(cfg.getRole().trim(), initiatorId);
+            return isValidApprover(approver, initiatorId) ? approver : null;
         }
         return null;
+    }
+
+    private boolean isValidApprover(SysUser approver, Long initiatorId) {
+        return approver != null
+                && approver.getId() != null
+                && UserStatus.ACTIVE.equals(approver.getStatus())
+                && !Objects.equals(approver.getId(), initiatorId);
     }
 
     // ==================== 配置加载 ====================
@@ -382,27 +411,72 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
 
     // ==================== 审批人查找 ====================
 
-    /**
-     * 查找兜底管理员
-     */
-    private SysUser findFallbackAdmin() {
-        SysUser admin = sysUserService.findFirstByRole(SecurityConstants.ROLE_ADMIN);
-        if (admin != null) {
-            return admin;
-        }
-        return sysUserService.findByUsername("admin");
-    }
-
     // ==================== 流程流转 ====================
+
+    private void claimCurrentStep(ApprovalWorkflow workflow, ApprovalStep currentStep, Long approverId,
+                                  ApprovalStatus decision, String comment) {
+        LocalDateTime approveTime = LocalDateTime.now();
+        UpdateWrapper<ApprovalStep> updateWrapper = new UpdateWrapper<ApprovalStep>()
+                .eq("workflow_id", workflow.getId())
+                .eq("step_no", workflow.getCurrentStep())
+                .eq("approver_id", approverId)
+                .eq("status", ApprovalStatus.PENDING)
+                .set("status", decision)
+                .set("approve_time", approveTime)
+                .set("approve_comment", comment)
+                .set(decision == ApprovalStatus.REJECTED, "reject_reason", comment);
+        if (currentStep.getId() != null) {
+            updateWrapper.eq("id", currentStep.getId());
+        }
+
+        if (!approvalStepService.update(updateWrapper)) {
+            throw new IllegalStateException("审批步骤状态已变更，请刷新后重试");
+        }
+
+        currentStep.setStatus(decision);
+        currentStep.setApproveTime(approveTime);
+        currentStep.setApproveComment(comment);
+        if (decision == ApprovalStatus.REJECTED) currentStep.setRejectReason(comment);
+    }
 
     private void moveToNextStep(ApprovalWorkflow workflow) {
         int nextStepNo = workflow.getCurrentStep() + 1;
         ApprovalStep nextStep = approvalStepService.getStepByNo(workflow.getId(), nextStepNo);
-        if (nextStep != null) {
-            workflow.setCurrentStep(nextStepNo);
-            workflow.setCurrentApproverId(nextStep.getApproverId());
-            updateById(workflow);
-            sendApprovalNotification(nextStep);
+        if (nextStep == null) {
+            throw new IllegalStateException("找不到下一审批步骤");
+        }
+
+        if (!update(new UpdateWrapper<ApprovalWorkflow>()
+                .eq("id", workflow.getId())
+                .eq("status", ApprovalStatus.PENDING)
+                .eq("current_step", workflow.getCurrentStep())
+                .eq("current_approver_id", workflow.getCurrentApproverId())
+                .set("current_step", nextStepNo)
+                .set("current_approver_id", nextStep.getApproverId()))) {
+            throw new IllegalStateException("审批流程状态已变更，请刷新后重试");
+        }
+
+        workflow.setCurrentStep(nextStepNo);
+        workflow.setCurrentApproverId(nextStep.getApproverId());
+        sendApprovalNotification(nextStep);
+    }
+
+    private void cancelCurrentStep(ApprovalWorkflow workflow, String reason) {
+        LocalDateTime cancelTime = LocalDateTime.now();
+        UpdateWrapper<ApprovalStep> updateWrapper = new UpdateWrapper<ApprovalStep>()
+                .eq("workflow_id", workflow.getId())
+                .eq("step_no", workflow.getCurrentStep())
+                .eq("status", ApprovalStatus.PENDING)
+                .set("status", ApprovalStatus.CANCELLED)
+                .set("approve_time", cancelTime)
+                .set("approve_comment", reason)
+                .set("reject_reason", reason);
+        if (workflow.getCurrentApproverId() != null) {
+            updateWrapper.eq("approver_id", workflow.getCurrentApproverId());
+        }
+
+        if (!approvalStepService.update(updateWrapper)) {
+            throw new IllegalStateException("审批步骤状态已变更，请刷新后重试");
         }
     }
 
@@ -417,13 +491,28 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
      * @param finalStatus 最终状态（APPROVED/REJECTED/CANCELLED）
      */
     private void completeWorkflow(ApprovalWorkflow workflow, ApprovalStatus finalStatus) {
+        completeWorkflow(workflow, finalStatus, workflow.getCurrentApproverId());
+    }
+
+    private void completeWorkflow(ApprovalWorkflow workflow, ApprovalStatus finalStatus, Long finalApproverId) {
         // 保存最终审批人ID，用于审计追溯
-        Long finalApproverId = workflow.getCurrentApproverId();
+        Long currentApproverId = workflow.getCurrentApproverId();
+        LocalDateTime completeTime = LocalDateTime.now();
+
+        if (!update(new UpdateWrapper<ApprovalWorkflow>()
+                .eq("id", workflow.getId())
+                .eq("status", ApprovalStatus.PENDING)
+                .eq("current_step", workflow.getCurrentStep())
+                .eq("current_approver_id", currentApproverId)
+                .set("status", finalStatus)
+                .set("complete_time", completeTime)
+                .set("current_approver_id", null))) {
+            throw new IllegalStateException("审批流程状态已变更，请刷新后重试");
+        }
 
         workflow.setStatus(finalStatus);
-        workflow.setCompleteTime(LocalDateTime.now());
+        workflow.setCompleteTime(completeTime);
         workflow.setCurrentApproverId(null);
-        updateById(workflow);
         sendWorkflowCompleteNotification(workflow, finalStatus);
 
         // 发布审批完成事件，由各业务模块监听处理
@@ -435,6 +524,10 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     // ==================== 通知 ====================
 
     private void sendApprovalNotification(ApprovalStep step) {
+        afterCommitExecutor.execute(() -> doSendApprovalNotification(step));
+    }
+
+    private void doSendApprovalNotification(ApprovalStep step) {
         try {
             SysUser approver = sysUserService.getById(step.getApproverId());
             if (approver == null) return;
@@ -450,6 +543,10 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     }
 
     private void sendWorkflowCompleteNotification(ApprovalWorkflow workflow, ApprovalStatus finalStatus) {
+        afterCommitExecutor.execute(() -> doSendWorkflowCompleteNotification(workflow, finalStatus));
+    }
+
+    private void doSendWorkflowCompleteNotification(ApprovalWorkflow workflow, ApprovalStatus finalStatus) {
         try {
             SysUser initiator = sysUserService.getById(workflow.getInitiatorId());
             if (initiator == null) return;
@@ -503,17 +600,28 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
             }
         }
 
-        if (businessKey != null && businessKey.startsWith("EMPLOYEE-")) {
-            try {
-                String remain = businessKey.substring("EMPLOYEE-".length());
-                int split = remain.indexOf('-');
-                String idPart = split > 0 ? remain.substring(0, split) : remain;
-                return Long.parseLong(idPart);
-            } catch (Exception ignored) {
-                // ignore invalid key format
-            }
+        Long employeeIdFromKey = extractEmployeeIdFromBusinessKey(businessKey);
+        if (employeeIdFromKey != null) {
+            return employeeIdFromKey;
         }
         return null;
+    }
+
+    private Long extractEmployeeIdFromBusinessKey(String businessKey) {
+        if (!StringUtils.hasText(businessKey) || !businessKey.startsWith("EMPLOYEE-")) {
+            return null;
+        }
+        String remain = businessKey.substring("EMPLOYEE-".length());
+        if (remain.startsWith("PROFILE-")) {
+            remain = remain.substring("PROFILE-".length());
+        }
+        int split = remain.indexOf('-');
+        String idPart = split > 0 ? remain.substring(0, split) : remain;
+        try {
+            return Long.parseLong(idPart);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     @SuppressWarnings("unchecked")

@@ -16,8 +16,6 @@ import org.springframework.transaction.event.TransactionPhase;
 import org.springframework.transaction.event.TransactionalEventListener;
 
 import java.time.LocalDateTime;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 薪资批次审批处理器
@@ -46,23 +44,7 @@ public class PayrollApprovalHandler {
     private final SysUserService sysUserService;
     private final NotificationService notificationService;
     private final PayrollProcessManager payrollProcessManager;
-
-    /**
-     * 内存中的失败队列（生产环境建议使用 Redis 队列）
-     */
-    private final Map<String, PayrollPaymentFailure> failureQueue = new ConcurrentHashMap<>();
-
-    /**
-     * 薪资批次支付失败记录
-     */
-    public record PayrollPaymentFailure(
-            Long workflowId,
-            Long batchId,
-            String businessKey,
-            String errorMessage,
-            LocalDateTime failedTime,
-            Integer retryCount
-    ) {}
+    private final PayrollPaymentFailureService payrollPaymentFailureService;
 
     /**
      * 监听审批完成事件
@@ -118,7 +100,7 @@ public class PayrollApprovalHandler {
             log.error("处理薪资批次审批失败: workflowId={}, businessKey={}, error={}",
                     workflow.getId(), workflow.getBusinessKey(), e.getMessage(), e);
 
-            // 记录到失败队列
+            // 记录到持久化补偿表
             recordFailureToQueue(workflow, e.getMessage());
 
             // 发送告警通知
@@ -215,11 +197,13 @@ public class PayrollApprovalHandler {
         var paymentBatch = payrollPaymentService.createPaymentBatch(payrollBatch, approver, true);
 
         if (paymentBatch != null) {
+            payrollPaymentFailureService.markResolved(workflow.getId(), paymentBatch.getBatchNo());
             log.info("薪资批次支付批次创建成功: workflowId={}, batchId={}, paymentBatchNo={}",
                     workflow.getId(), batchId, paymentBatch.getBatchNo());
         } else {
-            log.warn("薪资批次无有效支付记录，未创建支付批次: workflowId={}, batchId={}",
-                    workflow.getId(), batchId);
+            throw new IllegalStateException(String.format(
+                    "薪资批次无有效支付记录，未创建支付批次: workflowId=%s, batchId=%s",
+                    workflow.getId(), batchId));
         }
     }
 
@@ -257,10 +241,14 @@ public class PayrollApprovalHandler {
         }
         try {
             String idPart = businessKey.replaceAll("(?i)payroll_distribution[:_]", "").trim();
-            if (idPart.isEmpty()) {
+            int endIndex = 0;
+            while (endIndex < idPart.length() && Character.isDigit(idPart.charAt(endIndex))) {
+                endIndex++;
+            }
+            if (endIndex == 0) {
                 return null;
             }
-            return Long.parseLong(idPart);
+            return Long.parseLong(idPart.substring(0, endIndex));
         } catch (NumberFormatException e) {
             log.warn("解析发放单ID失败: businessKey={}", businessKey);
             return null;
@@ -278,7 +266,7 @@ public class PayrollApprovalHandler {
     }
 
     /**
-     * 记录失败到队列
+     * 记录失败到持久化补偿表
      *
      * @param workflow    工作流
      * @param errorMessage 错误信息
@@ -286,22 +274,11 @@ public class PayrollApprovalHandler {
     private void recordFailureToQueue(ApprovalWorkflow workflow, String errorMessage) {
         try {
             Long batchId = parseBatchId(workflow.getBusinessKey());
-            String queueKey = "payroll_payment_failure:" + workflow.getId();
-
-            PayrollPaymentFailure failure = new PayrollPaymentFailure(
-                    workflow.getId(),
-                    batchId,
-                    workflow.getBusinessKey(),
-                    errorMessage,
-                    LocalDateTime.now(),
-                    1
-            );
-
-            failureQueue.put(queueKey, failure);
-            log.info("薪资批次支付失败已记录到队列: queueKey={}", queueKey);
+            payrollPaymentFailureService.recordFailure(workflow.getId(), batchId, workflow.getBusinessKey(), errorMessage);
+            log.info("薪资批次支付失败已记录到补偿表: workflowId={}, batchId={}", workflow.getId(), batchId);
 
         } catch (Exception ex) {
-            log.error("记录失败队列异常: workflowId={}", workflow.getId(), ex);
+            log.error("记录支付补偿失败异常: workflowId={}", workflow.getId(), ex);
         }
     }
 
@@ -342,23 +319,4 @@ public class PayrollApprovalHandler {
         }
     }
 
-    /**
-     * 从失败队列中获取并清除记录
-     *
-     * @param workflowId 工作流ID
-     * @return 失败记录，不存在则返回 null
-     */
-    public PayrollPaymentFailure pollFailureFromQueue(Long workflowId) {
-        String queueKey = "payroll_payment_failure:" + workflowId;
-        return failureQueue.remove(queueKey);
-    }
-
-    /**
-     * 获取当前失败队列大小
-     *
-     * @return 队列大小
-     */
-    public int getFailureQueueSize() {
-        return failureQueue.size();
-    }
 }

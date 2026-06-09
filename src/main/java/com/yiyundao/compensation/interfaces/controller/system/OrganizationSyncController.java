@@ -26,6 +26,9 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class OrganizationSyncController {
 
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 200;
+
     private final OrganizationSyncService organizationSyncService;
     private final AuditLogService auditLogService;
     private final OrgSyncTaskService orgSyncTaskService;
@@ -50,7 +53,7 @@ public class OrganizationSyncController {
 
     // 检查连接
     @GetMapping("/check")
-    @SecurityAnnotations.HasOrgReadPermission
+    @SecurityAnnotations.HasOrgAdminReadPermission
     public ApiResponse<Boolean> check(@RequestParam(required = false, defaultValue = "all") String platform, HttpServletRequest request) {
         platform = normalizePlatform(platform);
         if (platform == null) {
@@ -87,12 +90,14 @@ public class OrganizationSyncController {
         java.util.List<com.yiyundao.compensation.modules.employee.entity.Employee> raw = organizationSyncService.fetchPreview(p);
         // 聚合：按平台用户聚合多部门
         java.util.Map<String, com.yiyundao.compensation.interfaces.dto.org.EmployeePreviewDto> map = new java.util.LinkedHashMap<>();
+        int rowIndex = 0;
         for (com.yiyundao.compensation.modules.employee.entity.Employee e : raw) {
-            String normalizedPlatform = firstNonBlank(normalizePlatform(e.getProvider()), e.getProvider());
-            String key = normalizedPlatform + ":" + e.getSubjectId();
+            rowIndex++;
+            String normalizedPlatform = firstNonBlank(normalizePlatform(e.getProvider()), p);
+            String subjectId = trimToNull(e.getSubjectId());
+            String key = buildPreviewGroupKey(normalizedPlatform, subjectId, e.getEmployeeId(), rowIndex);
             com.yiyundao.compensation.interfaces.dto.org.EmployeePreviewDto dto = map.get(key);
             if (dto == null) {
-                String subjectId = e.getSubjectId();
                 dto = new com.yiyundao.compensation.interfaces.dto.org.EmployeePreviewDto();
                 dto.setGroupKey(key);
                 dto.setProvider(normalizedPlatform);
@@ -139,7 +144,7 @@ public class OrganizationSyncController {
 
     // 新增：部门树预览（不落库）
     @PostMapping("/fetch-tree")
-    @SecurityAnnotations.HasOrgReadPermission
+    @SecurityAnnotations.HasOrgAdminReadPermission
     public ApiResponse<com.yiyundao.compensation.interfaces.dto.org.OrgDeptTreeResponse> fetchTree(
             @RequestParam(required = false) String platform,
             @RequestBody(required = false) com.yiyundao.compensation.interfaces.dto.org.OrgFetchRequest body
@@ -184,9 +189,26 @@ public class OrganizationSyncController {
                 );
                 String itemPlatform = firstNonBlank(normalizePlatform(it.getProvider()), requestPlatform);
                 String subjectId = trimToNull(it.getSubjectId());
+                if (!StringUtils.hasText(itemPlatform)) {
+                    fail++;
+                    errors.add(String.format("导入失败：%s(%s)，原因：平台类型无效",
+                            firstNonBlank(it.getName(), "未命名"),
+                            firstNonBlank(subjectId, "无平台ID")));
+                    continue;
+                }
+                if (!StringUtils.hasText(subjectId)) {
+                    fail++;
+                    errors.add(String.format("导入失败：%s(%s)，原因：平台用户ID不能为空",
+                            firstNonBlank(it.getName(), "未命名"),
+                            firstNonBlank(it.getEmployeeId(), "无工号")));
+                    continue;
+                }
                 com.yiyundao.compensation.modules.employee.entity.Employee existing = null;
                 if (StringUtils.hasText(itemPlatform) && StringUtils.hasText(subjectId)) {
                     existing = employeeService.getByProviderAndSubjectId(itemPlatform, subjectId);
+                }
+                if (existing == null && StringUtils.hasText(it.getEmployeeId())) {
+                    existing = employeeService.getByEmployeeId(it.getEmployeeId());
                 }
                 if (existing != null && !upsertMode) {
                     skipped++;
@@ -202,9 +224,9 @@ public class OrganizationSyncController {
                 e.setName(it.getName());
                 e.setPhone(it.getPhone());
                 e.setEmail(it.getEmail());
-                // 展示用主部门+多部门
-                if (it.getDepartments() != null && !it.getDepartments().isEmpty()) {
-                    e.setDepartment(String.join(",", it.getDepartments()));
+                java.util.List<String> departmentNames = normalizeDepartmentNames(it.getDepartments());
+                if (it.getDepartments() != null) {
+                    e.setDepartment(String.join(",", departmentNames));
                 }
                 e.setPosition(it.getPosition());
                 e.setEmploymentType(it.getEmploymentType());
@@ -225,8 +247,8 @@ public class OrganizationSyncController {
                     continue;
                 }
                 // 维护多部门关联
-                if (it.getDepartments() != null && !it.getDepartments().isEmpty()) {
-                    employeeDepartmentService.replaceDepartments(saved.getId(), itemPlatform, it.getDepartments());
+                if (it.getDepartments() != null) {
+                    employeeDepartmentService.replaceDepartments(saved.getId(), itemPlatform, departmentNames);
                 }
                 ok++;
                 if (existing != null) {
@@ -253,6 +275,17 @@ public class OrganizationSyncController {
         result.put("skippedItems", skippedItems);
         result.put("errors", errors);
         return ApiResponse.success(result);
+    }
+
+    private java.util.List<String> normalizeDepartmentNames(java.util.List<String> departments) {
+        if (departments == null || departments.isEmpty()) {
+            return java.util.List.of();
+        }
+        return departments.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .distinct()
+                .toList();
     }
 
     private String normalizePlatform(String platform) {
@@ -300,6 +333,17 @@ public class OrganizationSyncController {
         return "new_only";
     }
 
+    private String buildPreviewGroupKey(String provider, String subjectId, String employeeId, int rowIndex) {
+        String normalizedProvider = firstNonBlank(provider, "unknown");
+        if (StringUtils.hasText(subjectId)) {
+            return normalizedProvider + ":" + subjectId.trim();
+        }
+        if (StringUtils.hasText(employeeId)) {
+            return normalizedProvider + ":employee:" + employeeId.trim();
+        }
+        return normalizedProvider + ":row:" + rowIndex;
+    }
+
     private String trimToNull(String value) {
         if (value == null) {
             return null;
@@ -322,20 +366,24 @@ public class OrganizationSyncController {
 
     // 异步任务查询
     @GetMapping("/sync-task/{id}")
-    @SecurityAnnotations.HasOrgReadPermission
+    @SecurityAnnotations.HasOrgAdminReadPermission
     public ApiResponse<OrgSyncTaskService.TaskInfo> task(@PathVariable String id) {
-        return ApiResponse.success(orgSyncTaskService.get(id));
+        OrgSyncTaskService.TaskInfo taskInfo = orgSyncTaskService.get(id);
+        if (taskInfo == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "同步任务不存在");
+        }
+        return ApiResponse.success(taskInfo);
     }
 
     // 历史记录（审计日志中 business_type=ORG）
     @GetMapping("/history")
-    @SecurityAnnotations.HasOrgReadPermission
+    @SecurityAnnotations.HasOrgAdminReadPermission
     public ApiResponse<Map<String, Object>> history(@RequestParam(defaultValue = "1") int current,
                                                     @RequestParam(defaultValue = "10") int pageSize,
                                                     @RequestParam(required = false) String platform,
                                                     @RequestParam(required = false) String operation) {
         String normalized = platform == null ? null : normalizePlatform(platform);
-        Page<AuditLog> page = new Page<>(current, pageSize);
+        Page<AuditLog> page = new Page<>(safePage(current), safeSize(pageSize));
         LambdaQueryWrapper<AuditLog> w = new LambdaQueryWrapper<AuditLog>()
                 .eq(AuditLog::getBusinessType, "ORG")
                 .orderByDesc(AuditLog::getCreateTime);
@@ -367,5 +415,16 @@ public class OrganizationSyncController {
         resp.put("current", result.getCurrent());
         resp.put("size", result.getSize());
         return ApiResponse.success(resp);
+    }
+
+    private int safePage(int page) {
+        return page < 1 ? 1 : page;
+    }
+
+    private int safeSize(int size) {
+        if (size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
     }
 }

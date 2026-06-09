@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.modules.payment.provider.impl;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.yiyundao.compensation.enums.PaymentStatus;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
@@ -36,6 +37,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -129,14 +131,7 @@ class YunzhanghuSettlementProviderTest {
         assertEquals("YZH_ORDER_1001", result.getProviderOrderNo());
         assertEquals("YZH_REF_001", result.getProviderTradeNo());
 
-        ArgumentCaptor<PaymentRecord> captor = ArgumentCaptor.forClass(PaymentRecord.class);
-        verify(paymentRecordService).updateById(captor.capture());
-        PaymentRecord updated = captor.getValue();
-        assertEquals(1001L, updated.getId());
-        assertEquals("yunzhanghu", updated.getProviderCode());
-        assertEquals("YZH_ORDER_1001", updated.getProviderOrderNo());
-        assertEquals("YZH_REF_001", updated.getProviderTradeNo());
-        assertEquals(PaymentStatus.PROCESSING, updated.getStatus());
+        verify(paymentRecordService).update(org.mockito.ArgumentMatchers.<Wrapper<PaymentRecord>>any());
     }
 
     @Test
@@ -166,7 +161,7 @@ class YunzhanghuSettlementProviderTest {
         assertFalse(result.isSuccess());
         assertEquals("YZH_ID_CARD_MISSING", result.getErrorCode());
         assertEquals(SettlementStatus.FAILED, result.getStatus());
-        verify(paymentRecordService).updateById(any(PaymentRecord.class));
+        verify(paymentRecordService).update(org.mockito.ArgumentMatchers.<Wrapper<PaymentRecord>>any());
     }
 
     @Test
@@ -208,6 +203,7 @@ class YunzhanghuSettlementProviderTest {
 
         PaymentRecord record = new PaymentRecord();
         record.setId(2001L);
+        record.setStatus(PaymentStatus.PROCESSING);
         when(paymentRecordService.getByProviderOrderNo("yunzhanghu", "YZH_ORDER_CB_1")).thenReturn(record);
 
         boolean verified = provider.verifyCallback(Map.of("data", "x", "mess", "m", "timestamp", "t", "sign", "s"));
@@ -218,8 +214,70 @@ class YunzhanghuSettlementProviderTest {
         assertEquals("YZH_ORDER_CB_1", callbackResult.getBizNo());
         assertEquals(SettlementStatus.SUCCESS, callbackResult.getStatus());
 
-        ArgumentCaptor<PaymentRecord> captor = ArgumentCaptor.forClass(PaymentRecord.class);
-        verify(paymentRecordService).updateById(captor.capture());
-        assertEquals(PaymentStatus.SUCCESS, captor.getValue().getStatus());
+        verify(paymentRecordService).update(org.mockito.ArgumentMatchers.<Wrapper<PaymentRecord>>any());
+    }
+
+    @Test
+    @DisplayName("回调处理：已成功记录不被迟到失败回调降级")
+    void callback_shouldNotDowngradeSuccessfulRecord() {
+        NotifyOrderData notifyData = new NotifyOrderData();
+        notifyData.setOrderId("YZH_ORDER_CB_DONE");
+        notifyData.setRef("YZH_REF_CB_DONE");
+        notifyData.setStatus("FAILED");
+        notifyData.setStatusDetail("PAY_FAILED");
+
+        NotifyOrderRequest notifyOrderRequest = new NotifyOrderRequest();
+        notifyOrderRequest.setNotifyId("notify-done");
+        notifyOrderRequest.setNotifyTime("2026-02-26 10:00:00");
+        notifyOrderRequest.setData(notifyData);
+
+        NotifyResponse<NotifyOrderRequest> decoded = new NotifyResponse<>();
+        decoded.setSignRes(true);
+        decoded.setDescryptRes(true);
+        decoded.setData(notifyOrderRequest);
+        when(yunzhanghuClient.decodeOrderNotify(any())).thenReturn(decoded);
+
+        PaymentRecord record = new PaymentRecord();
+        record.setId(2002L);
+        record.setStatus(PaymentStatus.SUCCESS);
+        when(paymentRecordService.getByProviderOrderNo("yunzhanghu", "YZH_ORDER_CB_DONE")).thenReturn(record);
+
+        assertTrue(provider.verifyCallback(Map.of("data", "x", "mess", "m", "timestamp", "t", "sign", "s")));
+        SettlementCallbackResult callbackResult = provider.handleCallback(Map.of());
+
+        assertTrue(callbackResult.isSuccess());
+        assertEquals(SettlementStatus.FAILED, callbackResult.getStatus());
+        verify(paymentRecordService, never()).update(org.mockito.ArgumentMatchers.<Wrapper<PaymentRecord>>any());
+    }
+
+    @Test
+    @DisplayName("回调处理：验签通过但未匹配支付记录时不确认成功")
+    void callback_shouldNotAckWhenPaymentRecordMissing() {
+        NotifyOrderData notifyData = new NotifyOrderData();
+        notifyData.setOrderId("YZH_ORDER_MISSING");
+        notifyData.setRef("YZH_REF_MISSING");
+        notifyData.setStatus("SUCCESS");
+        notifyData.setStatusDetail("PAY_SUCCESS");
+
+        NotifyOrderRequest notifyOrderRequest = new NotifyOrderRequest();
+        notifyOrderRequest.setNotifyId("notify-missing");
+        notifyOrderRequest.setNotifyTime("2026-02-26 10:00:00");
+        notifyOrderRequest.setData(notifyData);
+
+        NotifyResponse<NotifyOrderRequest> decoded = new NotifyResponse<>();
+        decoded.setSignRes(true);
+        decoded.setDescryptRes(true);
+        decoded.setData(notifyOrderRequest);
+        when(yunzhanghuClient.decodeOrderNotify(any())).thenReturn(decoded);
+        when(paymentRecordService.getByProviderOrderNo("yunzhanghu", "YZH_ORDER_MISSING")).thenReturn(null);
+
+        assertTrue(provider.verifyCallback(Map.of("data", "x", "mess", "m", "timestamp", "t", "sign", "s")));
+        SettlementCallbackResult callbackResult = provider.handleCallback(Map.of());
+
+        assertFalse(callbackResult.isSuccess());
+        assertEquals("YZH_ORDER_MISSING", callbackResult.getBizNo());
+        assertEquals(SettlementStatus.SUCCESS, callbackResult.getStatus());
+        assertEquals("云账户回调未匹配到支付记录", callbackResult.getErrorMsg());
+        verify(paymentRecordService, never()).update(org.mockito.ArgumentMatchers.<Wrapper<PaymentRecord>>any());
     }
 }

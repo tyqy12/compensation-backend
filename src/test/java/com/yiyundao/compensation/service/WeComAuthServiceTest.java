@@ -18,6 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,26 +37,29 @@ class WeComAuthServiceTest {
     private WebClient webClient;
 
     private MockEnvironment environment;
+    private TrustedRedirectUrlValidator trustedRedirectUrlValidator;
     private WeComAuthService service;
 
     @BeforeEach
     void setUp() {
         environment = new MockEnvironment();
+        trustedRedirectUrlValidator = new TrustedRedirectUrlValidator(sysConfigService, environment);
         service = new WeComAuthService(
                 integrationConfigService,
                 sysConfigService,
                 authTokenService,
                 platformTokenCacheService,
                 webClient,
-                environment
+                environment,
+                trustedRedirectUrlValidator
         );
-        when(integrationConfigService.getWechatConfig()).thenReturn(validConfig());
     }
 
     @Test
     @DisplayName("sys_config 未配置时，应兜底读取 application 配置")
     void buildAuthorize_shouldFallbackToApplicationPropertyHosts() {
         environment.setProperty("oauth.trusted-redirect-hosts", "localhost:5173,127.0.0.1:5173");
+        when(integrationConfigService.getWechatConfig()).thenReturn(validConfig());
         when(sysConfigService.getString("oauth.trusted.redirect.hosts", null)).thenReturn(null);
         when(sysConfigService.getInt("auth.oauth.state.ttl.seconds", null)).thenReturn(null);
 
@@ -71,6 +75,7 @@ class WeComAuthServiceTest {
     @DisplayName("应优先使用 sys_config 白名单")
     void buildAuthorize_shouldPreferSysConfigHosts() {
         environment.setProperty("oauth.trusted-redirect-hosts", "localhost:5173");
+        when(integrationConfigService.getWechatConfig()).thenReturn(validConfig());
         when(sysConfigService.getString("oauth.trusted.redirect.hosts", null)).thenReturn("trusted.example.com");
         when(sysConfigService.getInt("auth.oauth.state.ttl.seconds", null)).thenReturn(null);
 
@@ -87,11 +92,39 @@ class WeComAuthServiceTest {
     @DisplayName("非 http/https 协议应拒绝")
     void buildAuthorize_shouldRejectNonHttpScheme() {
         environment.setProperty("oauth.trusted-redirect-hosts", "localhost:5173");
+        when(integrationConfigService.getWechatConfig()).thenReturn(validConfig());
 
         assertThrows(
                 IllegalArgumentException.class,
                 () -> service.buildAuthorize("web", "ftp://localhost:5173/oauth/callback/wecom")
         );
+    }
+
+    @Test
+    @DisplayName("JS-SDK 签名应拒绝非可信域名")
+    void jsapiSignature_shouldRejectUntrustedHostBeforeFetchingTicket() {
+        environment.setProperty("oauth.trusted-redirect-hosts", "trusted.example.com");
+        when(sysConfigService.getString("oauth.trusted.redirect.hosts", null)).thenReturn(null);
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.jsapiSignature("https://evil.example.com/page")
+        );
+
+        verifyNoInteractions(platformTokenCacheService, webClient);
+    }
+
+    @Test
+    @DisplayName("Agent JS-SDK 签名应拒绝非 http/https URL")
+    void agentJsapiSignature_shouldRejectNonHttpSchemeBeforeFetchingTicket() {
+        environment.setProperty("oauth.trusted-redirect-hosts", "trusted.example.com");
+
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> service.agentJsapiSignature("javascript:alert(1)")
+        );
+
+        verifyNoInteractions(platformTokenCacheService, webClient);
     }
 
     private WechatConfigDto validConfig() {

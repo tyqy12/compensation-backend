@@ -3,6 +3,7 @@ package com.yiyundao.compensation.interceptor;
 import com.yiyundao.compensation.common.annotation.Idempotent;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.security.ClientIpResolver;
 import com.yiyundao.compensation.service.IdempotentService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -23,10 +24,13 @@ import java.util.Map;
 public class IdempotentInterceptor implements HandlerInterceptor {
 
     private final IdempotentService idempotentService;
+    private final ClientIpResolver clientIpResolver;
 
     @Autowired
-    public IdempotentInterceptor(@Autowired(required = false) IdempotentService idempotentService) {
+    public IdempotentInterceptor(@Autowired(required = false) IdempotentService idempotentService,
+                                 ClientIpResolver clientIpResolver) {
         this.idempotentService = idempotentService;
+        this.clientIpResolver = clientIpResolver;
     }
 
     @Override
@@ -82,26 +86,12 @@ public class IdempotentInterceptor implements HandlerInterceptor {
         variables.put("request", request);
         variables.put("method", handlerMethod.getMethod().getName());
         variables.put("uri", request.getRequestURI());
-        variables.put("ip", getClientIp(request));
+        variables.put("ip", clientIpResolver.resolve(request));
 
         request.getParameterMap().forEach((k, v) ->
                 variables.put(k, v.length > 0 ? v[0] : null));
 
         return idempotentService.generateKey(idempotent.key(), variables);
-    }
-
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("WL-Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        return ip;
     }
 
     private void writeResponse(HttpServletResponse response, ErrorCode errorCode, String message) {

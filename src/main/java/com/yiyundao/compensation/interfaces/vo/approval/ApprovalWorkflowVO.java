@@ -18,7 +18,9 @@ public class ApprovalWorkflowVO {
     private String status;
     private String statusName;
     private Long initiatorId;
+    private String initiatorName;
     private Long currentApproverId;
+    private String currentApproverName;
     private LocalDateTime submitTime;
     private LocalDateTime completeTime;
 
@@ -45,4 +47,3 @@ public class ApprovalWorkflowVO {
         return vo;
     }
 }
-

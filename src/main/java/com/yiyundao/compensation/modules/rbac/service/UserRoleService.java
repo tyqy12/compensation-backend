@@ -6,6 +6,7 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.yiyundao.compensation.infrastructure.dao.SysRoleMapper;
 import com.yiyundao.compensation.infrastructure.dao.SysUserMapper;
 import com.yiyundao.compensation.infrastructure.dao.SysUserRoleMapper;
+import com.yiyundao.compensation.enums.UserStatus;
 import com.yiyundao.compensation.modules.rbac.entity.SysRole;
 import com.yiyundao.compensation.modules.rbac.entity.SysUserRole;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
@@ -17,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -44,6 +46,7 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
     private final SysRoleMapper roleMapper;
     private final SysUserMapper sysUserMapper;
     private final ObjectProvider<RedisTemplate<String, Object>> redisTemplateProvider;
+    private final ResourceCacheService resourceCacheService;
 
     private static final String USER_ROLES_CACHE_KEY = "user:roles:";
     private static final long CACHE_EXPIRE_HOURS = 24;
@@ -79,6 +82,8 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
                     return cached.stream()
                             .filter(Objects::nonNull)
                             .map(Object::toString)
+                            .map(this::normalizeRoleCode)
+                            .filter(StringUtils::hasText)
                             .collect(Collectors.toSet());
                 }
                 log.trace("UserRoleService: cache miss for userId={}", userId);
@@ -88,13 +93,14 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
         }
 
         // 2. 从关联表查询
-        Set<String> roleCodes = fetchUserRoleCodesFromDb(userId);
+        UserRoleCodeSnapshot snapshot = fetchUserRoleCodesFromDb(userId);
+        Set<String> roleCodes = snapshot.roleCodes();
 
         // 3. 写入缓存
         if (redisTemplate != null && !roleCodes.isEmpty()) {
             try {
                 redisTemplate.opsForSet().add(cacheKey, roleCodes.toArray());
-                redisTemplate.expire(cacheKey, CACHE_EXPIRE_HOURS, TimeUnit.HOURS);
+                redisTemplate.expire(cacheKey, cacheTtlSeconds(snapshot.nearestExpiresAt()), TimeUnit.SECONDS);
                 log.debug("UserRoleService: 缓存已更新, userId={}, roles={}", userId, roleCodes);
             } catch (Exception e) {
                 log.warn("UserRoleService: 缓存写入失败, userId={}", userId, e);
@@ -140,13 +146,18 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
      * @return 角色列表
      */
     public List<SysRole> getUserRoles(Long userId) {
-        // sys_user_role 表没有 deleted 字段，直接查询
+        // SysUserRole 继承 BaseEntity，逻辑删除条件由 MyBatis-Plus 自动追加。
+        LocalDateTime now = LocalDateTime.now();
         List<SysUserRole> userRoles = userRoleMapper.selectList(
                 new LambdaQueryWrapper<SysUserRole>()
                         .eq(SysUserRole::getUserId, userId)
+                        .and(w -> w.isNull(SysUserRole::getExpiresAt)
+                                .or()
+                                .gt(SysUserRole::getExpiresAt, now))
         );
 
         Set<Long> roleIds = userRoles.stream()
+                .filter(userRole -> isEffective(userRole, now))
                 .map(SysUserRole::getRoleId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
@@ -173,15 +184,9 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
             return false;
         }
 
-        // 规范化角色编码
-        String normalizedCode = roleCode.toUpperCase();
-        if (normalizedCode.startsWith("ROLE_")) {
-            normalizedCode = normalizedCode.substring(5);
-        }
-
         // 快速路径：先检查缓存
         Set<String> roleCodes = getUserRoleCodes(userId);
-        if (roleCodes.contains(normalizedCode) || roleCodes.contains("ROLE_" + normalizedCode)) {
+        if (hasRoleCode(roleCodes, roleCode)) {
             return true;
         }
 
@@ -257,7 +262,23 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
                           LocalDateTime expiresAt, String remarks) {
         log.info("授予用户角色: userId={}, roleId={}, grantedBy={}", userId, roleId, grantedBy);
 
-        // 检查是否已存在
+        boolean changed = grantRoleInternal(userId, roleId, grantedBy, expiresAt, remarks);
+        if (changed) {
+            refreshPermissionCaches(userId);
+        }
+    }
+
+    private boolean grantRoleInternal(Long userId, Long roleId, Long grantedBy,
+                                      LocalDateTime expiresAt, String remarks) {
+        LocalDateTime now = LocalDateTime.now();
+        String operator = String.valueOf(grantedBy);
+        int restored = userRoleMapper.restoreDeletedRole(
+                userId, roleId, grantedBy, now, expiresAt, remarks, operator, now);
+        if (restored > 0) {
+            return true;
+        }
+
+        // MyBatis-Plus 逻辑删除会自动过滤 deleted=1，这里只处理当前活跃关联。
         SysUserRole existing = userRoleMapper.selectOne(
                 new LambdaQueryWrapper<SysUserRole>()
                         .eq(SysUserRole::getUserId, userId)
@@ -265,11 +286,13 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
         );
 
         if (existing != null) {
-            // 已存在，更新过期时间
+            // 已存在，更新授权信息。
             existing.setExpiresAt(expiresAt);
             existing.setRemarks(remarks);
-            existing.setUpdateBy(String.valueOf(grantedBy));
-            existing.setUpdateTime(LocalDateTime.now());
+            existing.setGrantedBy(grantedBy);
+            existing.setGrantedAt(now);
+            existing.setUpdateBy(operator);
+            existing.setUpdateTime(now);
             userRoleMapper.updateById(existing);
         } else {
             // 不存在，创建新记录
@@ -277,17 +300,16 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
             userRole.setUserId(userId);
             userRole.setRoleId(roleId);
             userRole.setGrantedBy(grantedBy);
-            userRole.setGrantedAt(LocalDateTime.now());
+            userRole.setGrantedAt(now);
             userRole.setExpiresAt(expiresAt);
             userRole.setRemarks(remarks);
-            userRole.setCreateBy(String.valueOf(grantedBy));
-            userRole.setCreateTime(LocalDateTime.now());
+            userRole.setCreateBy(operator);
+            userRole.setCreateTime(now);
             userRole.setDeleted(0);
             userRoleMapper.insert(userRole);
         }
 
-        // 清除缓存 - 角色变更后立即生效
-        invalidateUserRolesCache(userId);
+        return true;
     }
 
     /**
@@ -303,9 +325,46 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
             return;
         }
 
+        boolean changed = false;
         for (Long roleId : roleIds) {
-            grantRole(userId, roleId, grantedBy, null, null);
+            changed |= grantRoleInternal(userId, roleId, grantedBy, null, null);
         }
+        if (changed) {
+            refreshPermissionCaches(userId);
+        }
+    }
+
+    /**
+     * 覆盖式设置用户角色。
+     * <p>
+     * 撤销、授予、权限版本递增必须处于同一事务，避免部分成功导致用户角色被清空。
+     * </p>
+     *
+     * @param userId    用户ID
+     * @param roleIds   目标角色ID集合
+     * @param operatorId 操作人ID
+     */
+    @Transactional
+    public void replaceUserRoles(Long userId, Collection<Long> roleIds, Long operatorId) {
+        revokeAllRolesInternal(userId, operatorId);
+
+        if (roleIds != null && !roleIds.isEmpty()) {
+            for (Long roleId : roleIds) {
+                grantRoleInternal(userId, roleId, operatorId, null, null);
+            }
+        }
+
+        refreshPermissionCaches(userId);
+    }
+
+    private void incrementPermissionVersion(Long userId) {
+        if (userId == null) {
+            return;
+        }
+        sysUserMapper.update(null, new LambdaUpdateWrapper<SysUser>()
+                .setSql("permission_version = COALESCE(permission_version, 0) + 1")
+                .set(SysUser::getUpdateTime, LocalDateTime.now())
+                .eq(SysUser::getId, userId));
     }
 
     /**
@@ -330,10 +389,8 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
             userRole.setDeleteBy(String.valueOf(revokedBy));
             userRole.setDeleteTime(LocalDateTime.now());
             userRoleMapper.updateById(userRole);
+            refreshPermissionCaches(userId);
         }
-
-        // 清除缓存
-        invalidateUserRolesCache(userId);
     }
 
     /**
@@ -346,16 +403,20 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
     public void revokeAllRoles(Long userId, Long revokedBy) {
         log.info("撤销用户所有角色: userId={}, revokedBy={}", userId, revokedBy);
 
-        userRoleMapper.update(null,
+        if (revokeAllRolesInternal(userId, revokedBy)) {
+            refreshPermissionCaches(userId);
+        }
+    }
+
+    private boolean revokeAllRolesInternal(Long userId, Long revokedBy) {
+        int updated = userRoleMapper.update(null,
                 new LambdaUpdateWrapper<SysUserRole>()
                         .set(SysUserRole::getDeleted, 1)
                         .set(SysUserRole::getUpdateBy, String.valueOf(revokedBy))
                         .set(SysUserRole::getUpdateTime, LocalDateTime.now())
                         .eq(SysUserRole::getUserId, userId)
         );
-
-        // 清除缓存
-        invalidateUserRolesCache(userId);
+        return updated > 0;
     }
 
     // ==================== 缓存管理 ====================
@@ -399,6 +460,16 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
         }
     }
 
+    private void refreshPermissionCaches(Long userId) {
+        incrementPermissionVersion(userId);
+        invalidateUserRolesCache(userId);
+        try {
+            resourceCacheService.evictByUserId(userId);
+        } catch (Exception e) {
+            log.warn("清除用户资源权限缓存失败: userId={}", userId, e);
+        }
+    }
+
     // ==================== 辅助方法 ====================
 
     /**
@@ -406,7 +477,10 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
      */
     private boolean hasRoleCode(Set<String> userRoleCodes, String roleCode) {
         String normalized = normalizeRoleCode(roleCode);
-        return userRoleCodes.contains(normalized) || userRoleCodes.contains("ROLE_" + normalized);
+        return userRoleCodes.stream()
+                .filter(StringUtils::hasText)
+                .map(this::normalizeRoleCode)
+                .anyMatch(normalized::equals);
     }
 
     /**
@@ -414,9 +488,16 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
      */
     private String normalizeRoleCode(String roleCode) {
         if (roleCode == null) return "";
-        String normalized = roleCode.toUpperCase();
+        String normalized = roleCode.trim();
         if (normalized.startsWith("ROLE_")) {
             normalized = normalized.substring(5);
+        }
+        if (normalized.regionMatches(true, 0, "role.", 0, "role.".length())) {
+            normalized = normalized.substring("role.".length());
+        }
+        normalized = normalized.toUpperCase(Locale.ROOT);
+        if (normalized.endsWith(".ALL")) {
+            normalized = normalized.substring(0, normalized.length() - ".ALL".length());
         }
         return normalized;
     }
@@ -424,20 +505,29 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
     /**
      * 从数据库获取用户角色编码
      */
-    private Set<String> fetchUserRoleCodesFromDb(Long userId) {
-        // sys_user_role 表没有 deleted 字段，直接查询
+    private UserRoleCodeSnapshot fetchUserRoleCodesFromDb(Long userId) {
+        LocalDateTime now = LocalDateTime.now();
+        // SysUserRole 继承 BaseEntity，逻辑删除条件由 MyBatis-Plus 自动追加。
         List<SysUserRole> userRoles = userRoleMapper.selectList(
                 new LambdaQueryWrapper<SysUserRole>()
                         .eq(SysUserRole::getUserId, userId)
+                        .and(w -> w.isNull(SysUserRole::getExpiresAt)
+                                .or()
+                                .gt(SysUserRole::getExpiresAt, now))
         );
 
+        List<SysUserRole> effectiveUserRoles = userRoles.stream()
+                .filter(userRole -> isEffective(userRole, now))
+                .toList();
+
         Set<Long> roleIds = userRoles.stream()
+                .filter(userRole -> isEffective(userRole, now))
                 .map(SysUserRole::getRoleId)
                 .filter(Objects::nonNull)
                 .collect(Collectors.toSet());
 
         if (roleIds.isEmpty()) {
-            return Collections.emptySet();
+            return new UserRoleCodeSnapshot(Collections.emptySet(), null);
         }
 
         // 只返回启用的角色
@@ -446,40 +536,41 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
                 .filter(role -> SysRole.Status.ENABLED.getCode().equals(role.getStatus()))
                 .collect(Collectors.toList());
 
-        return roles.stream()
+        Set<String> roleCodes = roles.stream()
                 .map(SysRole::getCode)
+                .map(this::normalizeRoleCode)
                 .filter(StringUtils::hasText)
                 .collect(Collectors.toSet());
+
+        LocalDateTime nearestExpiresAt = effectiveUserRoles.stream()
+                .map(SysUserRole::getExpiresAt)
+                .filter(Objects::nonNull)
+                .min(LocalDateTime::compareTo)
+                .orElse(null);
+        return new UserRoleCodeSnapshot(roleCodes, nearestExpiresAt);
     }
 
     /**
      * 从数据库检查用户是否有指定角色
      */
     private boolean hasRoleFromDb(Long userId, String roleCode) {
-        // 规范化角色编码（用于 lambda 中需要 final 变量）
-        String normalized = roleCode.toUpperCase();
-        if (normalized.startsWith("ROLE_")) {
-            normalized = normalized.substring(5);
-        }
-        final String normalizedCode = normalized;
-
-        // 查找角色ID（支持带 ROLE_ 前缀和不带前缀的编码）
-        SysRole role = roleMapper.selectOne(
-                new LambdaQueryWrapper<SysRole>()
-                        .and(w -> w.eq(SysRole::getCode, normalizedCode)
-                                .or()
-                                .eq(SysRole::getCode, "ROLE_" + normalizedCode))
-                        .eq(SysRole::getStatus, SysRole.Status.ENABLED.getCode())
-        );
-
-        if (role == null) {
+        List<SysRole> roles = findEnabledRolesByCode(roleCode);
+        Set<Long> roleIds = roles.stream()
+                .map(SysRole::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (roleIds.isEmpty()) {
             return false;
         }
 
+        LocalDateTime now = LocalDateTime.now();
         // 检查关联
         return userRoleMapper.selectCount(new LambdaQueryWrapper<SysUserRole>()
                 .eq(SysUserRole::getUserId, userId)
-                .eq(SysUserRole::getRoleId, role.getId())
+                .in(SysUserRole::getRoleId, roleIds)
+                .and(w -> w.isNull(SysUserRole::getExpiresAt)
+                        .or()
+                        .gt(SysUserRole::getExpiresAt, now))
         ) > 0;
     }
 
@@ -490,35 +581,95 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
      * @return 第一个匹配的用户
      */
     public SysUser findFirstUserByRole(String roleCode) {
-        String normalized = roleCode.toUpperCase();
-        if (normalized.startsWith("ROLE_")) {
-            normalized = normalized.substring(5);
-        }
-        final String normalizedCode = normalized;
+        return findFirstUserByRoleExcluding(roleCode, null);
+    }
 
-        SysRole role = roleMapper.selectOne(
-                new LambdaQueryWrapper<SysRole>()
-                        .and(w -> w.eq(SysRole::getCode, normalizedCode)
-                                .or()
-                                .eq(SysRole::getCode, "ROLE_" + normalizedCode))
-                        .eq(SysRole::getStatus, SysRole.Status.ENABLED.getCode())
-        );
-
-        if (role == null) {
+    /**
+     * 根据角色编码查找拥有该角色且不是排除用户的第一个有效用户。
+     *
+     * @param roleCode 角色编码
+     * @param excludedUserId 需要排除的用户ID
+     * @return 第一个匹配的激活用户
+     */
+    public SysUser findFirstUserByRoleExcluding(String roleCode, Long excludedUserId) {
+        List<SysRole> roles = findEnabledRolesByCode(roleCode);
+        Set<Long> roleIds = roles.stream()
+                .map(SysRole::getId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (roleIds.isEmpty()) {
             return null;
         }
 
-        SysUserRole userRole = userRoleMapper.selectOne(
+        LocalDateTime now = LocalDateTime.now();
+        List<SysUserRole> userRoles = userRoleMapper.selectList(
                 new LambdaQueryWrapper<SysUserRole>()
-                        .eq(SysUserRole::getRoleId, role.getId())
+                        .in(SysUserRole::getRoleId, roleIds)
+                        .ne(excludedUserId != null, SysUserRole::getUserId, excludedUserId)
+                        .and(w -> w.isNull(SysUserRole::getExpiresAt)
+                                .or()
+                                .gt(SysUserRole::getExpiresAt, now))
                         .orderByAsc(SysUserRole::getUserId)
-                        .last("limit 1")
         );
 
-        if (userRole == null) {
-            return null;
+        for (SysUserRole userRole : userRoles) {
+            if (!isEffective(userRole, now) || Objects.equals(userRole.getUserId(), excludedUserId)) {
+                continue;
+            }
+            SysUser user = sysUserMapper.selectById(userRole.getUserId());
+            if (user != null && UserStatus.ACTIVE.equals(user.getStatus())) {
+                return user;
+            }
+        }
+        return null;
+    }
+
+    private List<SysRole> findEnabledRolesByCode(String roleCode) {
+        Set<String> candidates = roleCodeCandidates(roleCode);
+        if (candidates.isEmpty()) {
+            return Collections.emptyList();
+        }
+        return roleMapper.selectList(new LambdaQueryWrapper<SysRole>()
+                .in(SysRole::getCode, candidates)
+                .eq(SysRole::getStatus, SysRole.Status.ENABLED.getCode()));
+    }
+
+    private Set<String> roleCodeCandidates(String roleCode) {
+        if (!StringUtils.hasText(roleCode)) {
+            return Collections.emptySet();
+        }
+        String normalized = normalizeRoleCode(roleCode);
+        if (!StringUtils.hasText(normalized)) {
+            return Collections.emptySet();
         }
 
-        return sysUserMapper.selectById(userRole.getUserId());
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        Set<String> candidates = new LinkedHashSet<>();
+        candidates.add(roleCode.trim());
+        candidates.add(normalized);
+        candidates.add("ROLE_" + normalized);
+        candidates.add("role." + lower);
+        if ("ADMIN".equals(normalized)) {
+            candidates.add("role.admin.all");
+        }
+        return candidates;
+    }
+
+    private boolean isEffective(SysUserRole userRole, LocalDateTime now) {
+        return userRole != null && (userRole.getExpiresAt() == null || userRole.getExpiresAt().isAfter(now));
+    }
+
+    private long cacheTtlSeconds(LocalDateTime nearestExpiresAt) {
+        if (nearestExpiresAt == null) {
+            return TimeUnit.HOURS.toSeconds(CACHE_EXPIRE_HOURS);
+        }
+        long seconds = Duration.between(LocalDateTime.now(), nearestExpiresAt).getSeconds();
+        if (seconds <= 0) {
+            return 1;
+        }
+        return Math.min(seconds, TimeUnit.HOURS.toSeconds(CACHE_EXPIRE_HOURS));
+    }
+
+    private record UserRoleCodeSnapshot(Set<String> roleCodes, LocalDateTime nearestExpiresAt) {
     }
 }

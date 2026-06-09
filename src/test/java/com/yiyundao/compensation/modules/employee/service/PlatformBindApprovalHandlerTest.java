@@ -5,6 +5,7 @@ import com.yiyundao.compensation.enums.ApprovalStatus;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.event.ApprovalCompletedEvent;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult;
+import com.yiyundao.compensation.modules.employee.dto.BindResult;
 import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -94,6 +96,62 @@ class PlatformBindApprovalHandlerTest {
 
         assertThrows(IllegalArgumentException.class, () -> strictHandler.onApprovalCompleted(event));
         verify(employeeService, never()).executeApprovedBinding(1003L, 2003L, "wechat", "wx_user_2003");
+    }
+
+    @Test
+    void shouldRejectApprovedEventWithMissingBindingFields() {
+        ApprovalCompletedEvent event = approvedEvent(
+                1004L,
+                """
+                        {
+                          "employeeId": 2004,
+                          "provider": "wechat"
+                        }
+                        """
+        );
+
+        assertThatThrownBy(() -> handler.onApprovalCompleted(event))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("审批数据缺少必需字段");
+        verify(employeeService, never()).executeApprovedBinding(
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void shouldRejectMalformedWorkflowData() {
+        ApprovalCompletedEvent event = approvedEvent(1005L, "{bad-json");
+
+        assertThatThrownBy(() -> handler.onApprovalCompleted(event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("审批流程数据解析失败");
+        verify(employeeService, never()).executeApprovedBinding(
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void shouldRejectFailedBindingResult() {
+        ApprovalCompletedEvent event = approvedEvent(
+                1006L,
+                """
+                        {
+                          "employeeId": 2006,
+                          "provider": "wechat",
+                          "subjectId": "wx_user_2006"
+                        }
+                        """
+        );
+        when(employeeService.executeApprovedBinding(1006L, 2006L, "wechat", "wx_user_2006"))
+                .thenReturn(BindPlatformResult.failed(BindResult.EMPLOYEE_NOT_FOUND, "员工不存在"));
+
+        assertThatThrownBy(() -> handler.onApprovalCompleted(event))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("员工平台绑定审批执行失败");
     }
 
     private ApprovalCompletedEvent approvedEvent(Long workflowId, String workflowData) {

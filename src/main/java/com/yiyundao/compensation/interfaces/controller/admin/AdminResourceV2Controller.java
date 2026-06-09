@@ -2,14 +2,18 @@ package com.yiyundao.compensation.interfaces.controller.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.dto.rbac.ResourceDto;
 import com.yiyundao.compensation.infrastructure.dao.SysRoleResourceMapper;
 import com.yiyundao.compensation.infrastructure.dao.SysUserResourceMapper;
+import com.yiyundao.compensation.infrastructure.dao.SysUserRoleMapper;
+import com.yiyundao.compensation.interfaces.dto.admin.ResourceResponseDto;
 import com.yiyundao.compensation.modules.rbac.entity.SysResource;
 import com.yiyundao.compensation.modules.rbac.entity.SysRoleResource;
 import com.yiyundao.compensation.modules.rbac.entity.SysUserResource;
+import com.yiyundao.compensation.modules.rbac.entity.SysUserRole;
 import com.yiyundao.compensation.modules.rbac.service.ResourceService;
 import com.yiyundao.compensation.modules.rbac.service.impl.ResourceChangeListener.ResourceChangeEvent;
 import com.yiyundao.compensation.security.SecurityAnnotations;
@@ -17,6 +21,7 @@ import jakarta.validation.Valid;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
@@ -44,6 +49,7 @@ public class AdminResourceV2Controller {
     private final ApplicationEventPublisher eventPublisher;
     private final SysRoleResourceMapper roleResourceMapper;
     private final SysUserResourceMapper userResourceMapper;
+    private final SysUserRoleMapper userRoleMapper;
 
     /**
      * 资源列表（按 type 过滤）
@@ -58,12 +64,13 @@ public class AdminResourceV2Controller {
 
     /**
      * 资源树（按 type 过滤）
-     * 直接返回 SysResource，避免 ResourceDto 转换时的序列化问题
      */
     @GetMapping("/tree")
-    public ApiResponse<List<SysResource>> tree(@RequestParam(required = false) String type) {
+    public ApiResponse<List<ResourceResponseDto>> tree(@RequestParam(required = false) String type) {
         List<SysResource> tree = resourceService.getResourceTree(type);
-        return ApiResponse.success(tree);
+        return ApiResponse.success(tree.stream()
+                .map(resource -> ResourceResponseDto.from(resource, objectMapper))
+                .toList());
     }
 
     /**
@@ -89,6 +96,9 @@ public class AdminResourceV2Controller {
      */
     @PutMapping("/{id}")
     public ApiResponse<ResourceDto> update(@PathVariable Long id, @Valid @RequestBody ResourceDto req) {
+        if (resourceService.getById(id) == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "资源不存在");
+        }
         SysResource entity = req.toEntity(objectMapper);
         entity.setId(id);
         resourceService.updateById(entity);
@@ -105,9 +115,15 @@ public class AdminResourceV2Controller {
      * 删除资源
      */
     @DeleteMapping("/{id}")
+    @Transactional(rollbackFor = Exception.class)
     public ApiResponse<Void> delete(@PathVariable Long id) {
+        if (resourceService.getById(id) == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "资源不存在");
+        }
         boolean hasChildren = resourceService.count(new LambdaQueryWrapper<SysResource>().eq(SysResource::getParentId, id)) > 0;
         if (hasChildren) return ApiResponse.error(ErrorCode.BUSINESS_ERROR, "请先删除子资源");
+
+        Set<Long> affectedUserIds = collectAffectedUserIdsBeforeDelete(id);
 
         // 清理角色-资源关联
         roleResourceMapper.delete(new LambdaQueryWrapper<SysRoleResource>()
@@ -119,7 +135,7 @@ public class AdminResourceV2Controller {
 
         // 发布删除事件
         eventPublisher.publishEvent(new ResourceChangeEvent(
-                ResourceChangeEvent.ChangeType.DELETE, id));
+                ResourceChangeEvent.ChangeType.DELETE, id, affectedUserIds));
 
         resourceService.removeById(id);
         return ApiResponse.success(null);
@@ -159,13 +175,14 @@ public class AdminResourceV2Controller {
      * 导入资源（按 code 幂等；支持 parentCode 引用父资源）
      */
     @PostMapping("/import")
+    @Transactional(rollbackFor = Exception.class)
     public ApiResponse<Map<String, Object>> importJson(@RequestBody List<ResourceDto> list) {
         if (CollectionUtils.isEmpty(list)) {
             return ApiResponse.success(Map.of("created", 0, "updated", 0, "errors", List.of()));
         }
 
         int created = 0, updated = 0;
-        List<String> errors = new ArrayList<>();
+        validateImportRequest(list);
 
         // 第一步：建立 code -> existingId 的映射（处理已存在的资源）
         Map<String, Long> existingCodeMap = new HashMap<>();
@@ -186,52 +203,41 @@ public class AdminResourceV2Controller {
         // 构建 parentCode -> id 的映射（优先使用已有的，然后是本次创建的）
         Map<String, Long> parentCodeMap = new HashMap<>(existingCodeMap);
 
-        // 第三步：按顺序处理资源（先处理父资源，再处理子资源）
-        List<ResourceDto> sortedList = list.stream()
-                .sorted((a, b) -> {
-                    boolean aHasParent = a.getParentId() != null || StringUtils.hasText(a.getParentCode());
-                    boolean bHasParent = b.getParentId() != null || StringUtils.hasText(b.getParentCode());
-                    if (!aHasParent && bHasParent) return -1;
-                    if (aHasParent && !bHasParent) return 1;
-                    return Integer.compare(
-                            a.getOrderNum() != null ? a.getOrderNum() : 0,
-                            b.getOrderNum() != null ? b.getOrderNum() : 0);
-                })
-                .collect(Collectors.toList());
+        List<ResourceDto> sortedList = resolveImportOrder(list, parentCodeMap.keySet());
 
         // 收集所有被修改的资源ID
         Set<Long> allAffectedIds = new HashSet<>();
 
-        // 处理每个资源
         for (ResourceDto d : sortedList) {
-            try {
-                SysResource entity = d.toEntity(objectMapper);
-                Long existingId = existingCodeMap.get(d.getCode());
+            SysResource entity = d.toEntity(objectMapper);
+            Long existingId = existingCodeMap.get(d.getCode());
 
-                // 解析 parentId（优先使用 parentId，其次根据 parentCode 查询）
-                Long parentId = d.resolveParentId(parentCodeMap);
-                entity.setParentId(parentId);
+            Long parentId = d.resolveParentId(parentCodeMap);
+            if (StringUtils.hasText(d.getParentCode()) && parentId == null) {
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "父资源不存在: " + d.getParentCode());
+            }
+            entity.setParentId(parentId);
 
-                if (existingId == null) {
-                    entity.setId(null);
-                    if (entity.getOrderNum() == null) entity.setOrderNum(0);
-                    if (entity.getStatus() == null) entity.setStatus("enabled");
-                    resourceService.save(entity);
-                    created++;
-                    allAffectedIds.add(entity.getId());
-
-                    if (StringUtils.hasText(d.getCode())) {
-                        parentCodeMap.put(d.getCode(), entity.getId());
-                    }
-                } else {
-                    entity.setId(existingId);
-                    resourceService.updateById(entity);
-                    updated++;
-                    allAffectedIds.add(existingId);
+            if (existingId == null) {
+                entity.setId(null);
+                if (entity.getOrderNum() == null) entity.setOrderNum(0);
+                if (entity.getStatus() == null) entity.setStatus("enabled");
+                if (!resourceService.save(entity)) {
+                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, "创建资源失败: " + d.getCode());
                 }
-            } catch (Exception e) {
-                String errorMsg = "导入资源失败: code=" + d.getCode() + ", error=" + e.getMessage();
-                errors.add(errorMsg);
+                created++;
+                allAffectedIds.add(entity.getId());
+
+                if (StringUtils.hasText(d.getCode())) {
+                    parentCodeMap.put(d.getCode(), entity.getId());
+                }
+            } else {
+                entity.setId(existingId);
+                if (!resourceService.updateById(entity)) {
+                    throw new BusinessException(ErrorCode.BUSINESS_ERROR, "更新资源失败: " + d.getCode());
+                }
+                updated++;
+                allAffectedIds.add(existingId);
             }
         }
 
@@ -244,7 +250,7 @@ public class AdminResourceV2Controller {
         Map<String, Object> resp = new HashMap<>();
         resp.put("created", created);
         resp.put("updated", updated);
-        resp.put("errors", errors);
+        resp.put("errors", List.of());
         return ApiResponse.success(resp);
     }
 
@@ -264,5 +270,84 @@ public class AdminResourceV2Controller {
     public static class SortItem {
         private Long id;
         private Integer orderNum;
+    }
+
+    private Set<Long> collectAffectedUserIdsBeforeDelete(Long resourceId) {
+        Set<Long> userIds = new HashSet<>();
+
+        List<SysUserResource> userResources = userResourceMapper.selectList(new LambdaQueryWrapper<SysUserResource>()
+                .eq(SysUserResource::getResourceId, resourceId));
+        userResources.stream()
+                .map(SysUserResource::getUserId)
+                .filter(Objects::nonNull)
+                .forEach(userIds::add);
+
+        List<SysRoleResource> roleResources = roleResourceMapper.selectList(new LambdaQueryWrapper<SysRoleResource>()
+                .eq(SysRoleResource::getResourceId, resourceId));
+        Set<Long> roleIds = roleResources.stream()
+                .map(SysRoleResource::getRoleId)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (!roleIds.isEmpty()) {
+            List<SysUserRole> userRoles = userRoleMapper.selectList(new LambdaQueryWrapper<SysUserRole>()
+                    .in(SysUserRole::getRoleId, roleIds));
+            userRoles.stream()
+                    .map(SysUserRole::getUserId)
+                    .filter(Objects::nonNull)
+                    .forEach(userIds::add);
+        }
+
+        return userIds;
+    }
+
+    private void validateImportRequest(List<ResourceDto> list) {
+        Set<String> codes = new HashSet<>();
+        for (ResourceDto dto : list) {
+            if (dto == null) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "资源不能为空");
+            }
+            if (!StringUtils.hasText(dto.getCode())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "资源编码不能为空");
+            }
+            if (!StringUtils.hasText(dto.getType())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "资源类型不能为空: " + dto.getCode());
+            }
+            if (!StringUtils.hasText(dto.getName())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "资源名称不能为空: " + dto.getCode());
+            }
+            if (!codes.add(dto.getCode())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "资源编码重复: " + dto.getCode());
+            }
+        }
+    }
+
+    private List<ResourceDto> resolveImportOrder(List<ResourceDto> list, Set<String> existingCodes) {
+        List<ResourceDto> pending = new ArrayList<>(list);
+        List<ResourceDto> ordered = new ArrayList<>(list.size());
+        Set<String> resolvedCodes = new HashSet<>(existingCodes);
+
+        while (!pending.isEmpty()) {
+            int before = pending.size();
+            Iterator<ResourceDto> iterator = pending.iterator();
+            while (iterator.hasNext()) {
+                ResourceDto dto = iterator.next();
+                if (!StringUtils.hasText(dto.getParentCode()) || resolvedCodes.contains(dto.getParentCode())) {
+                    ordered.add(dto);
+                    resolvedCodes.add(dto.getCode());
+                    iterator.remove();
+                }
+            }
+            if (pending.size() == before) {
+                String unresolved = pending.stream()
+                        .map(ResourceDto::getParentCode)
+                        .filter(StringUtils::hasText)
+                        .distinct()
+                        .sorted()
+                        .collect(Collectors.joining(","));
+                throw new BusinessException(ErrorCode.BUSINESS_ERROR, "父资源不存在或存在循环引用: " + unresolved);
+            }
+        }
+
+        return ordered;
     }
 }

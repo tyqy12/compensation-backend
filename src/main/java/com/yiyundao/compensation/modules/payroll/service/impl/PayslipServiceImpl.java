@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.interfaces.dto.payroll.EmployeePayslipDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollPreviewDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollValidationIssueDto;
@@ -16,10 +17,12 @@ import com.yiyundao.compensation.modules.payroll.service.PayCycleService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayslipService;
+import com.yiyundao.compensation.modules.payroll.support.CsvExportUtils;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.service.EncryptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
@@ -41,6 +44,40 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class PayslipServiceImpl implements PayslipService {
 
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 200;
+
+    private static final List<PayrollBatchStatus> CONFIRMATION_VISIBLE_STATUSES = List.of(
+            PayrollBatchStatus.CONFIRMING,
+            PayrollBatchStatus.DISPUTE_PROCESSING,
+            PayrollBatchStatus.CONFIRMED,
+            PayrollBatchStatus.SUBMITTED,
+            PayrollBatchStatus.APPROVED,
+            PayrollBatchStatus.PAY_PROCESSING,
+            PayrollBatchStatus.PAY_FAILED,
+            PayrollBatchStatus.PAID,
+            PayrollBatchStatus.ARCHIVED
+    );
+
+    private static final List<PayrollBatchStatus> APPROVED_VISIBLE_STATUSES = List.of(
+            PayrollBatchStatus.APPROVED,
+            PayrollBatchStatus.PAY_PROCESSING,
+            PayrollBatchStatus.PAY_FAILED,
+            PayrollBatchStatus.PAID,
+            PayrollBatchStatus.ARCHIVED
+    );
+
+    private static final String EMPLOYEE_VISIBLE_BATCH_EXISTS_SQL =
+            "SELECT 1 FROM payroll_batch pb"
+                    + " WHERE pb.id = payroll_line.batch_id"
+                    + " AND pb.deleted = 0"
+                    + " AND ("
+                    + " (COALESCE(pb.confirmation_required, 1) = 1"
+                    + " AND pb.status IN (" + sqlStatusCodes(CONFIRMATION_VISIBLE_STATUSES) + "))"
+                    + " OR (pb.confirmation_required = 0"
+                    + " AND pb.status IN (" + sqlStatusCodes(APPROVED_VISIBLE_STATUSES) + "))"
+                    + " )";
+
     private final PayrollLineService payrollLineService;
     private final PayrollBatchService payrollBatchService;
     private final PayCycleService payCycleService;
@@ -48,25 +85,26 @@ public class PayslipServiceImpl implements PayslipService {
     private final ObjectMapper objectMapper;
     private final PayrollValidationIssueSupport validationIssueSupport;
     private final UserRoleService userRoleService;
+    private final EncryptionService encryptionService;
 
     @Override
     public Page<EmployeePayslipDto.PayslipSummary> pagePayslips(SysUser currentUser, Long employeeId, int page, int size) {
         enforceAuthenticated(currentUser);
         Long targetEmployeeId = resolveTargetEmployee(currentUser, employeeId);
         if (targetEmployeeId == null) {
-            long current = Math.max(page, 1);
-            long sizeVal = Math.max(size, 1);
-            return new Page<>(current, sizeVal, 0L);
+            return new Page<>(safePage(page), safeSize(size), 0L);
         }
 
-        long pageIndex = Math.max(page, 1);
-        long pageSize = Math.max(size, 1);
-        Page<PayrollLine> entityPage = payrollLineService.page(
-                new Page<>(pageIndex, pageSize),
-                new LambdaQueryWrapper<PayrollLine>()
-                        .eq(PayrollLine::getEmployeeId, targetEmployeeId)
-                        .orderByDesc(PayrollLine::getId)
-        );
+        long pageIndex = safePage(page);
+        long pageSize = safeSize(size);
+        LambdaQueryWrapper<PayrollLine> wrapper = new LambdaQueryWrapper<PayrollLine>()
+                .eq(PayrollLine::getEmployeeId, targetEmployeeId);
+        if (!hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+            wrapper.exists(EMPLOYEE_VISIBLE_BATCH_EXISTS_SQL);
+        }
+        wrapper.orderByDesc(PayrollLine::getId);
+
+        Page<PayrollLine> entityPage = payrollLineService.page(new Page<>(pageIndex, pageSize), wrapper);
 
         Page<EmployeePayslipDto.PayslipSummary> result = new Page<>(pageIndex, pageSize, entityPage.getTotal());
         if (entityPage.getRecords() == null || entityPage.getRecords().isEmpty()) {
@@ -111,6 +149,17 @@ public class PayslipServiceImpl implements PayslipService {
         return result;
     }
 
+    private int safePage(int page) {
+        return page < 1 ? 1 : page;
+    }
+
+    private int safeSize(int size) {
+        if (size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
+    }
+
     @Override
     public EmployeePayslipDto.PayslipDetail getPayslipDetail(SysUser currentUser, Long lineId) {
         enforceAuthenticated(currentUser);
@@ -118,9 +167,10 @@ public class PayslipServiceImpl implements PayslipService {
         if (line == null) {
             return null;
         }
-        ensureAccess(currentUser, line);
-
         PayrollBatch batch = line.getBatchId() != null ? payrollBatchService.getById(line.getBatchId()) : null;
+        ensureAccess(currentUser, line);
+        ensureBatchVisibleToCurrentUser(currentUser, batch);
+
         PayCycle cycle = (batch != null && batch.getPayCycleId() != null) ? payCycleService.getById(batch.getPayCycleId()) : null;
         Employee employee = line.getEmployeeId() != null ? employeeService.getById(line.getEmployeeId()) : null;
 
@@ -159,7 +209,7 @@ public class PayslipServiceImpl implements PayslipService {
             detail.setDepartment(employee.getDepartment());
             detail.setEmploymentType(employee.getEmploymentType());
             detail.setBankName(employee.getBankName());
-            detail.setBankAccountMasked(maskBankAccount(employee.getBankAccount()));
+            detail.setBankAccountMasked(maskEncryptedBankAccount(employee.getBankAccount()));
         }
 
         List<PayrollPreviewDto.PayrollPreviewItemDto> items = parseItems(line.getItemsSnapshotJson());
@@ -191,27 +241,27 @@ public class PayslipServiceImpl implements PayslipService {
         }
         DecimalFormat decimalFormat = new DecimalFormat("0.00");
         StringBuilder sb = new StringBuilder();
-        sb.append("Payslip for ").append(nullSafe(detail.getEmployeeName())).append('\n');
-        sb.append("Period,").append(nullSafe(detail.getPeriodLabel())).append('\n');
-        sb.append("Currency,").append(nullSafe(detail.getCurrency())).append('\n');
-        sb.append("Gross, ").append(decimalFormat.format(detail.getGrossAmount())).append('\n');
-        sb.append("Tax, ").append(decimalFormat.format(detail.getTaxAmount())).append('\n');
-        sb.append("Social, ").append(decimalFormat.format(detail.getSocialAmount())).append('\n');
-        sb.append("Net, ").append(decimalFormat.format(detail.getNetAmount())).append('\n');
-        sb.append("Bank, ").append(nullSafe(detail.getBankName())).append('\n');
-        sb.append("Account, ").append(nullSafe(detail.getBankAccountMasked())).append('\n');
+        CsvExportUtils.appendRow(sb, "Payslip for", detail.getEmployeeName());
+        CsvExportUtils.appendRow(sb, "Period", detail.getPeriodLabel());
+        CsvExportUtils.appendRow(sb, "Currency", detail.getCurrency());
+        CsvExportUtils.appendRow(sb, "Gross", decimalFormat.format(detail.getGrossAmount()));
+        CsvExportUtils.appendRow(sb, "Tax", decimalFormat.format(detail.getTaxAmount()));
+        CsvExportUtils.appendRow(sb, "Social", decimalFormat.format(detail.getSocialAmount()));
+        CsvExportUtils.appendRow(sb, "Net", decimalFormat.format(detail.getNetAmount()));
+        CsvExportUtils.appendRow(sb, "Bank", detail.getBankName());
+        CsvExportUtils.appendRow(sb, "Account", detail.getBankAccountMasked());
         sb.append('\n');
-        sb.append("Item Code,Item Name,Type,Taxable,Amount\n");
+        CsvExportUtils.appendRow(sb, "Item Code", "Item Name", "Type", "Taxable", "Amount");
         for (PayrollPreviewDto.PayrollPreviewItemDto item : detail.getItems()) {
             if (item == null) {
                 continue;
             }
-            sb.append(nullSafe(item.getCode())).append(',')
-                    .append(nullSafe(item.getName())).append(',')
-                    .append(nullSafe(item.getType())).append(',')
-                    .append(item.getTaxable() != null && item.getTaxable() ? "Y" : "N").append(',')
-                    .append(decimalFormat.format(item.getAmount() == null ? BigDecimal.ZERO : item.getAmount()))
-                    .append('\n');
+            CsvExportUtils.appendRow(sb,
+                    item.getCode(),
+                    item.getName(),
+                    item.getType(),
+                    item.getTaxable() != null && item.getTaxable() ? "Y" : "N",
+                    decimalFormat.format(item.getAmount() == null ? BigDecimal.ZERO : item.getAmount()));
         }
         return sb.toString().getBytes(StandardCharsets.UTF_8);
     }
@@ -258,6 +308,25 @@ public class PayslipServiceImpl implements PayslipService {
             return;
         }
         throw new AccessDeniedException("无权查看该工资条");
+    }
+
+    private void ensureBatchVisibleToCurrentUser(SysUser currentUser, PayrollBatch batch) {
+        if (hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+            return;
+        }
+        if (!isEmployeeVisibleBatch(batch)) {
+            throw new AccessDeniedException("工资条暂不可查看");
+        }
+    }
+
+    private boolean isEmployeeVisibleBatch(PayrollBatch batch) {
+        if (batch == null || batch.getStatus() == null) {
+            return false;
+        }
+        if (Boolean.FALSE.equals(batch.getConfirmationRequired())) {
+            return APPROVED_VISIBLE_STATUSES.contains(batch.getStatus());
+        }
+        return CONFIRMATION_VISIBLE_STATUSES.contains(batch.getStatus());
     }
 
     private Map<Long, PayrollBatch> loadBatches(List<PayrollLine> lines) {
@@ -324,37 +393,52 @@ public class PayslipServiceImpl implements PayslipService {
     }
 
     private boolean hasAnyRole(SysUser user, String... roles) {
-        if (user == null || roles == null) {
+        if (user == null || user.getId() == null || roles == null) {
             return false;
         }
-        // 使用 UserRoleService 检查角色（带缓存）
-        Set<String> userRoleCodes = userRoleService.getUserRoleCodes(user.getId());
-        for (String role : roles) {
-            if (role != null && userRoleCodes.contains(role)) {
-                return true;
-            }
-        }
-        return false;
+        return userRoleService.hasAnyRole(user.getId(), roles);
     }
 
-    private String maskBankAccount(String bankAccount) {
+    private String maskEncryptedBankAccount(String encryptedBankAccount) {
+        if (!StringUtils.hasText(encryptedBankAccount)) {
+            return null;
+        }
+        try {
+            String plain = encryptionService.decrypt(encryptedBankAccount);
+            if (StringUtils.hasText(plain)) {
+                return maskPlainBankAccount(plain);
+            }
+        } catch (Exception ignored) {
+            // Fall through to support legacy plaintext values.
+        }
+        return maskPlainBankAccount(encryptedBankAccount);
+    }
+
+    private String maskPlainBankAccount(String bankAccount) {
         if (!StringUtils.hasText(bankAccount)) {
             return null;
         }
         String raw = bankAccount.replaceAll("\\s", "");
-        if (raw.length() <= 8) {
-            return "****";
+        if (!isLikelyPlainBankAccount(raw)) {
+            return null;
         }
-        String prefix = raw.substring(0, 4);
-        String suffix = raw.substring(raw.length() - 4);
-        return prefix + " **** **** " + suffix;
+        return encryptionService.maskBankAccount(raw);
     }
 
-    private String nullSafe(String value) {
-        return value == null ? "" : value;
+    private boolean isLikelyPlainBankAccount(String bankAccount) {
+        return StringUtils.hasText(bankAccount)
+                && bankAccount.length() >= 8
+                && bankAccount.length() <= 32
+                && bankAccount.chars().allMatch(Character::isDigit);
     }
 
     private BigDecimal safe(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private static String sqlStatusCodes(List<PayrollBatchStatus> statuses) {
+        return statuses.stream()
+                .map(status -> "'" + status.getCode() + "'")
+                .collect(java.util.stream.Collectors.joining(","));
     }
 }

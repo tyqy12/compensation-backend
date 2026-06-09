@@ -3,6 +3,7 @@ package com.yiyundao.compensation.service;
 import com.yiyundao.compensation.interfaces.dto.config.DingTalkConfigDto;
 import com.yiyundao.compensation.interfaces.dto.config.FeishuConfigDto;
 import com.yiyundao.compensation.interfaces.dto.config.WechatConfigDto;
+import com.yiyundao.compensation.common.utils.SecretLogSanitizer;
 import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -24,8 +25,15 @@ public class PlatformOAuthService {
     private final WebClient webClient;
     private final AuthTokenService authTokenService;
     private final com.yiyundao.compensation.modules.system.service.SysConfigService sysConfigService;
+    private final TrustedRedirectUrlValidator trustedRedirectUrlValidator;
 
     public Authorize buildAuthorize(String platform, String redirectUri) {
+        return buildAuthorize(platform, redirectUri, null);
+    }
+
+    public Authorize buildAuthorize(String platform, String redirectUri, String channel) {
+        validateRedirectUri(redirectUri);
+        String resolvedChannel = resolveChannel(platform, channel);
         String state = UUID.randomUUID().toString().replaceAll("-", "");
         String encodedRedirect = URLEncoder.encode(redirectUri, StandardCharsets.UTF_8);
         String url;
@@ -35,8 +43,15 @@ public class PlatformOAuthService {
                 if (cfg == null || !StringUtils.hasText(cfg.getCorpId()) || !StringUtils.hasText(cfg.getAgentId())) {
                     throw new IllegalStateException("wechat config missing");
                 }
-                url = "https://open.work.weixin.qq.com/wwopen/sso/qrConnect?appid=" + cfg.getCorpId()
-                        + "&agentid=" + cfg.getAgentId() + "&state=" + state + "&redirect_uri=" + encodedRedirect;
+                if ("wecom".equals(resolvedChannel)) {
+                    url = "https://open.weixin.qq.com/connect/oauth2/authorize?appid=" + cfg.getCorpId()
+                            + "&redirect_uri=" + encodedRedirect
+                            + "&response_type=code&scope=snsapi_base&state=" + state
+                            + "&agentid=" + cfg.getAgentId() + "#wechat_redirect";
+                } else {
+                    url = "https://open.work.weixin.qq.com/wwopen/sso/qrConnect?appid=" + cfg.getCorpId()
+                            + "&agentid=" + cfg.getAgentId() + "&state=" + state + "&redirect_uri=" + encodedRedirect;
+                }
                 break;
             }
             case "dingtalk": {
@@ -67,7 +82,23 @@ public class PlatformOAuthService {
         Authorize a = new Authorize();
         a.setState(state);
         a.setUrl(url);
+        a.setChannel(resolvedChannel);
         return a;
+    }
+
+    private String resolveChannel(String platform, String channel) {
+        if ("wechat".equals(platform) && "wecom".equalsIgnoreCase(StringUtils.trimWhitespace(channel))) {
+            return "wecom";
+        }
+        return "web";
+    }
+
+    private void validateRedirectUri(String redirectUri) {
+        try {
+            trustedRedirectUrlValidator.validateTrustedHttpUrl(redirectUri, "redirectUri");
+        } catch (Exception e) {
+            throw new IllegalArgumentException("redirectUri validation failed: " + e.getMessage());
+        }
     }
 
     public PlatformUser exchangeCode(String platform, String code) {
@@ -102,7 +133,7 @@ public class PlatformOAuthService {
                 return u;
             }
         } catch (Exception e) {
-            log.error("wechat exchange code failed", e);
+            log.error("wechat exchange code failed: {}", SecretLogSanitizer.sanitize(e));
         }
         return null;
     }
@@ -125,7 +156,7 @@ public class PlatformOAuthService {
                 return u;
             }
         } catch (Exception e) {
-            log.error("dingtalk exchange code failed", e);
+            log.error("dingtalk exchange code failed: {}", SecretLogSanitizer.sanitize(e));
         }
         return null;
     }
@@ -151,7 +182,7 @@ public class PlatformOAuthService {
                 return u;
             }
         } catch (Exception e) {
-            log.error("feishu exchange code failed", e);
+            log.error("feishu exchange code failed: {}", SecretLogSanitizer.sanitize(e));
         }
         return null;
     }
@@ -189,6 +220,7 @@ public class PlatformOAuthService {
     public static class Authorize {
         private String url;
         private String state;
+        private String channel;
     }
 
     @Data

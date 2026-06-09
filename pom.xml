@@ -155,6 +155,11 @@
 			<artifactId>commons-codec</artifactId>
 			<version>1.22.0</version>
 		</dependency>
+		<dependency>
+			<groupId>org.apache.commons</groupId>
+			<artifactId>commons-csv</artifactId>
+			<version>1.14.1</version>
+		</dependency>
 
 		<!-- JSON Processing -->
 		<dependency>
@@ -266,17 +271,6 @@
 			</releases>
 			<snapshots>
 				<enabled>true</enabled>
-			</snapshots>
-		</repository>
-		<repository>
-			<id>huawei-cloud</id>
-			<name>华为云Maven仓库</name>
-			<url>https://repo.huaweicloud.com/repository/maven/</url>
-			<releases>
-				<enabled>true</enabled>
-			</releases>
-			<snapshots>
-				<enabled>false</enabled>
 			</snapshots>
 		</repository>
 	</repositories>

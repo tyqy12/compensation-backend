@@ -199,10 +199,10 @@ public class DashboardService {
 
     private double successRateOfPayment(LocalDateTime since) {
         long success = paymentRecordService.count(new LambdaQueryWrapper<PaymentRecord>()
-                .ge(PaymentRecord::getPaymentTime, since)
+                .ge(PaymentRecord::getUpdateTime, since)
                 .eq(PaymentRecord::getStatus, PaymentStatus.SUCCESS));
         long failed = paymentRecordService.count(new LambdaQueryWrapper<PaymentRecord>()
-                .ge(PaymentRecord::getPaymentTime, since)
+                .ge(PaymentRecord::getUpdateTime, since)
                 .eq(PaymentRecord::getStatus, PaymentStatus.FAILED));
         return ratio(success, success + failed) * 100.0;
     }

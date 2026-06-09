@@ -3,7 +3,13 @@ import { useLocation, matchPath } from 'react-router-dom';
 import { useMeResourcesQuery } from '@services/queries/rbac';
 import Loading from '@components/Common/Loading';
 
-const views = import.meta.glob('/src/pages/**/*.tsx');
+const views = import.meta.glob([
+  '/src/pages/**/*.tsx',
+  '!/src/pages/**/*.test.tsx',
+  '!/src/pages/**/*.test.*.tsx',
+  '!/src/pages/**/*.backup.tsx',
+  '!/src/pages/demo/**',
+]);
 
 function resolveComponentPath(component?: string | null): string | undefined {
   if (!component) return undefined;
@@ -46,4 +52,3 @@ export const DynamicPageRenderer: React.FC = () => {
 };
 
 export default DynamicPageRenderer;
-

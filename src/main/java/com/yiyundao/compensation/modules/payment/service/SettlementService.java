@@ -14,6 +14,8 @@ public interface SettlementService {
 
     SettlementResult singleTransfer(Long paymentRecordId);
 
+    SettlementResult retryFailedRecord(Long paymentRecordId);
+
     PaymentBatchTransferValidationDto validateBatchForTransfer(String batchNo, boolean persistFailure);
 
     void batchTransfer(String batchNo);

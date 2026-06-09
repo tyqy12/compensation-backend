@@ -2,7 +2,10 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.yiyundao.compensation.common.exception.BusinessException;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.common.response.PageResponse;
+import com.yiyundao.compensation.enums.PayrollDistributionStatus;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollDistributionDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollDistributionItemDto;
@@ -59,11 +62,12 @@ public class PayrollFlowQueryServiceImpl implements PayrollFlowQueryService {
             wrapper.eq(PayrollDistribution::getBatchRevision, batchRevision);
         }
         if (StringUtils.hasText(distributionStatus)) {
-            com.yiyundao.compensation.enums.PayrollDistributionStatus status =
-                    com.yiyundao.compensation.enums.PayrollDistributionStatus.fromCode(distributionStatus);
-            if (status != null) {
-                wrapper.eq(PayrollDistribution::getDistributionStatus, status);
+            String normalizedStatus = distributionStatus.trim();
+            PayrollDistributionStatus status = PayrollDistributionStatus.fromCode(normalizedStatus);
+            if (status == null) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "无效的发放状态: " + distributionStatus);
             }
+            wrapper.eq(PayrollDistribution::getDistributionStatus, status);
         }
         wrapper.orderByDesc(PayrollDistribution::getUpdateTime).orderByDesc(PayrollDistribution::getId);
 

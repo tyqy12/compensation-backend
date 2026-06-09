@@ -176,6 +176,7 @@ public final class SecurityConstants {
      */
     public static final String[] PATTERNS_HEALTH = {
             "/actuator/health",
+            "/system/health",
             "/favicon.ico"
     };
 
@@ -185,8 +186,13 @@ public final class SecurityConstants {
     public static final String[] PATTERNS_AUTH_PUBLIC = {
             "/auth/login",
             "/auth/refresh",
-            "/auth/oauth/**",
-            "/auth/wecom/**",
+            "/auth/oauth/**"
+    };
+
+    /**
+     * 开发环境专用公共路径模式
+     */
+    public static final String[] PATTERNS_AUTH_DEV_ONLY = {
             "/auth/dev-token"
     };
 
@@ -195,8 +201,16 @@ public final class SecurityConstants {
      */
     public static final String[] PATTERNS_PAYMENT_NOTIFY = {
             "/alipay/notify",
-            "/v1/oauth/token",
             "/v1/settlement/callback/**"
+    };
+
+    /**
+     * 外部应用 OAuth 公共入口。
+     *
+     * <p>token 端点需要公开到安全链外层，但控制器内部仍会校验 Basic client credentials。</p>
+     */
+    public static final String[] PATTERNS_EXTERNAL_OAUTH_PUBLIC = {
+            "/v1/oauth/token"
     };
 
     // ==================== 辅助方法 ====================

@@ -109,11 +109,27 @@ const mockBatches: PaymentBatch[] = [
     processEndTime: null,
     remark: null,
   },
+  {
+    id: 4,
+    batchNo: 'BATCH_20240115004',
+    batchName: '2024年1月补发工资',
+    paymentType: 'salary',
+    totalAmount: 80000.0,
+    totalCount: 8,
+    successCount: 0,
+    failedCount: 0,
+    status: 'submitted',
+    submitTime: '2024-01-15T12:00:00',
+    approveTime: null,
+    processStartTime: null,
+    processEndTime: null,
+    remark: '审批后自动创建的待启动支付批次',
+  },
 ];
 
 const mockPagedResponse = {
   records: mockBatches,
-  total: 3,
+  total: 4,
   current: 1,
   size: 10,
 };
@@ -211,7 +227,7 @@ describe('Batches', () => {
     });
   });
 
-  it('should show start transfer button for approved batches', async () => {
+  it('should show start transfer button for submitted and approved batches', async () => {
     render(
       <TestWrapper>
         <Batches />
@@ -219,9 +235,8 @@ describe('Batches', () => {
     );
 
     await waitFor(() => {
-      // Should have one "启动" button for the approved batch
       const startButtons = screen.getAllByText('启动');
-      expect(startButtons).toHaveLength(1);
+      expect(startButtons).toHaveLength(2);
     });
   });
 
@@ -255,12 +270,12 @@ describe('Batches', () => {
     );
 
     await waitFor(() => {
-      expect(mockMutateAsync).toHaveBeenCalledWith('BATCH_20240115002');
+      expect(mockMutateAsync).toHaveBeenCalledWith(expect.stringMatching(/^BATCH_2024011500[24]$/));
       expect(mockMessage.success).toHaveBeenCalledWith('批次转账已启动，正在后台处理');
     });
   });
 
-  it('should prevent starting transfer for non-approved batches', async () => {
+  it('should prevent starting transfer for non-startable batches', async () => {
     render(
       <TestWrapper>
         <Batches />
@@ -270,7 +285,7 @@ describe('Batches', () => {
     // The completed and processing batches should not have start buttons
     await waitFor(() => {
       const startButtons = screen.getAllByText('启动');
-      expect(startButtons).toHaveLength(1); // Only one approved batch
+      expect(startButtons).toHaveLength(2); // submitted and approved batches
     });
   });
 

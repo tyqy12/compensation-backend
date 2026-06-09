@@ -42,7 +42,7 @@ public class ResourceChangeListener {
      *
      * @param event 资源变更事件
      */
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
     public void handleResourceChange(ResourceChangeEvent event) {
         log.info("收到资源变更事件: type={}, resourceId={}", event.changeType(), event.resourceId());
 
@@ -69,6 +69,9 @@ public class ResourceChangeListener {
      */
     private Set<Long> collectAffectedUserIds(ResourceChangeEvent event) {
         Set<Long> userIds = new HashSet<>();
+        if (event.affectedUserIds() != null) {
+            userIds.addAll(event.affectedUserIds());
+        }
 
         switch (event.changeType()) {
             case CREATE:
@@ -140,7 +143,11 @@ public class ResourceChangeListener {
     /**
      * 资源变更事件
      */
-    public record ResourceChangeEvent(ChangeType changeType, Long resourceId) {
+    public record ResourceChangeEvent(ChangeType changeType, Long resourceId, Set<Long> affectedUserIds) {
+        public ResourceChangeEvent(ChangeType changeType, Long resourceId) {
+            this(changeType, resourceId, Set.of());
+        }
+
         public enum ChangeType {
             CREATE, UPDATE, DELETE
         }

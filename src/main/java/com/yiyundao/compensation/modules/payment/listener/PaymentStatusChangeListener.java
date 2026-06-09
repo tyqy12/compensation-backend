@@ -42,6 +42,7 @@ public class PaymentStatusChangeListener {
      * 支付失败计数缓存
      */
     private final java.util.Map<String, Integer> paymentFailureCount = new java.util.concurrent.ConcurrentHashMap<>();
+    private static final int MAX_TRACKED_PAYMENT_FAILURE_BATCHES = 1000;
 
     /**
      * 处理支付审计日志事件
@@ -137,6 +138,7 @@ public class PaymentStatusChangeListener {
             }
 
             // 增加失败计数
+            prunePaymentFailureCountIfNeeded(batchNo);
             int count = paymentFailureCount.getOrDefault(batchNo, 0) + 1;
             paymentFailureCount.put(batchNo, count);
 
@@ -171,6 +173,19 @@ public class PaymentStatusChangeListener {
         } catch (Exception e) {
             log.error("处理支付失败事件失败", e);
         }
+    }
+
+    private void prunePaymentFailureCountIfNeeded(String batchNo) {
+        if (paymentFailureCount.containsKey(batchNo)) {
+            return;
+        }
+        int overflow = paymentFailureCount.size() - MAX_TRACKED_PAYMENT_FAILURE_BATCHES + 1;
+        if (overflow <= 0) {
+            return;
+        }
+        paymentFailureCount.keySet().stream()
+                .limit(overflow)
+                .forEach(paymentFailureCount::remove);
     }
 
     /**

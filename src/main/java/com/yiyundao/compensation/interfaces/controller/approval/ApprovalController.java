@@ -1,8 +1,10 @@
 package com.yiyundao.compensation.interfaces.controller.approval;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.common.response.PageResponse;
@@ -17,16 +19,20 @@ import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.service.ApprovalEngine;
 import com.yiyundao.compensation.modules.approval.service.ApprovalStepService;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
+import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
+import com.yiyundao.compensation.security.SecurityConstants;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -35,14 +41,17 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/approval/workflows")
 @RequiredArgsConstructor
-@SecurityAnnotations.IsFinanceOrManagerOrAdmin
 public class ApprovalController {
+
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 200;
 
     private final ApprovalEngine approvalEngine;
     private final ApprovalStepService approvalStepService;
     private final ApprovalWorkflowMapper approvalWorkflowMapper;
     private final SysUserService sysUserService;
     private final AuditLogService auditLogService;
+    private final UserRoleService userRoleService;
 
     // ==================== 查询接口 ====================
 
@@ -50,6 +59,7 @@ public class ApprovalController {
      * 分页查询审批流程列表
      */
     @GetMapping
+    @SecurityAnnotations.IsAuthenticated
     public ApiResponse<PageResponse<ApprovalWorkflowVO>> list(
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "10") Integer size,
@@ -61,41 +71,52 @@ public class ApprovalController {
             @RequestParam(defaultValue = "submitTime") String sortBy,
             @RequestParam(defaultValue = "desc") String order) {
 
-        IPage<ApprovalWorkflow> pageParam = new Page<>(page, size);
+        IPage<ApprovalWorkflow> pageParam = new Page<>(safePage(page), safeSize(size));
 
-        LambdaQueryWrapper<ApprovalWorkflow> queryWrapper = new LambdaQueryWrapper<>();
+        QueryWrapper<ApprovalWorkflow> queryWrapper = new QueryWrapper<>();
+        SysUser currentUser = resolveCurrentUser();
+        if (currentUser == null || currentUser.getId() == null) {
+            return ApiResponse.error(ErrorCode.UNAUTHORIZED, "未登录");
+        }
+        if (!userRoleService.hasAnyRole(currentUser.getId(), SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+            restrictToReadableWorkflows(queryWrapper, currentUser.getId());
+        }
 
         // 状态筛选
         if (StringUtils.hasText(status)) {
-            queryWrapper.eq(ApprovalWorkflow::getStatus, ApprovalStatus.fromCode(status));
+            queryWrapper.eq("status", parseApprovalStatus(status).getCode());
         }
 
         // 流程类型筛选
         if (StringUtils.hasText(workflowType)) {
-            queryWrapper.eq(ApprovalWorkflow::getWorkflowType, WorkflowType.fromCode(workflowType));
+            queryWrapper.eq("workflow_type", parseWorkflowType(workflowType).getCode());
         }
 
-        // 关键词搜索（流程名称、业务Key）
+        // 关键词搜索（流程ID、流程名称、业务Key）
         if (StringUtils.hasText(keyword)) {
+            String trimmedKeyword = keyword.trim();
+            Long workflowId = parseWorkflowIdKeyword(trimmedKeyword);
             queryWrapper.and(w -> w
-                    .like(ApprovalWorkflow::getWorkflowName, keyword)
+                    .like("workflow_name", trimmedKeyword)
                     .or()
-                    .like(ApprovalWorkflow::getBusinessKey, keyword));
+                    .like("business_key", trimmedKeyword)
+                    .or(workflowId != null)
+                    .eq(workflowId != null, "id", workflowId));
         }
 
         // 时间范围筛选
         if (StringUtils.hasText(startDate)) {
-            queryWrapper.ge(ApprovalWorkflow::getSubmitTime, LocalDateTime.parse(startDate + "T00:00:00"));
+            queryWrapper.ge("submit_time", parseDate(startDate, "开始日期").atStartOfDay());
         }
         if (StringUtils.hasText(endDate)) {
-            queryWrapper.le(ApprovalWorkflow::getSubmitTime, LocalDateTime.parse(endDate + "T23:59:59"));
+            queryWrapper.le("submit_time", parseDate(endDate, "结束日期").atTime(23, 59, 59));
         }
 
         // 排序
         if ("asc".equalsIgnoreCase(order)) {
-            queryWrapper.orderByAsc(ApprovalWorkflow::getSubmitTime);
+            queryWrapper.orderByAsc("submit_time");
         } else {
-            queryWrapper.orderByDesc(ApprovalWorkflow::getSubmitTime);
+            queryWrapper.orderByDesc("submit_time");
         }
 
         IPage<ApprovalWorkflow> result = approvalWorkflowMapper.selectPage(pageParam, queryWrapper);
@@ -111,6 +132,7 @@ public class ApprovalController {
      * 查询待我审批的流程
      */
     @GetMapping("/pending")
+    @SecurityAnnotations.IsAuthenticated
     public ApiResponse<List<ApprovalWorkflowVO>> getPending() {
         SysUser currentUser = resolveCurrentUser();
         if (currentUser == null) {
@@ -129,6 +151,7 @@ public class ApprovalController {
      * 查询我发起的流程
      */
     @GetMapping("/my")
+    @SecurityAnnotations.IsAuthenticated
     public ApiResponse<PageResponse<ApprovalWorkflowVO>> getMy(
             @RequestParam(defaultValue = "1") Integer page,
             @RequestParam(defaultValue = "10") Integer size,
@@ -139,12 +162,12 @@ public class ApprovalController {
             return ApiResponse.error(ErrorCode.UNAUTHORIZED, "未登录");
         }
 
-        IPage<ApprovalWorkflow> pageParam = new Page<>(page, size);
+        IPage<ApprovalWorkflow> pageParam = new Page<>(safePage(page), safeSize(size));
         LambdaQueryWrapper<ApprovalWorkflow> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(ApprovalWorkflow::getInitiatorId, currentUser.getId());
 
         if (StringUtils.hasText(status)) {
-            queryWrapper.eq(ApprovalWorkflow::getStatus, ApprovalStatus.fromCode(status));
+            queryWrapper.eq(ApprovalWorkflow::getStatus, parseApprovalStatus(status));
         }
 
         queryWrapper.orderByDesc(ApprovalWorkflow::getSubmitTime);
@@ -162,10 +185,15 @@ public class ApprovalController {
      * 获取审批流程详情
      */
     @GetMapping("/{id}")
+    @SecurityAnnotations.IsAuthenticated
     public ApiResponse<ApprovalWorkflowDetailVO> getDetail(@PathVariable Long id) {
         ApprovalWorkflow workflow = approvalEngine.getById(id);
         if (workflow == null) {
             return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "审批流程不存在");
+        }
+        SysUser currentUser = resolveCurrentUser();
+        if (!canReadWorkflow(workflow, currentUser)) {
+            return ApiResponse.error(ErrorCode.FORBIDDEN, "无权限查看该审批流程");
         }
 
         ApprovalWorkflowDetailVO detailVO = convertToDetailVO(workflow);
@@ -197,7 +225,16 @@ public class ApprovalController {
      * 获取审批步骤列表
      */
     @GetMapping("/{id}/steps")
+    @SecurityAnnotations.IsAuthenticated
     public ApiResponse<List<ApprovalStepVO>> getSteps(@PathVariable Long id) {
+        ApprovalWorkflow workflow = approvalEngine.getById(id);
+        if (workflow == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "审批流程不存在");
+        }
+        SysUser currentUser = resolveCurrentUser();
+        if (!canReadWorkflow(workflow, currentUser)) {
+            return ApiResponse.error(ErrorCode.FORBIDDEN, "无权限查看该审批流程");
+        }
         List<ApprovalStep> steps = approvalStepService.listByWorkflow(id);
         List<ApprovalStepVO> voList = steps.stream()
                 .map(ApprovalStepVO::from)
@@ -208,13 +245,40 @@ public class ApprovalController {
     // ==================== 审批操作接口 ====================
 
     @PostMapping("/{id}/approve")
+    @SecurityAnnotations.IsAuthenticated
     public ApiResponse<Boolean> approve(@PathVariable Long id, @RequestBody(required = false) DecisionRequest req) {
         return decide(id, ApprovalStatus.APPROVED, req != null ? req.getComment() : null);
     }
 
     @PostMapping("/{id}/reject")
+    @SecurityAnnotations.IsAuthenticated
     public ApiResponse<Boolean> reject(@PathVariable Long id, @RequestBody(required = false) DecisionRequest req) {
         return decide(id, ApprovalStatus.REJECTED, req != null ? req.getComment() : null);
+    }
+
+    @PostMapping("/{id}/cancel")
+    @SecurityAnnotations.IsAuthenticated
+    public ApiResponse<Boolean> cancel(@PathVariable Long id, @RequestBody(required = false) DecisionRequest req) {
+        SysUser operator = resolveCurrentUser();
+        if (operator == null) {
+            return ApiResponse.error(ErrorCode.UNAUTHORIZED, "未登录");
+        }
+
+        long begin = System.currentTimeMillis();
+        String reason = req != null ? req.getComment() : null;
+        try {
+            approvalEngine.cancelWorkflow(id, operator.getId(), reason);
+        } catch (Exception e) {
+            audit("审批撤销", operator.getUsername(), id.toString(), "APPROVAL", false, e.getMessage(), begin);
+            return ApiResponse.error(resolveApprovalOperationError(e), e.getMessage());
+        }
+
+        ApprovalWorkflow wf = approvalEngine.getById(id);
+        String detail = wf != null
+                ? "businessKey=" + wf.getBusinessKey() + ",status=" + wf.getStatus() + ",type=" + wf.getBusinessType()
+                : "status=cancelled";
+        audit("审批撤销", operator.getUsername(), id.toString(), "APPROVAL", true, detail, begin);
+        return ApiResponse.success(true);
     }
 
     private ApiResponse<Boolean> decide(Long workflowId, ApprovalStatus decision, String comment) {
@@ -231,7 +295,7 @@ public class ApprovalController {
         } catch (Exception e) {
             // 审批失败，记录审计日志
             audit(operation, approver.getUsername(), workflowId.toString(), "APPROVAL", false, e.getMessage(), begin);
-            return ApiResponse.error(ErrorCode.BUSINESS_ERROR, e.getMessage());
+            return ApiResponse.error(resolveApprovalOperationError(e), e.getMessage());
         }
 
         // 审批后业务处理由 ApprovalEngine.completeWorkflow() 中的 Handler 统一处理
@@ -274,6 +338,91 @@ public class ApprovalController {
         catch (Exception e) { return null; }
     }
 
+    private Long parseWorkflowIdKeyword(String keyword) {
+        if (!StringUtils.hasText(keyword) || !keyword.matches("\\d{1,18}")) {
+            return null;
+        }
+        try {
+            return Long.parseLong(keyword);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private ApprovalStatus parseApprovalStatus(String status) {
+        try {
+            return ApprovalStatus.fromCode(status.trim());
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "无效的审批状态: " + status);
+        }
+    }
+
+    private WorkflowType parseWorkflowType(String workflowType) {
+        try {
+            return WorkflowType.fromCode(workflowType.trim());
+        } catch (IllegalArgumentException ex) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "无效的流程类型: " + workflowType);
+        }
+    }
+
+    private ErrorCode resolveApprovalOperationError(Exception ex) {
+        if (ex instanceof BusinessException businessException && businessException.getErrorCode() != null) {
+            return businessException.getErrorCode();
+        }
+        String message = ex != null ? ex.getMessage() : null;
+        if (!StringUtils.hasText(message)) {
+            return ErrorCode.BUSINESS_ERROR;
+        }
+        if (message.contains("审批流程不存在")) {
+            return ErrorCode.RESOURCE_NOT_FOUND;
+        }
+        if (message.contains("无权限")
+                || message.contains("只有发起人")
+                || message.contains("发起人不能审批")) {
+            return ErrorCode.FORBIDDEN;
+        }
+        if (message.contains("状态已变更") || message.contains("请刷新后重试")) {
+            return ErrorCode.REQUEST_CONFLICT;
+        }
+        if (message.contains("不是待审批状态")
+                || message.contains("只能撤销待审批")
+                || message.contains("无效的审批决策")
+                || message.contains("数据不完整")
+                || message.contains("找不到当前审批步骤")
+                || message.contains("找不到下一审批步骤")) {
+            return ErrorCode.INVALID_STATUS;
+        }
+        return ErrorCode.BUSINESS_ERROR;
+    }
+
+    private LocalDate parseDate(String value, String fieldName) {
+        try {
+            return LocalDate.parse(value.trim());
+        } catch (DateTimeParseException ex) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "无效的" + fieldName + ": " + value);
+        }
+    }
+
+    private int safePage(Integer page) {
+        return page == null || page < 1 ? 1 : page;
+    }
+
+    private int safeSize(Integer size) {
+        if (size == null || size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
+    }
+
+    private void restrictToReadableWorkflows(QueryWrapper<ApprovalWorkflow> queryWrapper, Long userId) {
+        queryWrapper.and(w -> w
+                .eq("initiator_id", userId)
+                .or()
+                .eq("current_approver_id", userId)
+                .or()
+                .inSql("id", "SELECT workflow_id FROM approval_step WHERE approver_id = " + userId + " AND deleted = 0"));
+    }
+
     private SysUser resolveCurrentUser() {
         try {
             org.springframework.security.core.Authentication a = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
@@ -283,6 +432,23 @@ public class ApprovalController {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private boolean canReadWorkflow(ApprovalWorkflow workflow, SysUser user) {
+        if (workflow == null || user == null || user.getId() == null) {
+            return false;
+        }
+        if (userRoleService.hasAnyRole(user.getId(), SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+            return true;
+        }
+        if (user.getId().equals(workflow.getInitiatorId())) {
+            return true;
+        }
+        if (user.getId().equals(workflow.getCurrentApproverId())) {
+            return true;
+        }
+        List<ApprovalStep> steps = approvalStepService.listByWorkflow(workflow.getId());
+        return steps.stream().anyMatch(step -> user.getId().equals(step.getApproverId()));
     }
 
     /**
@@ -313,7 +479,13 @@ public class ApprovalController {
         if (w.getInitiatorId() != null) {
             SysUser initiator = sysUserService.getById(w.getInitiatorId());
             if (initiator != null) {
-                vo.setInitiatorId(initiator.getId());
+                vo.setInitiatorName(displayName(initiator));
+            }
+        }
+        if (w.getCurrentApproverId() != null) {
+            SysUser approver = sysUserService.getById(w.getCurrentApproverId());
+            if (approver != null) {
+                vo.setCurrentApproverName(displayName(approver));
             }
         }
 
@@ -348,7 +520,7 @@ public class ApprovalController {
         if (w.getInitiatorId() != null) {
             SysUser initiator = sysUserService.getById(w.getInitiatorId());
             if (initiator != null) {
-                vo.setInitiatorName(initiator.getRealName() != null ? initiator.getRealName() : initiator.getUsername());
+                vo.setInitiatorName(displayName(initiator));
             }
         }
 
@@ -356,11 +528,18 @@ public class ApprovalController {
         if (w.getCurrentApproverId() != null) {
             SysUser approver = sysUserService.getById(w.getCurrentApproverId());
             if (approver != null) {
-                vo.setCurrentApproverName(approver.getRealName() != null ? approver.getRealName() : approver.getUsername());
+                vo.setCurrentApproverName(displayName(approver));
             }
         }
 
         return vo;
+    }
+
+    private String displayName(SysUser user) {
+        if (user == null) {
+            return null;
+        }
+        return StringUtils.hasText(user.getRealName()) ? user.getRealName() : user.getUsername();
     }
 
     @Data

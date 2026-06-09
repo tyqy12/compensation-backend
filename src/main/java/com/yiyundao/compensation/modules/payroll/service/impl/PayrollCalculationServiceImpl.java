@@ -2,6 +2,8 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.yiyundao.compensation.common.exception.BusinessException;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.enums.PayrollConfirmationMode;
 import com.yiyundao.compensation.enums.PayrollConfirmationStatus;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
@@ -28,6 +30,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
@@ -48,6 +52,7 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
     private final EmployeeMapper employeeMapper;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final PayrollValidationIssueSupport validationIssueSupport;
+    private final PayrollCalculationFailureMarker calculationFailureMarker;
 
     @Override
     public boolean dryRun(Long batchId) {
@@ -72,10 +77,12 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
                 new LambdaQueryWrapper<PayrollLine>().eq(PayrollLine::getBatchId, batchId)
         );
         boolean revisionAdvance = existingLines != null && !existingLines.isEmpty();
-        markBatchCalculating(ctx.batch, revisionAdvance);
+        LinesSummary summary = computeLines(ctx);
+        rejectBlockingIssuesBeforePersist(summary, ctx.globalIssues);
+        FailureGuard rollbackFailureGuard = FailureGuard.from(ctx.batch);
+        FailureGuard calculatingFailureGuard = markBatchCalculating(ctx.batch);
 
         try {
-            LinesSummary summary = computeLines(ctx);
             java.util.Map<Long, PayrollLine> existingByEmployee = new java.util.HashMap<>();
             for (PayrollLine existing : existingLines) {
                 if (existing != null && existing.getEmployeeId() != null) {
@@ -104,9 +111,32 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
             updateBatchToConfirming(ctx.batch, revisionAdvance);
             return true;
         } catch (Exception ex) {
-            markBatchCalculationFailed(ctx.batch);
+            markBatchCalculationFailedAfterRollback(ctx.batch.getId(), rollbackFailureGuard, calculatingFailureGuard);
             throw ex;
         }
+    }
+
+    private void rejectBlockingIssuesBeforePersist(LinesSummary summary,
+                                                   java.util.List<PayrollValidationIssueDto> globalIssues) {
+        java.util.List<PayrollValidationIssueDto> issues = new java.util.ArrayList<>();
+        if (globalIssues != null) {
+            issues.addAll(globalIssues);
+        }
+        if (summary != null && summary.orderedLines != null) {
+            for (PayrollPreviewDto.PayrollPreviewLineDto line : summary.orderedLines) {
+                if (line != null && line.getIssues() != null) {
+                    issues.addAll(line.getIssues());
+                }
+            }
+        }
+        if (!validationIssueSupport.hasBlocking(issues)) {
+            return;
+        }
+        java.util.List<String> messages = validationIssueSupport.toMessages(issues);
+        String message = messages.isEmpty()
+                ? "存在阻塞问题，暂不可落地薪资计算"
+                : "存在阻塞问题，暂不可落地薪资计算：" + String.join("；", messages);
+        throw new BusinessException(ErrorCode.VALIDATION_FAILED, message);
     }
 
     @Override
@@ -242,7 +272,6 @@ public PayrollLedgerDto ledger(Long batchId) {
                 view.setManagerId(base.getManagerId());
                 view.setManagerName(base.getManagerName());
                 view.setEmploymentType(base.getEmploymentType());
-                view.setMissingItems(base.getMissingItems());
                 view.setDiff(base.getDiff());
             } else if (ctx != null) {
                 Employee emp = ctx.employeeMap.get(empId);
@@ -301,9 +330,7 @@ public PayrollLedgerDto ledger(Long batchId) {
             view.setNetAmount(net);
 
             java.util.List<PayrollValidationIssueDto> issues = parseIssueSnapshot(stored.getWarning());
-            if ((issues == null || issues.isEmpty()) && base != null && base.getIssues() != null) {
-                issues = new java.util.ArrayList<>(base.getIssues());
-            }
+            view.setMissingItems(java.util.Collections.emptyList());
             applyLineIssueSummary(view, issues);
 
             lines.add(view);
@@ -701,6 +728,9 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
 
     PreviewContext ctx = new PreviewContext();
     ctx.batch = batch;
+    ctx.persistedLines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
+            .eq(PayrollLine::getBatchId, batchId)
+            .orderByAsc(PayrollLine::getId));
     if (!ready) {
         PayrollBatchStatus status = batch.getStatus();
         if (status == PayrollBatchStatus.PAY_FAILED) {
@@ -720,7 +750,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
             ));
         }
     }
-    ctx.template = resolveTemplateForBatch(batch);
+    ctx.template = resolveTemplateForBatch(batch, ctx.persistedLines);
     ctx.rule = parseBasicRule(ctx.template);
     ctx.expectedItemRules = parseItemRules(ctx.template);
     if (ctx.template == null) {
@@ -737,6 +767,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
     for (SalaryItem item : salaryItemService.list(new LambdaQueryWrapper<SalaryItem>().eq(SalaryItem::getStatus, "enabled"))) {
         ctx.defByCode.put(item.getCode(), item);
     }
+    applyPersistedSalaryItemSnapshots(ctx);
 
     ctx.itemsByEmployee = new java.util.LinkedHashMap<>();
     var items = importItemMapper.selectList(new LambdaQueryWrapper<PayrollImportItem>()
@@ -780,8 +811,6 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         return status == PayrollBatchStatus.LOCKED
                 || status == PayrollBatchStatus.CONFIRMING
                 || status == PayrollBatchStatus.DISPUTE_PROCESSING
-                || status == PayrollBatchStatus.CONFIRMED
-                || status == PayrollBatchStatus.APPROVED
                 || status == PayrollBatchStatus.REJECTED;
     }
 
@@ -888,28 +917,48 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
             batch.setStatus(PayrollBatchStatus.CONFIRMING);
         }
         batch.setUpdateTime(LocalDateTime.now());
-        payrollBatchMapper.updateById(batch);
+        int updated = payrollBatchMapper.updateById(batch);
+        if (updated <= 0) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "批次状态已变更，请刷新后重试");
+        }
     }
 
-    private void markBatchCalculating(PayrollBatch batch, boolean revisionAdvance) {
+    private FailureGuard markBatchCalculating(PayrollBatch batch) {
         if (batch == null) {
-            return;
+            return FailureGuard.empty();
         }
         if (batch.getBatchRevision() == null || batch.getBatchRevision() < 1) {
             batch.setBatchRevision(1);
         }
         batch.setCalculationStatus(PayrollCalculationStatus.CALCULATING);
         batch.setUpdateTime(LocalDateTime.now());
-        payrollBatchMapper.updateById(batch);
+        int updated = payrollBatchMapper.updateById(batch);
+        if (updated <= 0) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "批次状态已变更，请刷新后重试");
+        }
+        return FailureGuard.from(batch);
     }
 
-    private void markBatchCalculationFailed(PayrollBatch batch) {
-        if (batch == null) {
+    private void markBatchCalculationFailedAfterRollback(Long batchId,
+                                                         FailureGuard rollbackFailureGuard,
+                                                         FailureGuard calculatingFailureGuard) {
+        if (batchId == null) {
             return;
         }
-        batch.setCalculationStatus(PayrollCalculationStatus.FAILED);
-        batch.setUpdateTime(LocalDateTime.now());
-        payrollBatchMapper.updateById(batch);
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            FailureGuard guard = calculatingFailureGuard != null ? calculatingFailureGuard : rollbackFailureGuard;
+            calculationFailureMarker.markFailed(batchId, guard.updateTime(), guard.version());
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCompletion(int status) {
+                if (status == TransactionSynchronization.STATUS_ROLLED_BACK) {
+                    FailureGuard guard = rollbackFailureGuard != null ? rollbackFailureGuard : FailureGuard.empty();
+                    calculationFailureMarker.markFailed(batchId, guard.updateTime(), guard.version());
+                }
+            }
+        });
     }
 
     private BigDecimal safe(BigDecimal value) {
@@ -957,15 +1006,28 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
             return java.util.Collections.emptyList();
         }
         try {
-            return objectMapper.readValue(json, new TypeReference<java.util.List<PayrollPreviewDto.PayrollPreviewItemDto>>() {});
+            var node = readJsonTree(json);
+            if (node == null || node.isNull() || !node.isArray()) {
+                return java.util.Collections.emptyList();
+            }
+            return objectMapper.convertValue(node, new TypeReference<java.util.List<PayrollPreviewDto.PayrollPreviewItemDto>>() {});
         } catch (Exception e) {
             log.warn("parse items snapshot failed: {}", e.getMessage());
             return java.util.Collections.emptyList();
         }
     }
 
-    private SalaryTemplate resolveTemplateForBatch(PayrollBatch batch) {
+    private SalaryTemplate resolveTemplateForBatch(PayrollBatch batch, java.util.List<PayrollLine> persistedLines) {
         try {
+            Long persistedTemplateId = resolvePersistedTemplateId(persistedLines);
+            if (persistedTemplateId != null) {
+                SalaryTemplate persistedTemplate = salaryTemplateService.getById(persistedTemplateId);
+                if (persistedTemplate != null) {
+                    return persistedTemplate;
+                }
+                log.warn("工资行引用的薪资模板不存在，将回退到当前启用模板: batchId={}, templateId={}",
+                        batch != null ? batch.getId() : null, persistedTemplateId);
+            }
             var list = salaryTemplateService.list(new LambdaQueryWrapper<SalaryTemplate>()
                     .eq(SalaryTemplate::getType, batch.getType())
                     .eq(SalaryTemplate::getStatus, "enabled"));
@@ -976,6 +1038,48 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         } catch (Exception e) {
             log.warn("resolveTemplateForBatch failed: {}", e.getMessage());
             return null;
+        }
+    }
+
+    private Long resolvePersistedTemplateId(java.util.List<PayrollLine> persistedLines) {
+        if (persistedLines == null || persistedLines.isEmpty()) {
+            return null;
+        }
+        java.util.Set<Long> templateIds = persistedLines.stream()
+                .map(PayrollLine::getTemplateId)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        if (templateIds.isEmpty()) {
+            return null;
+        }
+        if (templateIds.size() > 1) {
+            log.warn("同一批次工资行存在多个模板引用，将使用最早记录的模板: templateIds={}", templateIds);
+        }
+        return templateIds.iterator().next();
+    }
+
+    private void applyPersistedSalaryItemSnapshots(PreviewContext ctx) {
+        if (ctx == null || ctx.persistedLines == null || ctx.persistedLines.isEmpty()) {
+            return;
+        }
+        for (PayrollLine line : ctx.persistedLines) {
+            for (PayrollPreviewDto.PayrollPreviewItemDto item : parseItemsSnapshot(line.getItemsSnapshotJson())) {
+                if (item == null || !StringUtils.hasText(item.getCode())) {
+                    continue;
+                }
+                SalaryItem existing = ctx.defByCode.get(item.getCode());
+                SalaryItem snapshot = new SalaryItem();
+                snapshot.setCode(item.getCode());
+                snapshot.setName(StringUtils.hasText(item.getName()) ? item.getName() : existing != null ? existing.getName() : item.getCode());
+                snapshot.setType(StringUtils.hasText(item.getType()) ? item.getType() : existing != null ? existing.getType() : null);
+                snapshot.setTaxable(item.getTaxable() != null ? item.getTaxable() : existing != null ? existing.getTaxable() : null);
+                snapshot.setShowOnPayslip(existing != null && existing.getShowOnPayslip() != null
+                        ? existing.getShowOnPayslip()
+                        : Boolean.TRUE);
+                snapshot.setOrderNum(existing != null ? existing.getOrderNum() : null);
+                snapshot.setStatus("enabled");
+                ctx.defByCode.put(item.getCode(), snapshot);
+            }
         }
     }
 
@@ -1130,7 +1234,21 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         java.util.Map<Long, java.util.List<PayrollImportItem>> itemsByEmployee;
         java.util.Map<Long, Employee> employeeMap;
         java.util.Map<Long, Employee> managerMap;
+        java.util.List<PayrollLine> persistedLines = java.util.Collections.emptyList();
         java.util.List<PayrollValidationIssueDto> globalIssues = new java.util.ArrayList<>();
+    }
+
+    private record FailureGuard(LocalDateTime updateTime, Integer version) {
+        static FailureGuard from(PayrollBatch batch) {
+            if (batch == null) {
+                return empty();
+            }
+            return new FailureGuard(batch.getUpdateTime(), batch.getVersion());
+        }
+
+        static FailureGuard empty() {
+            return new FailureGuard(null, null);
+        }
     }
 
     private static class BasicCalcRule {

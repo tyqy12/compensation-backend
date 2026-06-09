@@ -6,5 +6,5 @@ import lombok.Data;
 public class OAuthAuthorizeResponse {
     private String url;
     private String state;
+    private String channel;
 }
-

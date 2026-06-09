@@ -2,6 +2,7 @@ package com.yiyundao.compensation.interfaces.controller;
 
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
+import com.yiyundao.compensation.security.SecurityAnnotations;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -30,6 +31,7 @@ public class SystemController {
     }
 
     @GetMapping("/info")
+    @SecurityAnnotations.IsAdmin
     public ApiResponse<Map<String, Object>> info() {
         Map<String, Object> info = new HashMap<>();
         info.put("name", "薪酬助手系统");

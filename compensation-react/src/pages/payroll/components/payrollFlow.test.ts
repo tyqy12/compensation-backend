@@ -6,6 +6,7 @@ import {
   getPayrollBlockers,
   getPayrollFlowCurrentStep,
   getPayrollNextAction,
+  isPayrollBatchComputable,
 } from './payrollFlow';
 
 describe('payrollFlow helpers', () => {
@@ -46,5 +47,16 @@ describe('payrollFlow helpers', () => {
 
     expect(getPayrollNextAction(record, true, true)).toContain('核算失败');
     expect(getPayrollBlockers(record, true)).toContain('当前版本核算失败，需要先修复数据或规则错误。');
+  });
+
+  it('matches backend computable payroll batch statuses', () => {
+    expect(isPayrollBatchComputable('locked')).toBe(true);
+    expect(isPayrollBatchComputable('confirming')).toBe(true);
+    expect(isPayrollBatchComputable('dispute_processing')).toBe(true);
+    expect(isPayrollBatchComputable('rejected')).toBe(true);
+    expect(isPayrollBatchComputable('confirmed')).toBe(false);
+    expect(isPayrollBatchComputable('approved')).toBe(false);
+    expect(isPayrollBatchComputable('pay_failed')).toBe(false);
+    expect(isPayrollBatchComputable('pay_processing')).toBe(false);
   });
 });

@@ -7,7 +7,6 @@ import {
   useUserBindingsQuery,
   useBindUserMutation,
   useUnbindUserMutation,
-  useBatchBindUsersMutation,
 } from './userBinding';
 
 // Mock the API
@@ -86,12 +85,12 @@ describe('UserBinding Queries', () => {
         expect(result.current.isSuccess).toBe(true);
       });
 
-      expect(mockApi.get).toHaveBeenCalledWith('/user-binding', {
+      expect(mockApi.get).toHaveBeenCalledWith('/admin/user-bindings', {
         params: {
-          page: 1,
-          size: 10,
-          platform: 'wechat',
-          bindStatus: 'active',
+          current: 1,
+          pageSize: 10,
+          provider: 'wechat',
+          bound: true,
           keyword: '张三',
         },
       });
@@ -116,10 +115,10 @@ describe('UserBinding Queries', () => {
       );
 
       await waitFor(() => {
-        expect(mockApi.get).toHaveBeenCalledWith('/user-binding', {
+        expect(mockApi.get).toHaveBeenCalledWith('/admin/user-bindings', {
           params: {
-            page: 1,
-            size: 10,
+            current: 1,
+            pageSize: 10,
           },
         });
       });
@@ -139,6 +138,41 @@ describe('UserBinding Queries', () => {
 
       expect(result.current.error).toEqual(mockError);
     });
+
+    it('should send backend-compatible admin query parameters in production mode', async () => {
+      vi.stubEnv('MODE', 'production');
+      const mockResponse = { data: { records: [], total: 0, current: 1, size: 10 } };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      renderHook(
+        () =>
+          useUserBindingsQuery({
+            current: 2,
+            pageSize: 20,
+            provider: 'wechat',
+            username: 'alice',
+            bound: false,
+          }),
+        { wrapper: createWrapper() },
+      );
+
+      await waitFor(() => {
+        expect(mockApi.get).toHaveBeenCalledWith('/admin/user-bindings', {
+          params: {
+            current: 2,
+            pageSize: 20,
+            provider: 'wechat',
+            bound: false,
+            keyword: 'alice',
+          },
+        });
+      });
+      expect(mockApi.get).not.toHaveBeenCalledWith('/admin/user-bindings', {
+        params: expect.objectContaining({ username: 'alice' }),
+      });
+
+      vi.unstubAllEnvs();
+    });
   });
 });
 
@@ -148,35 +182,28 @@ describe('UserBinding Mutations', () => {
   });
 
   describe('useBindUserMutation', () => {
-    it('should bind user successfully', async () => {
+    it('should reject bind request without user id', async () => {
       const bindData = {
         employeeId: 'EMP001',
         provider: 'wechat',
         subjectId: 'wx_user_456',
       };
-      const mockResponse = { data: { success: true, message: '绑定成功' } };
-      mockApi.post.mockResolvedValue(mockResponse);
 
       const { result } = renderHook(() => useBindUserMutation(), { wrapper: createWrapper() });
 
-      const mutateResult = await result.current.mutateAsync(bindData);
-
-      expect(mockApi.post).toHaveBeenCalledWith('/user-binding', {
-        employeeId: 'EMP001',
-        provider: 'wechat',
-        subjectId: 'wx_user_456',
-      });
-      expect(mutateResult).toEqual(mockResponse.data);
+      await expect(result.current.mutateAsync(bindData)).rejects.toThrow('缺少用户ID');
+      expect(mockApi.post).not.toHaveBeenCalled();
+      expect(mockApi.put).not.toHaveBeenCalled();
     });
 
     it('should handle bind failure', async () => {
       const bindData = {
-        employeeId: 'EMP001',
+        id: 1001,
         provider: 'wechat',
         subjectId: 'invalid_user',
       };
       const mockError = new Error('User not found on platform');
-      mockApi.post.mockRejectedValue(mockError);
+      mockApi.put.mockRejectedValue(mockError);
 
       const { result } = renderHook(() => useBindUserMutation(), { wrapper: createWrapper() });
 
@@ -207,7 +234,7 @@ describe('UserBinding Mutations', () => {
 
     it('should invalidate bindings query on success', async () => {
       const mockResponse = { data: { success: true } };
-      mockApi.post.mockResolvedValue(mockResponse);
+      mockApi.put.mockResolvedValue(mockResponse);
 
       const queryClient = new QueryClient();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
@@ -219,7 +246,7 @@ describe('UserBinding Mutations', () => {
       });
 
       await result.current.mutateAsync({
-        employeeId: 'EMP001',
+        id: 1001,
         provider: 'wechat',
         subjectId: 'wx_user_456',
       });
@@ -237,7 +264,9 @@ describe('UserBinding Mutations', () => {
 
       const mutateResult = await result.current.mutateAsync(123);
 
-      expect(mockApi.delete).toHaveBeenCalledWith('/user-binding/123');
+      expect(mockApi.delete).toHaveBeenCalledWith('/admin/users/123/platform-binding', {
+        params: { alsoUnlinkEmployee: true },
+      });
       expect(mutateResult).toEqual(mockResponse.data);
     });
 
@@ -269,126 +298,18 @@ describe('UserBinding Mutations', () => {
     });
   });
 
-  describe('useBatchBindUsersMutation', () => {
-    it('should batch bind users successfully', async () => {
-      const batchData = {
-        provider: 'wechat',
-        bindings: [
-          { employeeId: 'EMP001', subjectId: 'wx_user_001' },
-          { employeeId: 'EMP002', subjectId: 'wx_user_002' },
-        ],
-      };
-      const mockResponse = {
-        data: {
-          success: true,
-          message: '批量绑定完成',
-          successCount: 2,
-          failedCount: 0,
-          results: [
-            { employeeId: 'EMP001', success: true },
-            { employeeId: 'EMP002', success: true },
-          ],
-        },
-      };
-      mockApi.post.mockResolvedValue(mockResponse);
-
-      const { result } = renderHook(() => useBatchBindUsersMutation(), {
-        wrapper: createWrapper(),
-      });
-
-      const mutateResult = await result.current.mutateAsync(batchData);
-
-      expect(mockApi.post).toHaveBeenCalledWith('/user-binding/batch', {
-        provider: 'wechat',
-        bindings: [
-          { employeeId: 'EMP001', subjectId: 'wx_user_001' },
-          { employeeId: 'EMP002', subjectId: 'wx_user_002' },
-        ],
-      });
-      expect(mutateResult).toEqual(mockResponse.data);
-    });
-
-    it('should handle partial batch bind success', async () => {
-      const batchData = {
-        provider: 'wechat',
-        bindings: [
-          { employeeId: 'EMP001', subjectId: 'wx_user_001' },
-          { employeeId: 'EMP002', subjectId: 'invalid_user' },
-        ],
-      };
-      const mockResponse = {
-        data: {
-          success: true,
-          message: '批量绑定完成，部分失败',
-          successCount: 1,
-          failedCount: 1,
-          results: [
-            { employeeId: 'EMP001', success: true },
-            { employeeId: 'EMP002', success: false, error: 'User not found' },
-          ],
-        },
-      };
-      mockApi.post.mockResolvedValue(mockResponse);
-
-      const { result } = renderHook(() => useBatchBindUsersMutation(), {
-        wrapper: createWrapper(),
-      });
-
-      const mutateResult = await result.current.mutateAsync(batchData);
-
-      expect(mutateResult.successCount).toBe(1);
-      expect(mutateResult.failedCount).toBe(1);
-    });
-
-    it('should handle batch bind network error', async () => {
-      const batchData = {
-        provider: 'wechat',
-        bindings: [{ employeeId: 'EMP001', subjectId: 'wx_user_001' }],
-      };
-      const mockError = new Error('Network timeout');
-      mockApi.post.mockRejectedValue(mockError);
-
-      const { result } = renderHook(() => useBatchBindUsersMutation(), {
-        wrapper: createWrapper(),
-      });
-
-      await expect(result.current.mutateAsync(batchData)).rejects.toThrow('Network timeout');
-    });
-
-    it('should invalidate bindings query on success', async () => {
-      const mockResponse = { data: { success: true, successCount: 1, failedCount: 0 } };
-      mockApi.post.mockResolvedValue(mockResponse);
-
-      const queryClient = new QueryClient();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-
-      const { result } = renderHook(() => useBatchBindUsersMutation(), {
-        wrapper: function TestWrapper({ children }: { children: React.ReactNode }) {
-          return React.createElement(QueryClientProvider, { client: queryClient }, children);
-        },
-      });
-
-      await result.current.mutateAsync({
-        provider: 'wechat',
-        bindings: [{ employeeId: 'EMP001', subjectId: 'wx_user_001' }],
-      });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['userBindings'] });
-    });
-  });
-
   describe('mutation loading states', () => {
     it('should track loading state during bind', async () => {
       let resolvePromise: (value: any) => void;
       const promise = new Promise((resolve) => {
         resolvePromise = resolve;
       });
-      mockApi.post.mockReturnValue(promise);
+      mockApi.put.mockReturnValue(promise);
 
       const { result } = renderHook(() => useBindUserMutation(), { wrapper: createWrapper() });
 
       const bindPromise = result.current.mutateAsync({
-        employeeId: 'EMP001',
+        id: 1001,
         provider: 'wechat',
         subjectId: 'wx_user_456',
       });

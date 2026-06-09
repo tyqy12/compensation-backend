@@ -4,6 +4,7 @@ import { ProtectedRoute } from './ProtectedRoute';
 import { AppLayout } from '@components/Layout/AppLayout';
 import Loading from '@components/Common/Loading';
 import DynamicPageRenderer from './DynamicPageRenderer';
+import AuthErrorHandler from '@app/AuthErrorHandler';
 import { setCurrentPath } from '@services/api';
 import { authCenterRoutes } from './authCenterRoutes';
 
@@ -53,6 +54,7 @@ const RouteTracker: React.FC = () => {
 const RootLayout: React.FC = () =>
   withGuard(
     <AppLayout>
+      <AuthErrorHandler />
       <RouteTracker />
       <Outlet />
     </AppLayout>,

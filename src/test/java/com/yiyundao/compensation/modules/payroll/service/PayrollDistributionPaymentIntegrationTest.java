@@ -26,11 +26,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.transaction.TestTransaction;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -104,6 +106,7 @@ class PayrollDistributionPaymentIntegrationTest {
         PayrollLine line = new PayrollLine();
         line.setBatchId(batch.getId());
         line.setEmployeeId(employee.getId());
+        line.setEmploymentType("full_time");
         line.setGrossAmount(new BigDecimal("12000.00"));
         line.setNetAmount(new BigDecimal("9600.00"));
         payrollLineService.save(line);
@@ -116,6 +119,10 @@ class PayrollDistributionPaymentIntegrationTest {
     @Test
     void submitDistribution_shouldCreatePaymentAndSyncDistributionCompleted() {
         payrollProcessManager.submitDistribution(distribution.getId());
+        TestTransaction.flagForCommit();
+        TestTransaction.end();
+
+        awaitDistributionCompleted(distribution.getId());
 
         PayrollDistribution refreshedDistribution = distributionService.getById(distribution.getId());
         assertThat(refreshedDistribution.getDistributionStatus()).isEqualTo(PayrollDistributionStatus.COMPLETED);
@@ -148,5 +155,21 @@ class PayrollDistributionPaymentIntegrationTest {
         long reconciliationTasks = distributionService.count(new LambdaQueryWrapper<PayrollDistribution>()
                 .eq(PayrollDistribution::getId, distribution.getId()));
         assertThat(reconciliationTasks).isEqualTo(1);
+    }
+
+    private void awaitDistributionCompleted(Long distributionId) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline) {
+            PayrollDistribution current = distributionService.getById(distributionId);
+            if (current != null && current.getDistributionStatus() == PayrollDistributionStatus.COMPLETED) {
+                return;
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
     }
 }

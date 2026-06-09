@@ -670,6 +670,11 @@ CREATE TABLE `sys_role` (
   `code` varchar(50) NOT NULL COMMENT '角色编码',
   `name` varchar(100) NOT NULL COMMENT '角色名称',
   `description` varchar(255) DEFAULT NULL COMMENT '描述',
+  `role_type` varchar(20) DEFAULT 'CUSTOM' COMMENT '角色类型: SYSTEM/BUSINESS/CUSTOM',
+  `sort_order` int DEFAULT '0' COMMENT '排序号',
+  `is_editable` tinyint(1) DEFAULT '1' COMMENT '是否可编辑',
+  `icon` varchar(100) DEFAULT NULL COMMENT '角色图标',
+  `remarks` varchar(500) DEFAULT NULL COMMENT '备注',
   `status` varchar(20) DEFAULT 'enabled' COMMENT '状态',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -701,9 +706,22 @@ CREATE TABLE `sys_role_resource` (
 
 -- RBAC: User-Role
 CREATE TABLE `sys_user_role` (
+  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `user_id` bigint NOT NULL,
   `role_id` bigint NOT NULL,
+  `granted_by` bigint DEFAULT NULL COMMENT '授权人ID',
+  `granted_at` datetime DEFAULT NULL COMMENT '授权时间',
+  `expires_at` datetime DEFAULT NULL COMMENT '过期时间',
+  `remarks` varchar(500) DEFAULT NULL COMMENT '备注',
+  `delete_by` varchar(50) DEFAULT NULL COMMENT '删除人',
+  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+  PRIMARY KEY (`id`),
   UNIQUE KEY `uk_user_role` (`user_id`, `role_id`),
   KEY `idx_sys_user_role_role` (`role_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户-角色关系';
@@ -796,9 +814,29 @@ CREATE TABLE `external_identity` (
   CONSTRAINT `fk_external_identity_user` FOREIGN KEY (`user_id`) REFERENCES `sys_user` (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='外部平台身份绑定表';
 
--- Seed only ADMIN user
+-- Seed baseline roles and ADMIN user
+INSERT INTO `sys_role` (`code`, `name`, `description`, `role_type`, `sort_order`, `is_editable`, `icon`, `status`, `create_by`)
+VALUES
+('ADMIN', '系统管理员', '拥有所有系统权限', 'SYSTEM', 1, 0, 'crown', 'enabled', 'system'),
+('MANAGER', '部门经理', '部门管理和审批权限', 'BUSINESS', 2, 1, 'team', 'enabled', 'system'),
+('FINANCE', '财务人员', '薪酬管理和支付权限', 'BUSINESS', 3, 1, 'wallet', 'enabled', 'system'),
+('HR', '人力资源', '员工管理权限', 'BUSINESS', 4, 1, 'user', 'enabled', 'system'),
+('EMPLOYEE', '普通员工', '个人工资条查看权限', 'BUSINESS', 5, 1, 'contacts', 'enabled', 'system');
+
 INSERT INTO `sys_user` (`username`, `password`, `real_name`, `email`, `status`, `roles`, `create_by`)
 VALUES ('admin', '$2a$10$N.zmdr9k7uOCQb376NoUnuTJ8iKXIUYGSG2v8vwAkAbJXhRXz4CZG', '系统管理员', 'admin@yiyundao.com', 'active', 'ROLE_ADMIN', 'system');
+
+INSERT INTO `sys_user_role` (`user_id`, `role_id`, `granted_by`, `granted_at`, `deleted`, `create_time`, `create_by`)
+SELECT u.id, r.id, u.id, NOW(), 0, NOW(), 'system'
+FROM `sys_user` u
+JOIN `sys_role` r ON r.code = 'ADMIN'
+WHERE u.username = 'admin';
+
+INSERT INTO `sys_role_resource` (`role_id`, `resource_id`, `actions_json`, `create_time`, `create_by`)
+SELECT r.id, res.id, '["*"]', NOW(), 'system'
+FROM `sys_role` r
+JOIN `sys_resource` res ON res.status = 'enabled'
+WHERE r.code = 'ADMIN';
 
 -- Minimal system config seeds (optional safe defaults)
 INSERT INTO `sys_config` (`config_key`, `config_value`, `config_type`, `config_desc`) VALUES

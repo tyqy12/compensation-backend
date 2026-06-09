@@ -1,5 +1,8 @@
 package com.yiyundao.compensation.modules.payroll.service;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.enums.ApprovalStatus;
@@ -23,7 +26,9 @@ import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.security.SecurityConstants;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -39,6 +44,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -53,6 +59,14 @@ import static org.mockito.Mockito.when;
  */
 class PayrollConfirmationFlowIntegrationTest {
 
+    @BeforeAll
+    static void initTableInfo() {
+        MybatisConfiguration configuration = new MybatisConfiguration();
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, PayrollLine.class.getName());
+        assistant.setCurrentNamespace(PayrollLine.class.getName());
+        TableInfoHelper.initTableInfo(assistant, PayrollLine.class);
+    }
+
     @AfterEach
     void cleanupSecurityContext() {
         SecurityContextHolder.clearContext();
@@ -63,7 +77,7 @@ class PayrollConfirmationFlowIntegrationTest {
         FlowContext ctx = buildContext();
         when(ctx.approvalEngine.startWorkflow(
                 eq(WorkflowType.PAYROLL_DISPUTE),
-                eq("payroll_dispute:line:" + ctx.line2.getId()),
+                argThat(key -> key != null && key.startsWith("payroll_dispute:line:" + ctx.line2.getId() + "-")),
                 eq("payroll_dispute"),
                 eq(ctx.operator.getId()),
                 anyMap()
@@ -118,7 +132,7 @@ class PayrollConfirmationFlowIntegrationTest {
 
         verify(ctx.approvalEngine).startWorkflow(
                 eq(WorkflowType.PAYROLL_DISPUTE),
-                eq("payroll_dispute:line:" + ctx.line2.getId()),
+                argThat(key -> key != null && key.startsWith("payroll_dispute:line:" + ctx.line2.getId() + "-")),
                 eq("payroll_dispute"),
                 eq(ctx.operator.getId()),
                 anyMap()
@@ -141,7 +155,7 @@ class PayrollConfirmationFlowIntegrationTest {
         FlowContext ctx = buildContext();
         when(ctx.approvalEngine.startWorkflow(
                 eq(WorkflowType.PAYROLL_DISPUTE),
-                eq("payroll_dispute:line:" + ctx.line2.getId()),
+                argThat(key -> key != null && key.startsWith("payroll_dispute:line:" + ctx.line2.getId() + "-")),
                 eq("payroll_dispute"),
                 eq(ctx.operator.getId()),
                 anyMap()
@@ -253,6 +267,8 @@ class PayrollConfirmationFlowIntegrationTest {
             lineStore.put(updated.getId(), updated);
             return true;
         });
+        when(ctx.payrollLineService.update(org.mockito.ArgumentMatchers.any(LambdaUpdateWrapper.class)))
+                .thenReturn(true);
         when(ctx.validationIssueSupport.deserialize(any())).thenReturn(List.of());
 
         ctx.distribution = new PayrollDistribution();

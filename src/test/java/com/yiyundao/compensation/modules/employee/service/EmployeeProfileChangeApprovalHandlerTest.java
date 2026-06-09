@@ -12,8 +12,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -71,6 +73,28 @@ class EmployeeProfileChangeApprovalHandlerTest {
 
         verify(employeeService, never()).applyApprovedProfileChange(any(), any(), any());
         verify(encryptionService, never()).decrypt(any());
+    }
+
+    @Test
+    void shouldPropagateApplyFailureSoApprovalTransactionCanRollback() {
+        ApprovalCompletedEvent event = approvedEvent(
+                1003L,
+                """
+                        {
+                          "employeeId": 2003,
+                          "changePayloadCipher": "cipher_text"
+                        }
+                        """
+        );
+        when(encryptionService.decrypt("cipher_text")).thenReturn("{\"name\":\"王五\"}");
+        doThrow(new IllegalStateException("员工资料已变更"))
+                .when(employeeService)
+                .applyApprovedProfileChange(eq(1003L), eq(2003L), any(EmployeeProfileChangePayload.class));
+
+        assertThatThrownBy(() -> handler.onApprovalCompleted(event))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("员工资料变更审批处理失败")
+                .hasRootCauseMessage("员工资料已变更");
     }
 
     private ApprovalCompletedEvent approvedEvent(Long workflowId, String workflowData) {

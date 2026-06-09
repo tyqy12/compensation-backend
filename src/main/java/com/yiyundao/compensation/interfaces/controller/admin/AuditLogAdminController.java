@@ -3,6 +3,8 @@ package com.yiyundao.compensation.interfaces.controller.admin;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.interfaces.dto.admin.AuditLogResponseDto;
 import com.yiyundao.compensation.modules.audit.entity.AuditLog;
 import com.yiyundao.compensation.modules.audit.listener.AuditMetricsListener;
 import com.yiyundao.compensation.modules.audit.listener.LoginFailureListener;
@@ -24,6 +26,9 @@ import java.util.Map;
 @SecurityAnnotations.IsAdmin
 public class AuditLogAdminController {
 
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 200;
+
     private final AuditLogService auditLogService;
     private final AuditLogQueryService auditLogQueryService;
     private final AuditMetricsListener auditMetricsListener;
@@ -43,7 +48,7 @@ public class AuditLogAdminController {
                                                  @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startTime,
                                                  @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endTime,
                                                  @RequestParam(required = false) String keyword) {
-        Page<AuditLog> page = new Page<>(current, pageSize);
+        Page<AuditLog> page = new Page<>(safePage(current), safeSize(pageSize));
         LambdaQueryWrapper<AuditLog> w = new LambdaQueryWrapper<>();
         if (username != null && !username.isBlank()) w.like(AuditLog::getUsername, username);
         if (operation != null && !operation.isBlank()) w.like(AuditLog::getOperation, operation);
@@ -64,7 +69,7 @@ public class AuditLogAdminController {
         w.orderByDesc(AuditLog::getCreateTime);
         Page<AuditLog> result = auditLogService.page(page, w);
         Map<String, Object> resp = new HashMap<>();
-        resp.put("records", result.getRecords());
+        resp.put("records", toResponseList(result.getRecords()));
         resp.put("total", result.getTotal());
         resp.put("current", result.getCurrent());
         resp.put("size", result.getSize());
@@ -75,30 +80,45 @@ public class AuditLogAdminController {
      * 查询审计日志详情
      */
     @GetMapping("/{id}")
-    public ApiResponse<AuditLog> detail(@PathVariable Long id) {
-        return ApiResponse.success(auditLogService.getById(id));
+    public ApiResponse<AuditLogResponseDto> detail(@PathVariable Long id) {
+        AuditLog auditLog = auditLogService.getById(id);
+        if (auditLog == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "审计日志不存在");
+        }
+        return ApiResponse.success(AuditLogResponseDto.from(auditLog));
+    }
+
+    private int safePage(int page) {
+        return page < 1 ? 1 : page;
+    }
+
+    private int safeSize(int size) {
+        if (size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
     }
 
     /**
      * 查询用户最近操作记录
      */
     @GetMapping("/user/{username}/recent")
-    public ApiResponse<List<AuditLog>> getUserRecentOperations(
+    public ApiResponse<List<AuditLogResponseDto>> getUserRecentOperations(
             @PathVariable String username,
             @RequestParam(defaultValue = "10") int limit) {
         List<AuditLog> records = auditLogQueryService.findRecentByUsername(username, Math.min(limit, 50));
-        return ApiResponse.success(records);
+        return ApiResponse.success(toResponseList(records));
     }
 
     /**
      * 查询指定时间范围内的操作记录
      */
     @GetMapping("/time-range")
-    public ApiResponse<List<AuditLog>> getByTimeRange(
+    public ApiResponse<List<AuditLogResponseDto>> getByTimeRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime startTime,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime endTime) {
         List<AuditLog> records = auditLogQueryService.findByTimeRange(startTime, endTime);
-        return ApiResponse.success(records);
+        return ApiResponse.success(toResponseList(records));
     }
 
     /**
@@ -161,5 +181,12 @@ public class AuditLogAdminController {
     public ApiResponse<Map<String, Object>> getMetrics() {
         Map<String, Object> metrics = auditMetricsListener.getTodaySummary();
         return ApiResponse.success(metrics);
+    }
+
+    private List<AuditLogResponseDto> toResponseList(List<AuditLog> records) {
+        if (records == null || records.isEmpty()) {
+            return List.of();
+        }
+        return records.stream().map(AuditLogResponseDto::from).toList();
     }
 }

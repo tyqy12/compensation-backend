@@ -15,10 +15,12 @@ import jakarta.servlet.ServletResponse;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
+import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -32,6 +34,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.UUID;
 
 /**
@@ -56,6 +59,7 @@ public class SecurityConfig {
     private final com.yiyundao.compensation.modules.rbac.service.ResourceService resourceService;
     private final com.yiyundao.compensation.modules.rbac.service.UserRoleService userRoleService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final Environment environment;
 
     // ==================== 公共路径配置 ====================
 
@@ -64,11 +68,22 @@ public class SecurityConfig {
      */
     private String[] getPublicPatterns() {
         java.util.List<String> patterns = new java.util.ArrayList<>();
-        java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_OPENAPI_DOCS);
+        if (!isProdLikeProfile()) {
+            java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_OPENAPI_DOCS);
+            java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_AUTH_DEV_ONLY);
+        }
         java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_HEALTH);
         java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_AUTH_PUBLIC);
         java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_PAYMENT_NOTIFY);
+        java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_EXTERNAL_OAUTH_PUBLIC);
         return patterns.toArray(new String[0]);
+    }
+
+    private boolean isProdLikeProfile() {
+        return Arrays.stream(environment.getActiveProfiles())
+                .anyMatch(profile -> "prod".equalsIgnoreCase(profile)
+                        || "production".equalsIgnoreCase(profile)
+                        || "staging".equalsIgnoreCase(profile));
     }
 
     // ==================== CORS 过滤器 ====================
@@ -115,6 +130,14 @@ public class SecurityConfig {
         );
     }
 
+    @Bean
+    public FilterRegistrationBean<ApiResourceAuthorizationFilter> apiResourceAuthorizationFilterRegistration(
+            ApiResourceAuthorizationFilter filter) {
+        FilterRegistrationBean<ApiResourceAuthorizationFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
     // ==================== FilterChain 配置 ====================
 
     /**
@@ -137,11 +160,19 @@ public class SecurityConfig {
     @Bean
     @Order(2)
     public SecurityFilterChain openApiFilterChain(HttpSecurity http) throws Exception {
-        http.securityMatcher("/openapi/**", "/v1/oauth/**")
+        http.securityMatcher("/openapi/**", "/v1/payroll/**", "/v1/payslips", "/v1/payslips/**", "/v1/ping")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers("/v1/payroll/**")
+                                .hasAuthority(SecurityConstants.SCOPE_PAYROLL_READ)
+                        .requestMatchers("/v1/payslips")
+                                .hasAuthority(SecurityConstants.SCOPE_PAYSLIP_READ)
+                        .requestMatchers("/v1/payslips/**")
+                                .hasAuthority(SecurityConstants.SCOPE_PAYSLIP_READ)
+                        .requestMatchers("/v1/ping")
+                                .hasAuthority(SecurityConstants.ROLE_APP)
                         .anyRequest().authenticated()
                 )
                 .exceptionHandling(ex -> ex
@@ -164,10 +195,17 @@ public class SecurityConfig {
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
+                        .requestMatchers(SecurityConstants.PATTERNS_OPENAPI_DOCS)
+                                .hasRole(removeRolePrefix(SecurityConstants.ROLE_ADMIN))
                         .requestMatchers("/auth/logout").authenticated()
                         // 使用常量消除硬编码
                         .requestMatchers(SecurityConstants.PATTERN_SYSTEM_INTEGRATION)
                                 .hasRole(removeRolePrefix(SecurityConstants.ROLE_ADMIN))
+                        .requestMatchers(org.springframework.http.HttpMethod.PUT, "/admin/users/*/resources")
+                                .hasAnyRole(
+                                        removeRolePrefix(SecurityConstants.ROLE_ADMIN),
+                                        removeRolePrefix(SecurityConstants.ROLE_MANAGER)
+                                )
                         .requestMatchers(SecurityConstants.PATTERN_ADMIN)
                                 .hasRole(removeRolePrefix(SecurityConstants.ROLE_ADMIN))
                         .requestMatchers(SecurityConstants.PATTERN_MANAGER)

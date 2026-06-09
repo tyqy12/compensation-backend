@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.modules.user.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.yiyundao.compensation.infrastructure.dao.ExternalIdentityMapper;
 import com.yiyundao.compensation.interfaces.dto.config.DingTalkConfigDto;
@@ -28,43 +29,30 @@ public class ExternalIdentityServiceImpl extends ServiceImpl<ExternalIdentityMap
     @Override
     public ExternalIdentity findActiveIdentity(String provider, String tenantKey, String subjectType, String subjectId) {
         String normalizedProvider = normalizeProvider(provider);
+        boolean defaultTenantLookup = isDefaultTenantLookup(tenantKey);
         String normalizedTenant = normalizeTenantKey(normalizedProvider, tenantKey);
         String normalizedSubjectType = normalizeSubjectType(subjectType);
         if (!StringUtils.hasText(normalizedProvider) || !StringUtils.hasText(subjectId)) {
             return null;
         }
-        ExternalIdentity identity = getOne(baseIdentitySelect()
-                .eq(ExternalIdentity::getProvider, normalizedProvider)
-                .eq(ExternalIdentity::getTenantKey, normalizedTenant)
-                .eq(ExternalIdentity::getSubjectType, normalizedSubjectType)
-                .eq(ExternalIdentity::getSubjectId, subjectId)
-                .eq(ExternalIdentity::getStatus, STATUS_ACTIVE)
-                .last("limit 1"));
+        ExternalIdentity identity = findActiveIdentityByTenant(
+                normalizedProvider, normalizedTenant, normalizedSubjectType, subjectId);
         if (identity == null && !DEFAULT_SUBJECT_TYPE.equals(normalizedSubjectType)) {
-            identity = getOne(baseIdentitySelect()
-                    .eq(ExternalIdentity::getProvider, normalizedProvider)
-                    .eq(ExternalIdentity::getTenantKey, normalizedTenant)
-                    .eq(ExternalIdentity::getSubjectType, DEFAULT_SUBJECT_TYPE)
-                    .eq(ExternalIdentity::getSubjectId, subjectId)
-                    .eq(ExternalIdentity::getStatus, STATUS_ACTIVE)
-                    .last("limit 1"));
+            identity = findActiveIdentityByTenant(
+                    normalizedProvider, normalizedTenant, DEFAULT_SUBJECT_TYPE, subjectId);
         }
         if (identity == null && !DEFAULT_TENANT_KEY.equals(normalizedTenant)) {
-            identity = getOne(baseIdentitySelect()
-                    .eq(ExternalIdentity::getProvider, normalizedProvider)
-                    .eq(ExternalIdentity::getTenantKey, DEFAULT_TENANT_KEY)
-                    .eq(ExternalIdentity::getSubjectType, normalizedSubjectType)
-                    .eq(ExternalIdentity::getSubjectId, subjectId)
-                    .eq(ExternalIdentity::getStatus, STATUS_ACTIVE)
-                    .last("limit 1"));
+            identity = findActiveIdentityByTenant(
+                    normalizedProvider, DEFAULT_TENANT_KEY, normalizedSubjectType, subjectId);
             if (identity == null && !DEFAULT_SUBJECT_TYPE.equals(normalizedSubjectType)) {
-                identity = getOne(baseIdentitySelect()
-                        .eq(ExternalIdentity::getProvider, normalizedProvider)
-                        .eq(ExternalIdentity::getTenantKey, DEFAULT_TENANT_KEY)
-                        .eq(ExternalIdentity::getSubjectType, DEFAULT_SUBJECT_TYPE)
-                        .eq(ExternalIdentity::getSubjectId, subjectId)
-                        .eq(ExternalIdentity::getStatus, STATUS_ACTIVE)
-                        .last("limit 1"));
+                identity = findActiveIdentityByTenant(
+                        normalizedProvider, DEFAULT_TENANT_KEY, DEFAULT_SUBJECT_TYPE, subjectId);
+            }
+        }
+        if (identity == null && defaultTenantLookup) {
+            identity = findIdentityAcrossTenants(normalizedProvider, normalizedSubjectType, subjectId, true);
+            if (identity == null && !DEFAULT_SUBJECT_TYPE.equals(normalizedSubjectType)) {
+                identity = findIdentityAcrossTenants(normalizedProvider, DEFAULT_SUBJECT_TYPE, subjectId, true);
             }
         }
         return identity;
@@ -131,13 +119,17 @@ public class ExternalIdentityServiceImpl extends ServiceImpl<ExternalIdentityMap
     public void upsertPlatformIdentity(String provider, String tenantKey, String subjectType, String subjectId,
                                        Long employeeId, Long userId, String source, boolean primary) {
         String normalizedProvider = normalizeProvider(provider);
+        boolean defaultTenantLookup = isDefaultTenantLookup(tenantKey);
         String normalizedTenant = normalizeTenantKey(normalizedProvider, tenantKey);
         String normalizedSubjectType = normalizeSubjectType(subjectType);
         if (!StringUtils.hasText(normalizedProvider) || !StringUtils.hasText(subjectId)) {
             return;
         }
 
-        ExternalIdentity existing = findActiveIdentity(normalizedProvider, normalizedTenant, normalizedSubjectType, subjectId);
+        ExternalIdentity existing = findIdentity(normalizedProvider, normalizedTenant, normalizedSubjectType, subjectId);
+        if (existing == null && defaultTenantLookup) {
+            existing = findIdentityAcrossTenants(normalizedProvider, normalizedSubjectType, subjectId, false);
+        }
         if (existing == null) {
             ExternalIdentity identity = new ExternalIdentity();
             identity.setProvider(normalizedProvider);
@@ -151,23 +143,31 @@ public class ExternalIdentityServiceImpl extends ServiceImpl<ExternalIdentityMap
             identity.setSource(source);
             identity.setBoundAt(LocalDateTime.now());
             identity.setLastSeenAt(LocalDateTime.now());
+            demoteOtherPrimaryIdentities(identity);
             save(identity);
             return;
         }
 
-        if (userId != null && existing.getUserId() != null && !userId.equals(existing.getUserId())) {
+        boolean existingActive = STATUS_ACTIVE.equals(existing.getStatus());
+        if (existingActive && userId != null && existing.getUserId() != null && !userId.equals(existing.getUserId())) {
             throw new IllegalStateException("外部身份已绑定其他用户，provider=" + normalizedProvider + ", subjectId=" + subjectId);
         }
-        if (employeeId != null && existing.getEmployeeId() != null && !employeeId.equals(existing.getEmployeeId())) {
+        if (existingActive && employeeId != null && existing.getEmployeeId() != null && !employeeId.equals(existing.getEmployeeId())) {
             throw new IllegalStateException("外部身份已绑定其他员工，provider=" + normalizedProvider + ", subjectId=" + subjectId);
         }
 
         boolean changed = false;
-        if (employeeId != null && existing.getEmployeeId() == null) {
+        if (defaultTenantLookup && !normalizedTenant.equals(existing.getTenantKey())) {
+            existing.setTenantKey(normalizedTenant);
+            changed = true;
+        }
+        if ((!existingActive && !java.util.Objects.equals(employeeId, existing.getEmployeeId()))
+                || (existingActive && employeeId != null && !employeeId.equals(existing.getEmployeeId()))) {
             existing.setEmployeeId(employeeId);
             changed = true;
         }
-        if (userId != null && existing.getUserId() == null) {
+        if ((!existingActive && !java.util.Objects.equals(userId, existing.getUserId()))
+                || (existingActive && userId != null && !userId.equals(existing.getUserId()))) {
             existing.setUserId(userId);
             changed = true;
         }
@@ -194,6 +194,37 @@ public class ExternalIdentityServiceImpl extends ServiceImpl<ExternalIdentityMap
                     normalizedProvider, normalizedSubjectType, subjectId);
         }
         updateById(existing);
+        demoteOtherPrimaryIdentities(existing);
+    }
+
+    private void demoteOtherPrimaryIdentities(ExternalIdentity primaryIdentity) {
+        if (primaryIdentity == null || !Boolean.TRUE.equals(primaryIdentity.getPrimaryFlag())) {
+            return;
+        }
+        if (primaryIdentity.getUserId() != null) {
+            demoteOtherPrimaryIdentitiesByUser(primaryIdentity);
+        }
+        if (primaryIdentity.getEmployeeId() != null) {
+            demoteOtherPrimaryIdentitiesByEmployee(primaryIdentity);
+        }
+    }
+
+    private void demoteOtherPrimaryIdentitiesByUser(ExternalIdentity primaryIdentity) {
+        update(new LambdaUpdateWrapper<ExternalIdentity>()
+                .set(ExternalIdentity::getPrimaryFlag, false)
+                .eq(ExternalIdentity::getUserId, primaryIdentity.getUserId())
+                .eq(ExternalIdentity::getStatus, STATUS_ACTIVE)
+                .eq(ExternalIdentity::getPrimaryFlag, true)
+                .ne(primaryIdentity.getId() != null, ExternalIdentity::getId, primaryIdentity.getId()));
+    }
+
+    private void demoteOtherPrimaryIdentitiesByEmployee(ExternalIdentity primaryIdentity) {
+        update(new LambdaUpdateWrapper<ExternalIdentity>()
+                .set(ExternalIdentity::getPrimaryFlag, false)
+                .eq(ExternalIdentity::getEmployeeId, primaryIdentity.getEmployeeId())
+                .eq(ExternalIdentity::getStatus, STATUS_ACTIVE)
+                .eq(ExternalIdentity::getPrimaryFlag, true)
+                .ne(primaryIdentity.getId() != null, ExternalIdentity::getId, primaryIdentity.getId()));
     }
 
     @Override
@@ -233,6 +264,46 @@ public class ExternalIdentityServiceImpl extends ServiceImpl<ExternalIdentityMap
             case "feishu", "lark" -> "feishu";
             default -> p;
         };
+    }
+
+    private ExternalIdentity findIdentity(String provider, String tenantKey, String subjectType, String subjectId) {
+        if (!StringUtils.hasText(provider) || !StringUtils.hasText(subjectId)) {
+            return null;
+        }
+        return getOne(baseIdentitySelect()
+                .eq(ExternalIdentity::getProvider, provider)
+                .eq(ExternalIdentity::getTenantKey, tenantKey)
+                .eq(ExternalIdentity::getSubjectType, subjectType)
+                .eq(ExternalIdentity::getSubjectId, subjectId)
+                .last("limit 1"));
+    }
+
+    private ExternalIdentity findActiveIdentityByTenant(String provider, String tenantKey,
+                                                        String subjectType, String subjectId) {
+        return getOne(baseIdentitySelect()
+                .eq(ExternalIdentity::getProvider, provider)
+                .eq(ExternalIdentity::getTenantKey, tenantKey)
+                .eq(ExternalIdentity::getSubjectType, subjectType)
+                .eq(ExternalIdentity::getSubjectId, subjectId)
+                .eq(ExternalIdentity::getStatus, STATUS_ACTIVE)
+                .last("limit 1"));
+    }
+
+    private ExternalIdentity findIdentityAcrossTenants(String provider, String subjectType,
+                                                       String subjectId, boolean activeOnly) {
+        return getOne(baseIdentitySelect()
+                .eq(ExternalIdentity::getProvider, provider)
+                .eq(ExternalIdentity::getSubjectType, subjectType)
+                .eq(ExternalIdentity::getSubjectId, subjectId)
+                .eq(activeOnly, ExternalIdentity::getStatus, STATUS_ACTIVE)
+                .orderByDesc(ExternalIdentity::getPrimaryFlag)
+                .orderByDesc(ExternalIdentity::getLastSeenAt)
+                .orderByDesc(ExternalIdentity::getId)
+                .last("limit 1"));
+    }
+
+    private boolean isDefaultTenantLookup(String tenantKey) {
+        return !StringUtils.hasText(tenantKey) || DEFAULT_TENANT_KEY.equalsIgnoreCase(tenantKey.trim());
     }
 
     private String normalizeTenantKey(String provider, String tenantKey) {
@@ -291,6 +362,7 @@ public class ExternalIdentityServiceImpl extends ServiceImpl<ExternalIdentityMap
                         ExternalIdentity::getSubjectId,
                         ExternalIdentity::getEmployeeId,
                         ExternalIdentity::getUserId,
+                        ExternalIdentity::getPrimaryFlag,
                         ExternalIdentity::getStatus,
                         ExternalIdentity::getSource,
                         ExternalIdentity::getBoundAt,

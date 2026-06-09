@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.enums;
 
+import com.baomidou.mybatisplus.annotation.EnumValue;
 import lombok.Getter;
 
 @Getter
@@ -11,6 +12,7 @@ public enum WorkflowType {
     PERMISSION("PERMISSION", "权限授权"),
     PAYROLL_DISPUTE("PAYROLL_DISPUTE", "薪酬异议审批");
 
+    @EnumValue
     private final String code;
     private final String name;
 

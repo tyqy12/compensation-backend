@@ -1,6 +1,8 @@
 package com.yiyundao.compensation.interfaces.dto.role;
 
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import lombok.Data;
 
@@ -23,7 +25,7 @@ public class RoleResourceAssignRequest {
      * </ul>
      */
     @Size(max = 200, message = "单次分配的资源数量不能超过200")
-    private List<ResourceAssignment> resources;
+    private List<@Valid ResourceAssignment> resources;
 
     /**
      * 是否完全替换现有权限
@@ -43,7 +45,7 @@ public class RoleResourceAssignRequest {
         /**
          * 资源ID
          */
-        @NotEmpty(message = "资源ID不能为空")
+        @NotNull(message = "资源ID不能为空")
         private Long resourceId;
 
         /**

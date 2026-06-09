@@ -4,14 +4,17 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+
+import java.sql.ResultSet;
 
 @Slf4j
 @Component
 @RequiredArgsConstructor
-@ConditionalOnProperty(name = "migration.audit-log.enabled", havingValue = "true")
+@ConditionalOnExpression("'${migration.runner.enabled:false}' == 'true' || '${migration.audit-log.enabled:false}' == 'true'")
 public class DatabaseMigrationRunner implements ApplicationRunner {
 
     private final JdbcTemplate jdbcTemplate;
@@ -147,6 +150,8 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  KEY `idx_recipient_channel` (`recipient_id`, `channel`),\n" +
                 "  KEY `idx_create_time` (`create_time`)\n" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='通知发送记录表';");
+
+        migrateRbacSchema();
 
         // 2) audit_log incremental columns
         addColumnIfMissing("audit_log", "update_time",
@@ -449,6 +454,317 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "CREATE INDEX `idx_cycle_next_execution` ON `pay_cycle` (`next_execution_time`)");
     }
 
+    private void migrateRbacSchema() {
+        createTableIfMissing("sys_resource",
+                "CREATE TABLE `sys_resource` (\n" +
+                "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
+                "  `type` varchar(20) NOT NULL COMMENT '资源类型: MENU/VIEW/ACTION/API',\n" +
+                "  `code` varchar(100) NOT NULL COMMENT '全局唯一编码',\n" +
+                "  `name` varchar(100) NOT NULL COMMENT '资源名称',\n" +
+                "  `path` varchar(255) DEFAULT NULL COMMENT '路由或接口路径',\n" +
+                "  `component` varchar(255) DEFAULT NULL COMMENT '前端组件',\n" +
+                "  `icon` varchar(100) DEFAULT NULL COMMENT '图标',\n" +
+                "  `parent_id` bigint DEFAULT NULL COMMENT '父资源ID',\n" +
+                "  `order_num` int DEFAULT '0' COMMENT '排序号',\n" +
+                "  `props_json` json DEFAULT NULL COMMENT '扩展元信息(JSON)',\n" +
+                "  `status` varchar(20) DEFAULT 'enabled' COMMENT '状态',\n" +
+                "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n" +
+                "  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',\n" +
+                "  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',\n" +
+                "  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',\n" +
+                "  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',\n" +
+                "  `version` int DEFAULT '0' COMMENT '乐观锁版本号',\n" +
+                "  PRIMARY KEY (`id`),\n" +
+                "  UNIQUE KEY `uk_resource_code` (`code`),\n" +
+                "  KEY `idx_sys_resource_type` (`type`),\n" +
+                "  KEY `idx_sys_resource_parent_order` (`parent_id`, `order_num`)\n" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统资源表';");
+
+        createTableIfMissing("sys_role",
+                "CREATE TABLE `sys_role` (\n" +
+                "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
+                "  `code` varchar(50) NOT NULL COMMENT '角色编码',\n" +
+                "  `name` varchar(100) NOT NULL COMMENT '角色名称',\n" +
+                "  `description` varchar(255) DEFAULT NULL COMMENT '描述',\n" +
+                "  `role_type` varchar(20) DEFAULT 'CUSTOM' COMMENT '角色类型: SYSTEM/BUSINESS/CUSTOM',\n" +
+                "  `sort_order` int DEFAULT '0' COMMENT '排序号',\n" +
+                "  `is_editable` tinyint(1) DEFAULT '1' COMMENT '是否可编辑',\n" +
+                "  `icon` varchar(100) DEFAULT NULL COMMENT '角色图标',\n" +
+                "  `remarks` varchar(500) DEFAULT NULL COMMENT '备注',\n" +
+                "  `status` varchar(20) DEFAULT 'enabled' COMMENT '状态',\n" +
+                "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n" +
+                "  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',\n" +
+                "  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',\n" +
+                "  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',\n" +
+                "  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',\n" +
+                "  `version` int DEFAULT '0' COMMENT '乐观锁版本号',\n" +
+                "  PRIMARY KEY (`id`),\n" +
+                "  UNIQUE KEY `uk_role_code` (`code`)\n" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色表';");
+
+        createTableIfMissing("sys_role_resource",
+                "CREATE TABLE `sys_role_resource` (\n" +
+                "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
+                "  `role_id` bigint NOT NULL,\n" +
+                "  `resource_id` bigint NOT NULL,\n" +
+                "  `actions_json` json DEFAULT NULL COMMENT '按钮/动作集合(JSON 数组)',\n" +
+                "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n" +
+                "  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',\n" +
+                "  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',\n" +
+                "  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',\n" +
+                "  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',\n" +
+                "  `version` int DEFAULT '0' COMMENT '乐观锁版本号',\n" +
+                "  PRIMARY KEY (`id`),\n" +
+                "  UNIQUE KEY `uk_role_resource` (`role_id`, `resource_id`),\n" +
+                "  KEY `idx_sys_role_resource_role` (`role_id`),\n" +
+                "  KEY `idx_sys_role_resource_resource` (`resource_id`)\n" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色-资源授权关系';");
+
+        createTableIfMissing("sys_user_role",
+                "CREATE TABLE `sys_user_role` (\n" +
+                "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
+                "  `user_id` bigint NOT NULL,\n" +
+                "  `role_id` bigint NOT NULL,\n" +
+                "  `granted_by` bigint DEFAULT NULL COMMENT '授权人ID',\n" +
+                "  `granted_at` datetime DEFAULT NULL COMMENT '授权时间',\n" +
+                "  `expires_at` datetime DEFAULT NULL COMMENT '过期时间',\n" +
+                "  `remarks` varchar(500) DEFAULT NULL COMMENT '备注',\n" +
+                "  `delete_by` varchar(50) DEFAULT NULL COMMENT '删除人',\n" +
+                "  `delete_time` datetime DEFAULT NULL COMMENT '删除时间',\n" +
+                "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n" +
+                "  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',\n" +
+                "  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',\n" +
+                "  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',\n" +
+                "  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',\n" +
+                "  `version` int DEFAULT '0' COMMENT '乐观锁版本号',\n" +
+                "  PRIMARY KEY (`id`),\n" +
+                "  UNIQUE KEY `uk_user_role` (`user_id`, `role_id`),\n" +
+                "  KEY `idx_sys_user_role_role` (`role_id`)\n" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户-角色关系';");
+
+        createTableIfMissing("sys_user_resource",
+                "CREATE TABLE `sys_user_resource` (\n" +
+                "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
+                "  `user_id` bigint NOT NULL,\n" +
+                "  `resource_id` bigint NOT NULL,\n" +
+                "  `actions_json` json DEFAULT NULL COMMENT '按钮/动作集合(JSON 数组)',\n" +
+                "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n" +
+                "  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',\n" +
+                "  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',\n" +
+                "  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',\n" +
+                "  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',\n" +
+                "  `version` int DEFAULT '0' COMMENT '乐观锁版本号',\n" +
+                "  PRIMARY KEY (`id`),\n" +
+                "  UNIQUE KEY `uk_user_resource` (`user_id`, `resource_id`),\n" +
+                "  KEY `idx_sys_user_resource_user` (`user_id`),\n" +
+                "  KEY `idx_sys_user_resource_resource` (`resource_id`)\n" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户-资源个性授权';");
+
+        createTableIfMissing("resource_snapshot",
+                "CREATE TABLE `resource_snapshot` (\n" +
+                "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
+                "  `workflow_id` bigint NOT NULL COMMENT '审批流程ID',\n" +
+                "  `before_json` json DEFAULT NULL COMMENT '变更前快照',\n" +
+                "  `after_json` json DEFAULT NULL COMMENT '变更后拟态',\n" +
+                "  `actor_id` bigint DEFAULT NULL COMMENT '发起人',\n" +
+                "  `reason` varchar(255) DEFAULT NULL COMMENT '原因',\n" +
+                "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',\n" +
+                "  PRIMARY KEY (`id`),\n" +
+                "  UNIQUE KEY `uk_snapshot_workflow` (`workflow_id`)\n" +
+                ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='资源授权变更快照';");
+
+        addColumnIfMissing("sys_user", "permission_version",
+                "ALTER TABLE sys_user ADD COLUMN `permission_version` int DEFAULT '0' COMMENT '权限版本'");
+
+        addBaseEntityColumnsIfMissing("sys_resource");
+        addBaseEntityColumnsIfMissing("sys_role");
+        addBaseEntityColumnsIfMissing("sys_role_resource");
+        addBaseEntityColumnsIfMissing("sys_user_resource");
+
+        addColumnIfMissing("sys_role", "role_type",
+                "ALTER TABLE sys_role ADD COLUMN `role_type` varchar(20) DEFAULT 'CUSTOM' COMMENT '角色类型: SYSTEM/BUSINESS/CUSTOM'");
+        addColumnIfMissing("sys_role", "sort_order",
+                "ALTER TABLE sys_role ADD COLUMN `sort_order` int DEFAULT '0' COMMENT '排序号'");
+        addColumnIfMissing("sys_role", "is_editable",
+                "ALTER TABLE sys_role ADD COLUMN `is_editable` tinyint(1) DEFAULT '1' COMMENT '是否可编辑'");
+        addColumnIfMissing("sys_role", "icon",
+                "ALTER TABLE sys_role ADD COLUMN `icon` varchar(100) DEFAULT NULL COMMENT '角色图标'");
+        addColumnIfMissing("sys_role", "remarks",
+                "ALTER TABLE sys_role ADD COLUMN `remarks` varchar(500) DEFAULT NULL COMMENT '备注'");
+
+        addColumnIfMissing("sys_user_role", "id",
+                "ALTER TABLE sys_user_role ADD COLUMN `id` bigint NOT NULL AUTO_INCREMENT PRIMARY KEY COMMENT '主键ID'");
+        addColumnIfMissing("sys_user_role", "granted_by",
+                "ALTER TABLE sys_user_role ADD COLUMN `granted_by` bigint DEFAULT NULL COMMENT '授权人ID'");
+        addColumnIfMissing("sys_user_role", "granted_at",
+                "ALTER TABLE sys_user_role ADD COLUMN `granted_at` datetime DEFAULT NULL COMMENT '授权时间'");
+        addColumnIfMissing("sys_user_role", "expires_at",
+                "ALTER TABLE sys_user_role ADD COLUMN `expires_at` datetime DEFAULT NULL COMMENT '过期时间'");
+        addColumnIfMissing("sys_user_role", "remarks",
+                "ALTER TABLE sys_user_role ADD COLUMN `remarks` varchar(500) DEFAULT NULL COMMENT '备注'");
+        addColumnIfMissing("sys_user_role", "delete_by",
+                "ALTER TABLE sys_user_role ADD COLUMN `delete_by` varchar(50) DEFAULT NULL COMMENT '删除人'");
+        addColumnIfMissing("sys_user_role", "delete_time",
+                "ALTER TABLE sys_user_role ADD COLUMN `delete_time` datetime DEFAULT NULL COMMENT '删除时间'");
+        addBaseEntityColumnsIfMissing("sys_user_role");
+
+        addIndexIfMissing("sys_resource", "uk_resource_code",
+                "CREATE UNIQUE INDEX `uk_resource_code` ON `sys_resource` (`code`)");
+        addIndexIfMissing("sys_role", "uk_role_code",
+                "CREATE UNIQUE INDEX `uk_role_code` ON `sys_role` (`code`)");
+        addIndexIfMissing("sys_role_resource", "uk_role_resource",
+                "CREATE UNIQUE INDEX `uk_role_resource` ON `sys_role_resource` (`role_id`, `resource_id`)");
+        addIndexIfMissing("sys_user_resource", "uk_user_resource",
+                "CREATE UNIQUE INDEX `uk_user_resource` ON `sys_user_resource` (`user_id`, `resource_id`)");
+        addIndexIfMissing("sys_user_role", "uk_user_role",
+                "CREATE UNIQUE INDEX `uk_user_role` ON `sys_user_role` (`user_id`, `role_id`)");
+        addIndexIfMissing("sys_user_role", "idx_sys_user_role_role",
+                "CREATE INDEX `idx_sys_user_role_role` ON `sys_user_role` (`role_id`)");
+
+        executeSqlSafely("UPDATE sys_user SET permission_version = 0 WHERE permission_version IS NULL");
+        executeSqlSafely("UPDATE sys_resource SET deleted = 0 WHERE deleted IS NULL");
+        executeSqlSafely("UPDATE sys_role SET deleted = 0 WHERE deleted IS NULL");
+        executeSqlSafely("UPDATE sys_role_resource SET deleted = 0 WHERE deleted IS NULL");
+        executeSqlSafely("UPDATE sys_user_role SET deleted = 0 WHERE deleted IS NULL");
+        executeSqlSafely("UPDATE sys_user_resource SET deleted = 0 WHERE deleted IS NULL");
+
+        seedRbacRolesAndUserAssignments();
+    }
+
+    private void addBaseEntityColumnsIfMissing(String table) {
+        String quotedTable = "`" + table + "`";
+        addColumnIfMissing(table, "create_time",
+                "ALTER TABLE " + quotedTable + " ADD COLUMN `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间'");
+        addColumnIfMissing(table, "update_time",
+                "ALTER TABLE " + quotedTable + " ADD COLUMN `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间'");
+        addColumnIfMissing(table, "create_by",
+                "ALTER TABLE " + quotedTable + " ADD COLUMN `create_by` varchar(50) DEFAULT NULL COMMENT '创建人'");
+        addColumnIfMissing(table, "update_by",
+                "ALTER TABLE " + quotedTable + " ADD COLUMN `update_by` varchar(50) DEFAULT NULL COMMENT '更新人'");
+        addColumnIfMissing(table, "deleted",
+                "ALTER TABLE " + quotedTable + " ADD COLUMN `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除'");
+        addColumnIfMissing(table, "version",
+                "ALTER TABLE " + quotedTable + " ADD COLUMN `version` int DEFAULT '0' COMMENT '乐观锁版本号'");
+    }
+
+    private void seedRbacRolesAndUserAssignments() {
+        executeSqlSafely("""
+                INSERT INTO sys_role (code, name, description, role_type, sort_order, is_editable, icon, status, create_by)
+                SELECT 'ADMIN', '系统管理员', '拥有所有系统权限', 'SYSTEM', 1, 0, 'crown', 'enabled', 'system'
+                WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code = 'ADMIN')
+                """);
+        executeSqlSafely("""
+                INSERT INTO sys_role (code, name, description, role_type, sort_order, is_editable, icon, status, create_by)
+                SELECT 'MANAGER', '部门经理', '部门管理和审批权限', 'BUSINESS', 2, 1, 'team', 'enabled', 'system'
+                WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code = 'MANAGER')
+                """);
+        executeSqlSafely("""
+                INSERT INTO sys_role (code, name, description, role_type, sort_order, is_editable, icon, status, create_by)
+                SELECT 'FINANCE', '财务人员', '薪酬管理和支付权限', 'BUSINESS', 3, 1, 'wallet', 'enabled', 'system'
+                WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code = 'FINANCE')
+                """);
+        executeSqlSafely("""
+                INSERT INTO sys_role (code, name, description, role_type, sort_order, is_editable, icon, status, create_by)
+                SELECT 'HR', '人力资源', '员工管理权限', 'BUSINESS', 4, 1, 'user', 'enabled', 'system'
+                WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code = 'HR')
+                """);
+        executeSqlSafely("""
+                INSERT INTO sys_role (code, name, description, role_type, sort_order, is_editable, icon, status, create_by)
+                SELECT 'EMPLOYEE', '普通员工', '个人工资条查看权限', 'BUSINESS', 5, 1, 'contacts', 'enabled', 'system'
+                WHERE NOT EXISTS (SELECT 1 FROM sys_role WHERE code = 'EMPLOYEE')
+                """);
+
+        executeSqlSafely("""
+                INSERT INTO sys_user_role (user_id, role_id, granted_by, granted_at, deleted, create_time, create_by)
+                SELECT u.id, r.id, 1, NOW(), 0, NOW(), 'system_migration'
+                FROM sys_user u
+                JOIN sys_role r ON r.code = 'ADMIN' AND r.status = 'enabled'
+                WHERE u.roles IS NOT NULL
+                  AND (
+                      REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,ROLE_ADMIN,%'
+                      OR REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,ADMIN,%'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sys_user_role ur
+                      WHERE ur.user_id = u.id AND ur.role_id = r.id AND ur.deleted = 0
+                  )
+                """);
+        executeSqlSafely("""
+                INSERT INTO sys_user_role (user_id, role_id, granted_by, granted_at, deleted, create_time, create_by)
+                SELECT u.id, r.id, 1, NOW(), 0, NOW(), 'system_migration'
+                FROM sys_user u
+                JOIN sys_role r ON r.code = 'MANAGER' AND r.status = 'enabled'
+                WHERE u.roles IS NOT NULL
+                  AND (
+                      REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,ROLE_MANAGER,%'
+                      OR REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,MANAGER,%'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sys_user_role ur
+                      WHERE ur.user_id = u.id AND ur.role_id = r.id AND ur.deleted = 0
+                  )
+                """);
+        executeSqlSafely("""
+                INSERT INTO sys_user_role (user_id, role_id, granted_by, granted_at, deleted, create_time, create_by)
+                SELECT u.id, r.id, 1, NOW(), 0, NOW(), 'system_migration'
+                FROM sys_user u
+                JOIN sys_role r ON r.code = 'FINANCE' AND r.status = 'enabled'
+                WHERE u.roles IS NOT NULL
+                  AND (
+                      REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,ROLE_FINANCE,%'
+                      OR REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,FINANCE,%'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sys_user_role ur
+                      WHERE ur.user_id = u.id AND ur.role_id = r.id AND ur.deleted = 0
+                  )
+                """);
+        executeSqlSafely("""
+                INSERT INTO sys_user_role (user_id, role_id, granted_by, granted_at, deleted, create_time, create_by)
+                SELECT u.id, r.id, 1, NOW(), 0, NOW(), 'system_migration'
+                FROM sys_user u
+                JOIN sys_role r ON r.code = 'HR' AND r.status = 'enabled'
+                WHERE u.roles IS NOT NULL
+                  AND (
+                      REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,ROLE_HR,%'
+                      OR REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,HR,%'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sys_user_role ur
+                      WHERE ur.user_id = u.id AND ur.role_id = r.id AND ur.deleted = 0
+                  )
+                """);
+        executeSqlSafely("""
+                INSERT INTO sys_user_role (user_id, role_id, granted_by, granted_at, deleted, create_time, create_by)
+                SELECT u.id, r.id, 1, NOW(), 0, NOW(), 'system_migration'
+                FROM sys_user u
+                JOIN sys_role r ON r.code = 'EMPLOYEE' AND r.status = 'enabled'
+                WHERE u.roles IS NOT NULL
+                  AND (
+                      REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,ROLE_EMPLOYEE,%'
+                      OR REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,EMPLOYEE,%'
+                      OR REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,ROLE_USER,%'
+                      OR REPLACE(CONCAT(',', u.roles, ','), ' ', '') LIKE '%,USER,%'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sys_user_role ur
+                      WHERE ur.user_id = u.id AND ur.role_id = r.id AND ur.deleted = 0
+                  )
+                """);
+
+        executeSqlSafely("""
+                INSERT INTO sys_role_resource (role_id, resource_id, actions_json, create_time, create_by)
+                SELECT r.id, res.id, '["*"]', NOW(), 'system_migration'
+                FROM sys_role r
+                JOIN sys_resource res ON res.status = 'enabled'
+                WHERE r.code = 'ADMIN'
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sys_role_resource rr
+                      WHERE rr.role_id = r.id AND rr.resource_id = res.id AND rr.deleted = 0
+                  )
+                """);
+    }
+
     private void migratePaymentRecordProviderColumns() {
         addColumnIfMissing("payment_record", "provider_code",
                 "ALTER TABLE payment_record ADD COLUMN `provider_code` varchar(32) NOT NULL DEFAULT 'alipay' " +
@@ -705,6 +1021,33 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资对账任务';
                 """);
 
+        createTableIfMissing("payroll_payment_failure", """
+                CREATE TABLE `payroll_payment_failure` (
+                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                  `workflow_id` bigint NOT NULL COMMENT '审批工作流ID',
+                  `payroll_batch_id` bigint DEFAULT NULL COMMENT '薪资批次ID',
+                  `business_key` varchar(100) DEFAULT NULL COMMENT '审批业务Key',
+                  `error_message` varchar(1000) DEFAULT NULL COMMENT '最近失败原因',
+                  `status` varchar(20) NOT NULL DEFAULT 'unresolved' COMMENT 'unresolved/retrying/resolved',
+                  `retry_count` int NOT NULL DEFAULT 0 COMMENT '重试次数',
+                  `last_failed_time` datetime DEFAULT NULL COMMENT '最近失败时间',
+                  `last_retry_time` datetime DEFAULT NULL COMMENT '最近重试时间',
+                  `resolved_time` datetime DEFAULT NULL COMMENT '解决时间',
+                  `payment_batch_no` varchar(64) DEFAULT NULL COMMENT '关联支付批次号',
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+                  `create_by` varchar(50) DEFAULT NULL COMMENT '创建人',
+                  `update_by` varchar(50) DEFAULT NULL COMMENT '更新人',
+                  `deleted` tinyint(1) DEFAULT '0' COMMENT '逻辑删除',
+                  `version` int DEFAULT '0' COMMENT '乐观锁版本号',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_workflow` (`workflow_id`),
+                  KEY `idx_status_failed_time` (`status`,`last_failed_time`),
+                  KEY `idx_payroll_batch` (`payroll_batch_id`),
+                  KEY `idx_payment_batch_no` (`payment_batch_no`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资审批后置支付失败补偿表';
+                """);
+
         addColumnIfMissing("payment_batch", "distribution_id",
                 "ALTER TABLE payment_batch ADD COLUMN `distribution_id` bigint DEFAULT NULL COMMENT '关联发放单ID' AFTER `status`");
         addColumnIfMissing("payment_batch", "payment_status",
@@ -733,7 +1076,8 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
     private void addColumnIfMissing(String table, String column, String ddl) {
         try {
             Integer cnt = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS " +
+                            "WHERE TABLE_SCHEMA = SCHEMA() AND TABLE_NAME = ? AND COLUMN_NAME = ?",
                     Integer.class, table, column);
             if (cnt == null || cnt == 0) {
                 log.info("Adding column {}.{} via: {}", table, column, ddl);
@@ -748,11 +1092,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
 
     private void addIndexIfMissing(String table, String index, String ddl) {
         try {
-            Integer cnt = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM information_schema.STATISTICS WHERE TABLE_SCHEMA = DATABASE() " +
-                            "AND TABLE_NAME = ? AND INDEX_NAME = ?",
-                    Integer.class, table, index);
-            if (cnt == null || cnt == 0) {
+            if (!indexExists(table, index)) {
                 log.info("Adding index {}.{} via: {}", table, index, ddl);
                 jdbcTemplate.execute(ddl);
             } else {
@@ -761,6 +1101,25 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         } catch (Exception e) {
             log.warn("Failed adding index {}.{}: {}", table, index, e.getMessage());
         }
+    }
+
+    private boolean indexExists(String table, String index) {
+        return Boolean.TRUE.equals(jdbcTemplate.execute((ConnectionCallback<Boolean>) connection -> {
+            try (ResultSet resultSet = connection.getMetaData().getIndexInfo(
+                    connection.getCatalog(),
+                    connection.getSchema(),
+                    table,
+                    false,
+                    false)) {
+                while (resultSet.next()) {
+                    String indexName = resultSet.getString("INDEX_NAME");
+                    if (index.equalsIgnoreCase(indexName)) {
+                        return true;
+                    }
+                }
+                return false;
+            }
+        }));
     }
 
     private void executeSqlSafely(String sql) {
@@ -775,7 +1134,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
     private void createTableIfMissing(String table, String ddl) {
         try {
             Integer cnt = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?",
+                    "SELECT COUNT(*) FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = SCHEMA() AND TABLE_NAME = ?",
                     Integer.class, table);
             if (cnt == null || cnt == 0) {
                 log.info("Creating table {} via DDL", table);

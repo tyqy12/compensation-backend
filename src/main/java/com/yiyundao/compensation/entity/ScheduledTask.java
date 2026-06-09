@@ -2,6 +2,7 @@ package com.yiyundao.compensation.entity;
 
 import com.baomidou.mybatisplus.annotation.*;
 import lombok.Data;
+import lombok.Getter;
 
 import java.time.LocalDateTime;
 
@@ -67,10 +68,18 @@ public class ScheduledTask {
     @TableField("deleted")
     private Integer deleted;
 
+    @Getter
     public enum TaskStatus {
-        PAUSED,
-        RUNNING,
-        FAILED,
-        SUCCESS
+        PAUSED(0),
+        RUNNING(1),
+        FAILED(2),
+        SUCCESS(3);
+
+        @EnumValue
+        private final int code;
+
+        TaskStatus(int code) {
+            this.code = code;
+        }
     }
 }

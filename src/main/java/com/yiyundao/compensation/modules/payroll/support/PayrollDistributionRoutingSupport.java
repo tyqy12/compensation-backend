@@ -1,9 +1,11 @@
 package com.yiyundao.compensation.modules.payroll.support;
 
 import com.yiyundao.compensation.common.utils.ValidationUtils;
+import com.yiyundao.compensation.common.utils.SettlementAccountPlaintextGuard;
 import com.yiyundao.compensation.enums.EmploymentType;
 import com.yiyundao.compensation.enums.SettlementAccountType;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.payment.support.SettlementRouteProviderResolver;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.service.EncryptionService;
@@ -30,19 +32,30 @@ public class PayrollDistributionRoutingSupport {
         }
 
         String settlementType = normalizeSettlementType(employee.getSettlementAccountType());
-        String settlementAccount = decryptAccount(employee.getSettlementAccount());
-        String bankAccount = decryptAccount(employee.getBankAccount());
+        AccountResolution settlementAccountResult = decryptAccount(employee.getSettlementAccount());
+        if (settlementAccountResult.decryptFailed()) {
+            return RouteSnapshot.failed("收款账号解密失败，请重新维护收款信息");
+        }
+        String settlementAccount = settlementAccountResult.value();
+        boolean hasConfiguredAccount = settlementAccountResult.configured();
 
-        if (!StringUtils.hasText(settlementAccount) && StringUtils.hasText(bankAccount)) {
-            settlementAccount = bankAccount;
-            if (!StringUtils.hasText(settlementType)) {
-                settlementType = SettlementAccountType.BANK_CARD.getCode();
+        if (!StringUtils.hasText(settlementAccount)) {
+            AccountResolution bankAccountResult = decryptAccount(employee.getBankAccount());
+            if (bankAccountResult.decryptFailed()) {
+                return RouteSnapshot.failed("收款账号解密失败，请重新维护收款信息");
+            }
+            hasConfiguredAccount = hasConfiguredAccount || bankAccountResult.configured();
+            if (StringUtils.hasText(bankAccountResult.value())) {
+                settlementAccount = bankAccountResult.value();
+                if (!StringUtils.hasText(settlementType)) {
+                    settlementType = SettlementAccountType.BANK_CARD.getCode();
+                }
             }
         }
         if (!StringUtils.hasText(settlementType) && StringUtils.hasText(settlementAccount)) {
             settlementType = inferSettlementType(settlementAccount);
         }
-        if (!StringUtils.hasText(settlementAccount)) {
+        if (!StringUtils.hasText(settlementAccount) && !hasConfiguredAccount) {
             String fallback = resolveFallbackAlipayAccount(employee);
             if (StringUtils.hasText(fallback)) {
                 settlementAccount = fallback;
@@ -67,10 +80,7 @@ public class PayrollDistributionRoutingSupport {
                     && !SettlementAccountType.BANK_CARD.getCode().equals(accountType)) {
                 return RouteSnapshot.failed("全职用工仅支持支付宝或银行卡收款账户");
             }
-            providerCode = normalizeProviderCode(employee.getSettlementProviderCode());
-            if (!StringUtils.hasText(providerCode)) {
-                providerCode = "alipay";
-            }
+            providerCode = SettlementRouteProviderResolver.resolveFullTimeProvider(accountType, employee, batch);
         } else {
             return RouteSnapshot.failed("不支持的用工类型: " + employmentType);
         }
@@ -161,15 +171,24 @@ public class PayrollDistributionRoutingSupport {
         };
     }
 
-    private String decryptAccount(String encryptedValue) {
+    private AccountResolution decryptAccount(String encryptedValue) {
         if (!StringUtils.hasText(encryptedValue)) {
-            return null;
+            return AccountResolution.missing();
         }
         try {
-            return encryptionService.decrypt(encryptedValue);
+            String plainAccount = encryptionService.decrypt(encryptedValue);
+            if (StringUtils.hasText(plainAccount)) {
+                return AccountResolution.resolved(plainAccount.trim());
+            }
+            log.warn("解密收款账户结果为空，阻断发放路由");
+            return AccountResolution.failed();
         } catch (Exception ex) {
-            log.warn("解密收款账户失败，按明文兜底处理: {}", ex.getMessage());
-            return encryptedValue;
+            if (SettlementAccountPlaintextGuard.isRecognizedPlainAccount(encryptedValue)) {
+                log.warn("解密收款账户失败，按历史明文账号兼容处理: {}", ex.getMessage());
+                return AccountResolution.resolved(encryptedValue.trim());
+            }
+            log.warn("解密收款账户失败，且原始值不像合法明文账号，阻断发放路由: {}", ex.getMessage());
+            return AccountResolution.failed();
         }
     }
 
@@ -178,10 +197,6 @@ public class PayrollDistributionRoutingSupport {
             return null;
         }
         return encryptionService.encrypt(plainAccount.trim());
-    }
-
-    private String normalizeProviderCode(String providerCode) {
-        return StringUtils.hasText(providerCode) ? providerCode.trim().toLowerCase() : null;
     }
 
     private String maskRecipientAccount(String account, String paymentMethod) {
@@ -238,6 +253,20 @@ public class PayrollDistributionRoutingSupport {
 
         public static RouteSnapshot failed(String failureReason) {
             return new RouteSnapshot(false, null, null, null, null, null, null, null, failureReason);
+        }
+    }
+
+    private record AccountResolution(String value, boolean configured, boolean decryptFailed) {
+        private static AccountResolution missing() {
+            return new AccountResolution(null, false, false);
+        }
+
+        private static AccountResolution resolved(String value) {
+            return new AccountResolution(value, true, false);
+        }
+
+        private static AccountResolution failed() {
+            return new AccountResolution(null, true, true);
         }
     }
 }

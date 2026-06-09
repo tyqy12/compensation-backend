@@ -26,13 +26,4 @@ public class ApprovalWorkflowDetailVO extends ApprovalWorkflowVO {
      */
     private Map<String, Object> businessInfo;
 
-    /**
-     * 发起人信息
-     */
-    private String initiatorName;
-
-    /**
-     * 当前审批人信息
-     */
-    private String currentApproverName;
 }

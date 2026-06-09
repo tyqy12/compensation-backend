@@ -46,6 +46,7 @@ import {
   calculateBatchProgress,
   calculateBatchSuccessRate,
 } from '@services/queries/paymentBatch';
+import { toMessage, withActionPrefix } from '@utils/error';
 import dayjs from 'dayjs';
 
 const { Text } = Typography;
@@ -105,7 +106,7 @@ const BatchDetail: React.FC = () => {
           // 刷新批次详情以更新统计数据
           batchQuery.refetch();
         } catch (error: any) {
-          message.error(`重试失败：${error.message || '网络错误'}`);
+          message.error(withActionPrefix('重试失败', error));
         }
       },
     });
@@ -135,19 +136,22 @@ const BatchDetail: React.FC = () => {
       ),
       icon: <ExclamationCircleOutlined />,
       onOk: async () => {
-        try {
-          // 并发重试所有失败的记录
-          const retryPromises = failedRecords.map(record =>
-            retryMutation.mutateAsync(record.id)
-          );
-          await Promise.allSettled(retryPromises);
+        // 并发重试所有失败的记录，保留每笔业务失败原因用于提示。
+        const results = await Promise.allSettled(
+          failedRecords.map(record => retryMutation.mutateAsync(record.id)),
+        );
+        const rejectedResults = results.filter(
+          (result): result is PromiseRejectedResult => result.status === 'rejected',
+        );
 
+        if (rejectedResults.length === 0) {
           message.success('批量重试已完成');
-          actionRef.current?.reload();
-          batchQuery.refetch();
-        } catch (error: any) {
-          message.error(`批量重试失败：${error.message || '网络错误'}`);
+        } else {
+          const firstReason = toMessage(rejectedResults[0].reason);
+          message.error(`批量重试完成，${rejectedResults.length} 笔失败：${firstReason}`);
         }
+        actionRef.current?.reload();
+        batchQuery.refetch();
       },
     });
   };
@@ -432,7 +436,7 @@ const BatchDetail: React.FC = () => {
           <ExclamationCircleOutlined style={{ fontSize: 48, color: '#ff4d4f', marginBottom: 16 }} />
           <div style={{ fontSize: 16, marginBottom: 8 }}>批次加载失败</div>
           <div style={{ color: '#8c8c8c', marginBottom: 16 }}>
-            {batchQuery.error?.message || '网络错误，请检查网络连接'}
+            {toMessage(batchQuery.error) || '网络错误，请检查网络连接'}
           </div>
           <Space>
             <Button
@@ -686,7 +690,7 @@ const BatchDetail: React.FC = () => {
                 <ExclamationCircleOutlined style={{ fontSize: 48, color: '#ff4d4f', marginBottom: 16 }} />
                 <div style={{ fontSize: 16, marginBottom: 8 }}>数据加载失败</div>
                 <div style={{ color: '#8c8c8c', marginBottom: 16 }}>
-                  {recordsQuery.error?.message || '网络错误，请检查网络连接'}
+                  {toMessage(recordsQuery.error) || '网络错误，请检查网络连接'}
                 </div>
                 <Button
                   type="primary"

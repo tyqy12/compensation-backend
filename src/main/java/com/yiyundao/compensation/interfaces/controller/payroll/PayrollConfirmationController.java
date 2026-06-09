@@ -55,6 +55,7 @@ public class PayrollConfirmationController {
     }
 
     @PostMapping("/batches/{batchId}/assign")
+    @SecurityAnnotations.IsFinanceOrAdmin
     public ApiResponse<Map<String, Object>> assign(@PathVariable Long batchId,
                                                    @Valid @RequestBody PayrollConfirmationAssignRequest request) {
         int affected = payrollConfirmationService.assignConfirmationAssignee(batchId, currentUser(), request);
@@ -69,6 +70,7 @@ public class PayrollConfirmationController {
     }
 
     @GetMapping("/batches/{batchId}/summary")
+    @SecurityAnnotations.IsFinanceOrHrOrAdmin
     public ApiResponse<PayrollConfirmationSummaryDto> summary(@PathVariable Long batchId) {
         return ApiResponse.success(payrollConfirmationService.getBatchSummary(batchId));
     }

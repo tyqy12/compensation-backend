@@ -143,29 +143,18 @@ public class OrganizationSyncService {
      */
     public com.yiyundao.compensation.modules.employee.entity.Employee importOne(com.yiyundao.compensation.modules.employee.entity.Employee employee, String preferredUsername) {
         com.yiyundao.compensation.modules.employee.entity.Employee target = null;
-        if (employee.getSubjectId() != null && employee.getProvider() != null) {
-            try {
-                com.yiyundao.compensation.modules.employee.entity.Employee exist =
-                        employeeService.getByProviderAndSubjectId(employee.getProvider(), employee.getSubjectId());
-                if (exist != null) {
-                    // 更新已有记录
-                    com.yiyundao.compensation.modules.employee.entity.Employee update = new com.yiyundao.compensation.modules.employee.entity.Employee();
-                    update.setName(employee.getName());
-                    update.setPhone(employee.getPhone());
-                    update.setEmail(employee.getEmail());
-                    update.setDepartment(employee.getDepartment());
-                    update.setPosition(employee.getPosition());
-                    update.setEmploymentType(employee.getEmploymentType());
-                    update.setStatus(employee.getStatus());
-                    update.setOffline(employee.getOffline());
-                    update.setManagerId(employee.getManagerId());
-                    update.setBankAccount(employee.getBankAccount());
-                    update.setBankName(employee.getBankName());
-                    update.setHireDate(employee.getHireDate());
-                    EmployeeVO updatedVo = employeeService.updateEmployee(exist.getId(), update);
-                    target = employeeService.getById(updatedVo.getId());
-                }
-            } catch (Exception ignored) {}
+        com.yiyundao.compensation.modules.employee.entity.Employee exist = null;
+        if (hasPlatformIdentity(employee)) {
+            exist = employeeService.getByProviderAndSubjectId(employee.getProvider(), employee.getSubjectId());
+        }
+        if (exist == null && hasText(employee.getEmployeeId())) {
+            exist = employeeService.getByEmployeeId(employee.getEmployeeId());
+        }
+        if (exist != null) {
+            // 更新已有记录
+            com.yiyundao.compensation.modules.employee.entity.Employee update = buildImportUpdate(employee);
+            EmployeeVO updatedVo = employeeService.updateEmployee(exist.getId(), update);
+            target = employeeService.getById(updatedVo.getId());
         }
         if (target == null) {
             EmployeeVO createdVo = employeeService.createEmployee(employee);
@@ -175,11 +164,40 @@ public class OrganizationSyncService {
         return target;
     }
 
+    private boolean hasPlatformIdentity(com.yiyundao.compensation.modules.employee.entity.Employee employee) {
+        return employee != null && hasText(employee.getProvider()) && hasText(employee.getSubjectId());
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
+    }
+
+    private com.yiyundao.compensation.modules.employee.entity.Employee buildImportUpdate(
+            com.yiyundao.compensation.modules.employee.entity.Employee employee) {
+        com.yiyundao.compensation.modules.employee.entity.Employee update = new com.yiyundao.compensation.modules.employee.entity.Employee();
+        update.setName(employee.getName());
+        update.setPhone(employee.getPhone());
+        update.setEmail(employee.getEmail());
+        update.setDepartment(employee.getDepartment());
+        update.setPosition(employee.getPosition());
+        update.setEmploymentType(employee.getEmploymentType());
+        update.setStatus(employee.getStatus());
+        update.setOffline(employee.getOffline());
+        update.setManagerId(employee.getManagerId());
+        update.setBankAccount(employee.getBankAccount());
+        update.setBankName(employee.getBankName());
+        update.setHireDate(employee.getHireDate());
+        update.setProvider(employee.getProvider());
+        update.setSubjectId(employee.getSubjectId());
+        return update;
+    }
+
     /**
      * 发送平台通知
      */
     public void sendNotification(String provider, String subjectId, String message) {
-        OrganizationAdapter adapter = adapters.get(provider);
+        String normalizedProvider = normalizeProvider(provider);
+        OrganizationAdapter adapter = adapters.get(normalizedProvider);
         if (adapter == null) {
             log.warn("未找到平台适配器: {}，使用回退通知", provider);
             notificationService.sendFallbackNotification(provider, subjectId, message);
@@ -190,16 +208,30 @@ public class OrganizationSyncService {
             try {
                 adapter.sendApprovalNotification(subjectId, message);
                 if (i > 1) {
-                    log.info("通知重试第{}次成功: provider={}, subjectId={}", i - 1, provider, subjectId);
+                    log.info("通知重试第{}次成功: provider={}, subjectId={}", i - 1, normalizedProvider, subjectId);
                 }
                 return;
             } catch (Exception e) {
                 last = e;
-                log.warn("发送平台通知失败(第{}次): provider={}, subjectId={}, err={}", i, provider, subjectId, e.getMessage());
+                log.warn("发送平台通知失败(第{}次): provider={}, subjectId={}, err={}",
+                        i, normalizedProvider, subjectId, e.getMessage());
                 try { Thread.sleep(Math.max(0, notifyBackoffMs)); } catch (InterruptedException ignored) { Thread.currentThread().interrupt(); }
             }
         }
-        log.error("通知重试耗尽，使用回退策略: provider={}, subjectId={}", provider, subjectId, last);
+        log.error("通知重试耗尽，使用回退策略: provider={}, subjectId={}", normalizedProvider, subjectId, last);
         notificationService.sendFallbackNotification(provider, subjectId, message);
+    }
+
+    private String normalizeProvider(String provider) {
+        if (provider == null || provider.isBlank()) {
+            return null;
+        }
+        String value = provider.trim().toLowerCase();
+        return switch (value) {
+            case "wechat", "wecom", "qywx", "wx" -> "wechat";
+            case "dingtalk", "dingding", "dd" -> "dingtalk";
+            case "feishu", "lark" -> "feishu";
+            default -> value;
+        };
     }
 }

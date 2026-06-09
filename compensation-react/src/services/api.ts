@@ -1,6 +1,7 @@
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosError } from 'axios';
 import { toMessage } from '@utils/error';
 import { notifyApiError } from '@services/errors';
+import { redirectToLogin } from '@services/navigation';
 
 // Base URL: dev 环境默认走 Vite 代理 '/api'，生产从环境变量读取
 const ENV = (import.meta as any)?.env || {};
@@ -42,6 +43,15 @@ export const setCurrentPath = (path: string) => {
   } catch {}
 };
 
+function isAuthEndpoint(config?: AxiosRequestConfig) {
+  const url = config?.url ?? '';
+  return [
+    '/auth/login',
+    '/auth/refresh',
+    '/auth/oauth/callback',
+  ].some((path) => url.includes(path));
+}
+
 // Attach Authorization header from store/localStorage
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('auth_token');
@@ -58,17 +68,25 @@ api.interceptors.response.use(
   async (error: AxiosError) => {
     const status = error.response?.status;
     if (status === 401) {
+      if (isAuthEndpoint(error.config)) {
+        return Promise.reject(error);
+      }
       try {
         localStorage.removeItem('auth_token');
         localStorage.removeItem('auth');
       } catch {}
-      // 通知 UI 显示提示
-      notifyApiError({ status, message: '登录已过期，请重新登录', error, config: error.config });
-      // 跳转到登录页（避免重复跳转）
-      const currentPath = getCurrentPath();
-      if (currentPath !== '/login') {
-        sessionStorage.setItem('auth_redirect', currentPath);
-        window.location.href = '/login';
+      const handledByUi = notifyApiError({
+        status,
+        message: '登录已过期，请重新登录',
+        error,
+        config: error.config,
+      });
+      if (!handledByUi) {
+        const currentPath = getCurrentPath();
+        if (currentPath !== '/login') {
+          sessionStorage.setItem('auth_redirect', currentPath);
+          redirectToLogin();
+        }
       }
       return Promise.reject(error);
     }

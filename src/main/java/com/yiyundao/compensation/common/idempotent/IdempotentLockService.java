@@ -5,6 +5,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.Expression;
 import org.springframework.expression.ExpressionParser;
+import org.springframework.expression.ExpressionException;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.StandardEvaluationContext;
 import org.springframework.stereotype.Component;
@@ -29,6 +30,8 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 @ConditionalOnBean(IdempotentLockService.RedisLockService.class)
 public class IdempotentLockService {
+
+    static final String DEFAULT_LOCK_PREFIX = "idempotent:";
 
     private final RedisLockService redisLockService;
     private final ExpressionParser expressionParser = new SpelExpressionParser();
@@ -90,12 +93,19 @@ public class IdempotentLockService {
             throw new IllegalArgumentException("幂等键不能为空");
         }
 
-        // 检查是否是 SpEL 表达式
-        if (keyExpression.startsWith("#")) {
+        if (isSpelExpression(keyExpression)) {
             return parseSpelExpression(keyExpression, args, result);
         }
 
         return keyExpression;
+    }
+
+    private boolean isSpelExpression(String keyExpression) {
+        String expression = keyExpression.trim();
+        return expression.startsWith("#")
+                || expression.contains("#")
+                || expression.startsWith("'")
+                || expression.startsWith("\"");
     }
 
     /**
@@ -132,17 +142,17 @@ public class IdempotentLockService {
             Object value = exp.getValue(context);
             return value != null ? value.toString() : expression;
         } catch (Exception e) {
-            log.warn("解析幂等键表达式失败: {}", expression, e);
-            return expression;
+            log.warn("解析幂等键表达式失败: expression={}, error={}", expression, e.getMessage());
+            throw new ExpressionException("解析幂等键表达式失败: " + expression, e);
         }
     }
 
     /**
      * 构建锁键
      */
-    private String buildLockKey(String key, String lockPrefix) {
+    String buildLockKey(String key, String lockPrefix) {
         if (lockPrefix == null || lockPrefix.isEmpty()) {
-            return "idempotent:" + key;
+            return DEFAULT_LOCK_PREFIX + key;
         }
         return lockPrefix + key;
     }

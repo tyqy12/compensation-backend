@@ -7,7 +7,6 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
-import org.springframework.security.core.authority.AuthorityUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.util.Assert;
 import org.springframework.util.CollectionUtils;
@@ -29,6 +28,7 @@ public class ExternalApiTokenService {
     private static final String ROLE_APP = "ROLE_APP";
 
     private final ExternalApiAuthProperties properties;
+    private final SecretKeyPolicy secretKeyPolicy;
 
     private SecretKey secretKey;
     private long expirationSeconds;
@@ -36,7 +36,7 @@ public class ExternalApiTokenService {
     @PostConstruct
     void init() {
         String secret = properties.getJwt().getSecret();
-        Assert.hasText(secret, "external-api.jwt.secret must be configured");
+        secretKeyPolicy.validateSigningSecret("external-api.jwt.secret", secret);
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
         this.expirationSeconds = Math.max(properties.getJwt().getExpirationSeconds(), 60L);
     }
@@ -52,8 +52,6 @@ public class ExternalApiTokenService {
         Instant now = Instant.now();
         Instant expiry = now.plusSeconds(expirationSeconds);
 
-        String authorities = buildAuthorityString(scopes);
-
         String token = Jwts.builder()
                 .id(UUID.randomUUID().toString())
                 .subject(app.getClientId())
@@ -62,7 +60,6 @@ public class ExternalApiTokenService {
                 .claim("appId", app.getId())
                 .claim("appName", app.getAppName())
                 .claim("scp", scopes)
-                .claim("authorities", authorities)
                 .signWith(secretKey)
                 .compact();
 
@@ -112,15 +109,6 @@ public class ExternalApiTokenService {
         return new ArrayList<>(normalized);
     }
 
-    private String buildAuthorityString(List<String> scopes) {
-        List<String> authorities = new ArrayList<>();
-        authorities.add(ROLE_APP);
-        for (String scope : scopes) {
-            authorities.add("SCOPE_" + scope);
-        }
-        return String.join(",", authorities);
-    }
-
     private Long convertLong(Object value) {
         if (value == null) {
             return null;
@@ -153,13 +141,15 @@ public class ExternalApiTokenService {
         }
 
         public List<org.springframework.security.core.authority.SimpleGrantedAuthority> toAuthorities() {
-            if (authorities == null || authorities.isEmpty()) {
-                return List.of();
+            List<org.springframework.security.core.authority.SimpleGrantedAuthority> grantedAuthorities = new ArrayList<>();
+            grantedAuthorities.add(new org.springframework.security.core.authority.SimpleGrantedAuthority(ROLE_APP));
+            if (scopes != null) {
+                scopes.stream()
+                        .filter(scope -> scope != null && !scope.isBlank())
+                        .map(scope -> new org.springframework.security.core.authority.SimpleGrantedAuthority("SCOPE_" + scope.trim()))
+                        .forEach(grantedAuthorities::add);
             }
-            return AuthorityUtils.commaSeparatedStringToAuthorityList(authorities)
-                    .stream()
-                    .map(auth -> new org.springframework.security.core.authority.SimpleGrantedAuthority(auth.getAuthority()))
-                    .toList();
+            return List.copyOf(grantedAuthorities);
         }
     }
 }

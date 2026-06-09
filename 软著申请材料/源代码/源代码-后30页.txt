@@ -1,1000 +1,1500 @@
-    private String department;
-    private Long managerId;
-    private String keyword;
-    private Integer totalEmployees;
-    private BigDecimal earningsTotal;
-    private BigDecimal deductionsTotal;
-    private BigDecimal grossTotal;
-    private BigDecimal taxTotal;
-    private BigDecimal socialTotal;
-    private BigDecimal netTotal;
-    private Integer linesWithWarnings;
-    private Integer totalWarnings;
-    private List<String> warnings;
-    private List<PayrollPreviewDto.PayrollPreviewLineDto> lines;
-}
-package com.yiyundao.compensation.interfaces.dto.payroll;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-import java.time.LocalDate;
-@Data
-public class PayCycleUpsertRequest {
-    @NotBlank
-    private String type; // monthly/custom
-    @NotBlank
-    private String periodLabel; // YYYY-MM
-    private LocalDate startDate;
-    private LocalDate endDate;
-    private LocalDate cutoffDate;
-    private String status; // open/closed/archived
-}
-package com.yiyundao.compensation.interfaces.dto.payroll;
-import lombok.Data;
-@Data
-public class PayrollBatchUpdateRequest {
-    private Long payCycleId;
-    private String periodLabel;
-    private String scopeJson;
-    private String currency;
-    private String remark;
-}
-package com.yiyundao.compensation.interfaces.dto.payroll;
-import lombok.Data;
-import java.math.BigDecimal;
-import java.util.List;
-@Data
-public class PayrollPreviewDto {
-    private Long batchId;
-    private String currency;
-    private Integer totalEmployees;
-    private Integer linesWithWarnings;
-    private Integer totalWarnings;
-    private List<String> warnings;
-    private BigDecimal earningsTotal;
-    private BigDecimal deductionsTotal;
-    private BigDecimal grossTotal;
-    private BigDecimal taxTotal;
-    private BigDecimal socialTotal;
-    private BigDecimal netTotal;
-    private List<PayrollPreviewLineDto> lines;
-    @Data
-    public static class PayrollPreviewLineDto {
-        private Long employeeId;
-        private String employeeNo;
-        private String employeeName;
-        private List<PayrollPreviewItemDto> items;
-        private BigDecimal earningsTotal;
-        private BigDecimal deductionsTotal;
-        private BigDecimal grossAmount;
-        private BigDecimal taxAmount;
-        private BigDecimal socialAmount;
-        private BigDecimal netAmount;
-        private List<String> warnings; // 缺失项/阈值/异常提示
-        private List<String> missingItems; // 模板要求但缺失的项编码
-        private DiffSummaryDto diff; // 与上期对比
-        private String department;
-        private Long managerId;
-        private String managerName;
-        private String employmentType;
-    }
-    @Data
-    public static class PayrollPreviewItemDto {
-        private String code;
-        private String name;
-        private String type; // earning/deduction
-        private Boolean taxable;
-        private BigDecimal amount;
-    }
-    @Data
-    public static class DiffSummaryDto {
-        private BigDecimal lastGrossAmount;
-        private BigDecimal lastNetAmount;
-        private BigDecimal netDeltaAmount;
-        private BigDecimal netDeltaPercent; // -1.00 ~ +1.00
-    }
-}
-package com.yiyundao.compensation.interfaces.dto.payroll;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-@Data
-public class SalaryTemplateUpsertRequest {
-    @NotBlank
-    private String name;
-    @NotBlank
-    private String type; // full_time / part_time
-    private String itemsJson;
-    private String taxRuleJson;
-    private String status; // enabled/disabled
-}
-package com.yiyundao.compensation.interfaces.dto.payroll;
-import lombok.Data;
-import java.math.BigDecimal;
-import java.util.List;
-@Data
-public class PayrollLedgerDto {
-    private Long batchId;
-    private String status;
-    private String periodLabel;
-    private String currency;
-    private Integer totalEmployees;
-    private BigDecimal earningsTotal;
-    private BigDecimal deductionsTotal;
-    private BigDecimal grossTotal;
-    private BigDecimal taxTotal;
-    private BigDecimal socialTotal;
-    private BigDecimal netTotal;
-    private Integer linesWithWarnings;
-    private Integer totalWarnings;
-    private List<String> warnings;
-    private List<PayrollPreviewDto.PayrollPreviewLineDto> lines;
-}
-package com.yiyundao.compensation.interfaces.dto.payroll;
-import lombok.Data;
-import java.math.BigDecimal;
-import java.util.List;
-@Data
-public class PayrollBasicReportDto {
-    private Long batchId;
-    private String periodLabel;
-    private String currency;
-    private BigDecimal earningsTotal;
-    private BigDecimal deductionsTotal;
-    private BigDecimal grossTotal;
-    private BigDecimal taxTotal;
-    private BigDecimal socialTotal;
-    private BigDecimal netTotal;
-    private Integer employeeCount;
-    private List<DepartmentSummary> departments;
-    @Data
-    public static class DepartmentSummary {
-        private String department;
-        private Integer employeeCount;
-        private BigDecimal earningsTotal;
-        private BigDecimal deductionsTotal;
-        private BigDecimal grossTotal;
-        private BigDecimal taxTotal;
-        private BigDecimal socialTotal;
-        private BigDecimal netTotal;
-    }
-}
-package com.yiyundao.compensation.interfaces.dto.payroll;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-@Data
-public class PayrollBatchCreateRequest {
-    private Long payCycleId;
-    private String periodLabel; // 可冗余传入
-    @NotBlank
-    private String type; // full_time / part_time
-    private String scopeJson; // JSON string
-    private String currency; // 默认 CNY
-    private String remark;
-}
-package com.yiyundao.compensation.interfaces.dto.org;
-import lombok.Data;
-import java.util.List;
-@Data
-public class OrgDeptTreeResponse {
-    private String platformType;
-    private List<OrgDeptNodeDto> roots;
-}
-package com.yiyundao.compensation.interfaces.dto.org;
-import lombok.Data;
-@Data
-public class EmployeePreviewDto {
-    private String platformType;
-    private String platformUserId;
-    private String employeeId;
-    private String name;
-    private String phone;
-    private String email;
-    private String department;
-    private java.util.List<String> departments;
-    private String position;
-    private String employmentType; // full_time/part_time，可编辑
-    private String groupKey;
-}
-package com.yiyundao.compensation.interfaces.dto.org;
-import lombok.Data;
-import java.util.List;
-@Data
-public class OrgFetchPreviewResponse {
-    private String platformType;
-    private int totalEmployees;
-    private List<EmployeePreviewDto> employees;
-}
-package com.yiyundao.compensation.interfaces.dto.org;
-import lombok.Data;
-import java.util.List;
-@Data
-public class OrgImportRequest {
-    private String platformType;
-    private List<OrgImportRequest.EmployeeItem> items;
-    @Data
-    public static class EmployeeItem {
-        private String employeeId;
-        private String name;
-        private String phone;
-        private String email;
-        private java.util.List<String> departments;
-        private String position;
-        private String employmentType; // full_time/part_time
-        private String platformUserId;
-        private String platformType;
-        private String status; // optional
-        private Boolean offline; // optional
-        private Long managerId; // optional
-        private String bankAccount; // optional
-        private String bankName; // optional
-        private java.time.LocalDate hireDate; // optional
-        private String username; // preferred username for system account
-    }
-}
-package com.yiyundao.compensation.interfaces.dto.org;
-import lombok.Data;
-@Data
-public class OrgMemberPreviewDto {
-    private String platformUserId;
-    private String name;
-    private String employeeId; // 预览阶段通常为空，供编辑
-    private String phone;
-    private String email;
-    private String position;
-    private String employmentType; // full_time/part_time，可编辑
-}
-package com.yiyundao.compensation.interfaces.dto.org;
-import lombok.Data;
-import java.util.ArrayList;
-import java.util.List;
-@Data
-public class OrgDeptNodeDto {
-    private String platformDeptId;
-    private String name;
-    private String parentPlatformDeptId;
-    private List<OrgDeptNodeDto> children = new ArrayList<>();
-    private List<OrgMemberPreviewDto> members = new ArrayList<>();
-}
-package com.yiyundao.compensation.interfaces.dto.org;
-import lombok.Data;
-@Data
-public class OrgFetchRequest {
-    private String platform; // wechat|dingtalk|feishu
-}
-package com.yiyundao.compensation.interfaces.dto.admin;
-import lombok.Data;
-import java.time.LocalDateTime;
-@Data
-public class RoleListItemDto {
-    private Long id;
-    private String code;
-    private String name;
-    private String description;
-    private String status;
-    private Integer userCount;
-    private Integer resourceCount;
-    private LocalDateTime createTime;
-    private LocalDateTime updateTime;
-}
-package com.yiyundao.compensation.interfaces.dto.admin;
-import lombok.Data;
-import java.util.List;
-@Data
-public class ResourceDetailDto {
-    private Long id;
-    private String type;       // MENU/VIEW/ACTION/API
-    private String code;
-    private String name;
-    private String path;
-    private String component;
-    private String icon;
-    private Long parentId;
-    private Integer orderNum;
-    private String status;     // enabled/disabled
-    private List<String> actions; // 授权动作（可为空）
-}
-package com.yiyundao.compensation.interfaces.dto.admin;
-import lombok.Data;
-@Data
-public class UserAggregateDto {
-    private Long userId;
-    private String username;
-    private String realName;
-    private String email;
-    private String phone;
-    private String roles; // comma separated
-    private Long employeeId;     // employee.id
-    private String employeeNo;   // employee.employee_id
-    private String employeeName; // employee.name
-    private String platformType;
-    private String platformUserId;
-}
-package com.yiyundao.compensation.interfaces.dto.auth;
-import lombok.Data;
-@Data
-public class OAuthAuthorizeResponse {
-    private String url;
-    private String state;
-}
-package com.yiyundao.compensation.interfaces.dto.auth;
-import lombok.Data;
-import java.util.List;
-@Data
-public class DevTokenRequest {
-    private String username;
-    private List<String> roles;       // e.g. ["ADMIN","MANAGER"]
-    private List<String> authorities; // e.g. ["approval:start","approval:read"]
-}
-package com.yiyundao.compensation.interfaces.dto.auth;
-import lombok.Data;
-@Data
-public class LoginRequest {
-    private String username;
-    private String password;
-}
-package com.yiyundao.compensation.interfaces.dto.auth;
-import lombok.Data;
-@Data
-public class LogoutRequest {
-    private String refreshToken; // 可选
-}
-package com.yiyundao.compensation.interfaces.dto.auth;
-import lombok.Data;
-@Data
-public class RefreshRequest {
-    private String refreshToken;
-}
-package com.yiyundao.compensation.interfaces.dto.auth;
-import lombok.Data;
-import java.util.List;
-@Data
-public class LoginResponse {
-    private String token;
-    private String refreshToken;
-    private String username;
-    private List<String> roles;
-}
-package com.yiyundao.compensation.interfaces.dto.approval;
-import jakarta.validation.constraints.NotNull;
-import lombok.Data;
-@Data
-public class CancelWorkflowRequest {
-    @NotNull
-    private Long operatorId;
-    private String reason;
-}
-package com.yiyundao.compensation.interfaces.dto.approval;
-import jakarta.validation.constraints.NotNull;
-import lombok.Data;
-@Data
-public class ApprovalDecisionRequest {
-    @NotNull
-    private Long approverId;
-    private String comment;
-}
-package com.yiyundao.compensation.interfaces.dto.approval;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
-import lombok.Data;
-import java.util.Map;
-@Data
-public class StartWorkflowRequest {
-    @NotBlank
-    private String workflowType; // WorkflowType code
-    @NotBlank
-    private String businessKey;
-    @NotBlank
-    private String businessType;
-    @NotNull
-    private Long initiatorId;
-    private Map<String, Object> workflowData;
-}
-package com.yiyundao.compensation.interfaces.dto.role;
-import jakarta.validation.constraints.Size;
-import lombok.Data;
-@Data
-public class RoleBaseRequest {
-    @Size(min = 2, max = 100, message = "角色名称长度必须在2-100之间")
-    private String name;
-    @Size(max = 500, message = "角色描述长度不能超过500")
-    private String description;
-    @Size(max = 100, message = "图标标识长度不能超过100")
-    private String icon;
-    @Size(max = 500, message = "备注长度不能超过500")
-    private String remarks;
-}
-package com.yiyundao.compensation.interfaces.dto.role;
-import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.Size;
-import lombok.Data;
-import java.util.List;
-@Data
-public class RoleResourceAssignRequest {
-    @Size(max = 200, message = "单次分配的资源数量不能超过200")
-    private List<ResourceAssignment> resources;
-    private Boolean replaceExisting = true;
-    @Data
-    public static class ResourceAssignment {
-        @NotEmpty(message = "资源ID不能为空")
-        private Long resourceId;
-        @Size(max = 20, message = "操作权限数量不能超过20")
-        private List<String> actions;
-    }
-}
-package com.yiyundao.compensation.interfaces.dto.role;
-import jakarta.validation.constraints.Pattern;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-@Data
-@EqualsAndHashCode(callSuper = true)
-public class UpdateRoleRequest extends RoleBaseRequest {
-    @Pattern(regexp = "^(enabled|disabled)$", message = "状态只能是 enabled 或 disabled")
-    private String status;
-    private Integer sortOrder;
-    private Boolean isEditable;
-}
-package com.yiyundao.compensation.interfaces.dto.role;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
-import lombok.Data;
-import java.util.List;
-@Data
-public class CreateRoleRequest {
-    @NotBlank(message = "角色编码不能为空")
-    @Size(min = 2, max = 50, message = "角色编码长度必须在2-50之间")
-    @Pattern(regexp = "^[A-Za-z][A-Za-z0-9_]*$", message = "角色编码必须以字母开头，只能包含字母、数字和下划线")
-    private String code;
-    @NotBlank(message = "角色名称不能为空")
-    @Size(min = 2, max = 100, message = "角色名称长度必须在2-100之间")
-    private String name;
-    @Size(max = 500, message = "角色描述长度不能超过500")
-    private String description;
-    @Pattern(regexp = "^(BUSINESS|CUSTOM)$", message = "角色类型只能是 BUSINESS 或 CUSTOM")
-    private String roleType = "BUSINESS";
-    private Integer sortOrder = 0;
-    @Size(max = 100, message = "图标标识长度不能超过100")
-    private String icon;
-    @Size(max = 500, message = "备注长度不能超过500")
-    private String remarks;
-    private List<Long> resourceIds;
-    private List<String> actions;
-}
-package com.yiyundao.compensation.interfaces.dto.employee;
-import jakarta.validation.Valid;
-import jakarta.validation.constraints.NotEmpty;
-import lombok.Data;
-import java.util.List;
-@Data
-public class BatchImportRequest {
-    @Valid
-    @NotEmpty
-    private List<EmployeeCreateRequest> employees;
-}
-package com.yiyundao.compensation.interfaces.dto.employee;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-@Data
-public class BindPlatformRequest {
-    @NotBlank
-    private String platformUserId;
-    @NotBlank
-    private String platformType; // wechat/dingtalk/feishu
-}
-package com.yiyundao.compensation.interfaces.dto.employee;
-import lombok.Data;
-import java.time.LocalDate;
-@Data
-public class EmployeeUpdateRequest {
-    private String name;
-    private String phone;
-    private String email;
-    private String idCard; // 明文，后端加密
-    private String department;
-    private String position;
-    private LocalDate hireDate;
-    private String bankAccount; // 明文，后端加密
-    private String bankName;
-}
-package com.yiyundao.compensation.interfaces.dto.employee;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-import java.time.LocalDate;
-@Data
-public class EmployeeCreateRequest {
-    @NotBlank
-    private String employeeId;
-    @NotBlank
-    private String name;
-    private String phone;
-    private String email;
-    private String idCard;
-    private String department;
-    private String position;
-    private String employmentType;
-    private String platformUserId;
-    private String platformType;
-    private Long managerId;
-    private LocalDate hireDate;
-    private String status; // 默认 active
-    private String bankAccount; // 明文，后端加密
-    private String bankName;
-    private Boolean offline;
-    private String username;
-}
-package com.yiyundao.compensation.interfaces.dto.employee;
-import jakarta.validation.constraints.NotBlank;
-import lombok.Data;
-@Data
-public class UpdateStatusRequest {
-    @NotBlank
-    private String status; // active/inactive/terminated 等
-}
-package com.yiyundao.compensation.interfaces.dto.openapi;
-import lombok.Builder;
-import lombok.Data;
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.List;
-@Data
-@Builder
-public class OpenApiPayrollLineDto {
-    private Long id;
-    private Long batchId;
-    private String employeeRef;
-    private String employmentType;
-    private BigDecimal grossAmount;
-    private BigDecimal taxAmount;
-    private BigDecimal socialAmount;
-    private BigDecimal netAmount;
-    private String currency;
-    private List<String> departments;
-    private String employeeNameMasked;
-    private String phoneMasked;
-    private LocalDateTime generatedAt;
-}
-package com.yiyundao.compensation.interfaces.dto.openapi;
-import lombok.Builder;
-import lombok.Data;
-import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.List;
-@Data
-@Builder
-public class OpenApiPayslipDto {
-    private Long id;
-    private String employeeRef;
-    private String period;
-    private String employmentType;
-    private BigDecimal grossAmount;
-    private BigDecimal taxAmount;
-    private BigDecimal socialAmount;
-    private BigDecimal netAmount;
-    private String currency;
-    private List<String> departments;
-    private String employeeNameMasked;
-    private String phoneMasked;
-    private LocalDateTime generatedAt;
-    private List<PayslipItemDto> items;
-    @Data
-    @Builder
-    public static class PayslipItemDto {
-        private String code;
-        private String name;
-        private String type;
-        private Boolean taxable;
-        private BigDecimal amount;
-        private Boolean showOnPayslip;
-        private Integer order;
-    }
-}
-package com.yiyundao.compensation.interfaces.dto.openapi;
-import lombok.Builder;
-import lombok.Data;
-import java.time.LocalDateTime;
-@Data
-@Builder
-public class OpenApiPayrollBatchDto {
-    private Long id;
-    private String periodLabel;
-    private String type;
-    private String status;
-    private String currency;
-    private Long lineCount;
-    private LocalDateTime paidAt;
-    private LocalDateTime createdAt;
-    private LocalDateTime updatedAt;
-}
-package com.yiyundao.compensation.interfaces.dto.app;
-import lombok.Builder;
-import lombok.Data;
-@Data
-@Builder
-public class ExternalAppTokenResponse {
-    private String accessToken;
-    private String tokenType;
-    private long expiresIn;
-    private String scope;
-}
-package com.yiyundao.compensation.interfaces.dto.app;
-import lombok.Builder;
-import lombok.Data;
-import java.time.LocalDateTime;
-import java.util.List;
-@Data
-@Builder
-public class AppRegistryResponse {
-    private Long id;
-    private String appName;
-    private String clientId;
-    private List<String> scopes;
-    private List<String> ipWhitelist;
-    private String webhookUrl;
-    private String status;
-    private LocalDateTime createTime;
-    private LocalDateTime updateTime;
-}
-package com.yiyundao.compensation.interfaces.dto.app;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
-import lombok.Data;
-import java.util.List;
-@Data
-public class AppRegistryCreateRequest {
-    @NotBlank
-    private String appName;
-    @NotEmpty
-    private List<String> scopes;
-    private List<String> ipWhitelist;
-    private String webhookUrl;
-    private String status;
-}
-package com.yiyundao.compensation.interfaces.dto.app;
-import lombok.Builder;
-import lombok.Data;
-import java.time.LocalDateTime;
-import java.util.List;
-@Data
-@Builder
-public class AppRegistrySecretResponse {
-    private Long id;
-    private String appName;
-    private String clientId;
-    private String clientSecret;
-    private List<String> scopes;
-    private List<String> ipWhitelist;
-    private String webhookUrl;
-    private String status;
-    private LocalDateTime createTime;
-    private LocalDateTime updateTime;
-}
-package com.yiyundao.compensation.interfaces.dto.app;
-import lombok.Data;
-import java.util.List;
-@Data
-public class AppRegistryUpdateRequest {
-    private String appName;
-    private List<String> scopes;
-    private List<String> ipWhitelist;
-    private String webhookUrl;
-    private String status;
-}
-package com.yiyundao.compensation.interfaces.dto.config;
-import lombok.Data;
-@Data
-public class SmsConfigDto {
-    private String provider; // 服务商: aliyun/tencent/huawei/mock
-    private String accessKeyId;
-    private String accessKeySecret;
-    private String signName; // 短信签名
-    private String templateCode; // 默认模板
-    private String secretId;
-    private String secretKey;
-    private String appId;
-    private String sdkAppId;
-    private String appKey;
-    private String appSecret;
-    private String sender;
-    private String templateId;
-    private String endpoint; // 服务端点
-    private String region; // 地域
-    private Integer dailyLimit; // 每日发送限制
-    private Integer rateLimitPerMinute; // 每分钟限流
-    private Boolean enabled; // 是否启用
-}package com.yiyundao.compensation.interfaces.dto.config;
-import lombok.Data;
-@Data
-public class EmailConfigDto {
-    private String host; // SMTP服务器
-    private Integer port; // 端口
-    private String username; // 用户名
-    private String password; // 密码
-    private String fromAddress; // 发件人地址
-    private String fromName; // 发件人名称
-    private Boolean ssl; // 是否启用SSL
-    private Boolean tls; // 是否启用TLS
-    private String encoding; // 编码
-    private Boolean enabled; // 是否启用
-}package com.yiyundao.compensation.interfaces.dto.config;
-import lombok.Data;
-import java.time.LocalDateTime;
-@Data
-public class IntegrationConfigListDto {
-    private String platformType; // 平台类型: wechat, dingtalk, feishu, alipay, sms, email, encryption
-    private String platformName; // 平台显示名称
-    private Boolean enabled; // 是否启用
-    private Boolean configured; // 是否已配置
-    private String connectionStatus; // 连接状态: connected, disconnected, unknown
-    private LocalDateTime lastModified; // 最后修改时间
-}package com.yiyundao.compensation.interfaces.dto.config;
-import lombok.Data;
-@Data
-public class FeishuConfigDto {
-    private String appId;
-    private String appSecret;
-    private String appToken; // 应用Token
-    private Boolean enabled;
-}
-package com.yiyundao.compensation.interfaces.dto.config;
-import lombok.Data;
-@Data
-public class WechatConfigDto {
-    private String corpId;
-    private String corpSecret;
-    private String agentId;
-}
-package com.yiyundao.compensation.interfaces.dto.config;
-import lombok.Data;
-@Data
-public class EncryptionConfigDto {
-    private String aesKey; // AES密钥
-    private String sm4Key; // SM4密钥
-    private String algorithm; // 算法: SM4+AES/AES256
-    private String keyDerivation; // 密钥派生方式
-    private Integer keyRotationDays; // 密钥轮换天数
-    private Boolean enabled; // 是否启用
-}package com.yiyundao.compensation.interfaces.dto.config;
-import lombok.Data;
-@Data
-public class AlipayConfigDto {
-    private String appId;
-    private String serverUrl;
-    private String privateKey;
-    private String publicKey;
-    private String charset;
-    private String signType;
-    private String format;
-    private String notifyUrl;
-    private String returnUrl;
-}
-package com.yiyundao.compensation.interfaces.dto.config;
-import lombok.Data;
-import java.time.LocalDateTime;
-@Data
-public class IntegrationConfigDetailDto {
-    private String platformType; // 平台类型
-    private String platformName; // 平台显示名称
-    private Boolean enabled; // 是否启用
-    private Object config; // 具体配置内容（根据平台类型返回对应的DTO）
-    private String connectionStatus; // 连接状态: connected, disconnected, unknown
-    private LocalDateTime lastModified; // 最后修改时间
-}package com.yiyundao.compensation.interfaces.dto.config;
-import lombok.Data;
-@Data
-public class DingTalkConfigDto {
-    private String appKey;
-    private String appSecret;
-    private String webhookUrl; // 机器人Webhook地址
-    private Boolean enabled;
-}
-package com.yiyundao.compensation.interceptor;
-import com.yiyundao.compensation.common.annotation.Idempotent;
-import com.yiyundao.compensation.common.response.ApiResponse;
-import com.yiyundao.compensation.common.response.ErrorCode;
-import com.yiyundao.compensation.service.IdempotentService;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
-import org.springframework.stereotype.Component;
-import org.springframework.web.method.HandlerMethod;
-import org.springframework.web.servlet.HandlerInterceptor;
-import java.lang.reflect.Method;
-import java.util.HashMap;
-import java.util.Map;
-@Slf4j
-@Component
-@ConditionalOnBean(IdempotentService.class)
-public class IdempotentInterceptor implements HandlerInterceptor {
-    private final IdempotentService idempotentService;
-    @Autowired
-    public IdempotentInterceptor(@Autowired(required = false) IdempotentService idempotentService) {
-        this.idempotentService = idempotentService;
-    }
-    @Override
-    public boolean preHandle(HttpServletRequest request, HttpServletResponse response, Object handler) {
-        if (!(handler instanceof HandlerMethod handlerMethod)) {
-            return true;
-        }
-        Method method = handlerMethod.getMethod();
-        Idempotent idempotent = method.getAnnotation(Idempotent.class);
-        if (idempotent == null) {
-            return true;
-        }
-        if (idempotentService == null) {
-            return true;
-        }
-        String idempotentKey = generateKey(request, idempotent, handlerMethod);
-        boolean acquired = idempotentService.tryLock(
-                idempotentKey,
-                idempotent.expireSeconds(),
-                idempotent.tryLock() ? idempotent.waitTime() : 0
-        );
-        if (!acquired) {
-            log.warn("幂等性检查未通过: key={}", idempotentKey);
-            writeResponse(response, ErrorCode.REQUEST_CONFLICT, idempotent.message());
-            return false;
-        }
-        request.setAttribute("idempotentKey", idempotentKey);
-        return true;
-    }
-    @Override
-    public void afterCompletion(HttpServletRequest request, HttpServletResponse response,
-                                Object handler, Exception ex) {
-        String idempotentKey = (String) request.getAttribute("idempotentKey");
-        if (idempotentKey != null) {
-            if (ex == null) {
-                idempotentService.unlock(idempotentKey);
-            }
-        }
-    }
-    private String generateKey(HttpServletRequest request, Idempotent idempotent,
-                               HandlerMethod handlerMethod) {
-        Map<String, Object> variables = new HashMap<>();
-        variables.put("request", request);
-        variables.put("method", handlerMethod.getMethod().getName());
-        variables.put("uri", request.getRequestURI());
-        variables.put("ip", getClientIp(request));
-        request.getParameterMap().forEach((k, v) ->
-                variables.put(k, v.length > 0 ? v[0] : null));
-        return idempotentService.generateKey(idempotent.key(), variables);
-    }
-    private String getClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getHeader("WL-Proxy-Client-IP");
-        }
-        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-            ip = request.getRemoteAddr();
-        }
-        return ip;
-    }
-    private void writeResponse(HttpServletResponse response, ErrorCode errorCode, String message) {
-        try {
-            response.setContentType("application/json;charset=UTF-8");
-            response.setStatus(errorCode.getHttpStatusCode());
-            ApiResponse<?> apiResponse = ApiResponse.error(errorCode, message);
-            response.getWriter().write(
-                    new com.fasterxml.jackson.databind.ObjectMapper()
-                            .writeValueAsString(apiResponse)
-            );
-        } catch (Exception e) {
-            log.error("写入幂等响应失败", e);
-        }
-    }
-}
-package com.yiyundao.compensation.entity;
-import com.baomidou.mybatisplus.annotation.*;
-import lombok.Data;
-import java.time.LocalDateTime;
-@Data
-@TableName("scheduled_task")
-public class ScheduledTask {
-    @TableId(type = IdType.AUTO)
-    private Long id;
-    @TableField("task_key")
-    private String taskKey;
-    @TableField("task_name")
-    private String taskName;
-    @TableField("task_group")
-    private String taskGroup;
-    @TableField("cron_expression")
-    private String cronExpression;
-    @TableField("description")
-    private String description;
-    @TableField("status")
-    private TaskStatus status;
-    @TableField("retry_count")
-    private Integer retryCount;
-    @TableField("max_retry_count")
-    private Integer maxRetryCount;
-    @TableField("retry_interval_seconds")
-    private Integer retryIntervalSeconds;
-    @TableField("last_execute_time")
-    private LocalDateTime lastExecuteTime;
-    @TableField("next_execute_time")
-    private LocalDateTime nextExecuteTime;
-    @TableField("last_result")
-    private String lastResult;
-    @TableField("alarm_enabled")
-    private Boolean alarmEnabled;
-    @TableField("alarm_receivers")
-    private String alarmReceivers;
-    @TableField("handler_bean")
-    private String handlerBean;
-    @TableField(value = "create_time", fill = FieldFill.INSERT)
-    private LocalDateTime createTime;
-    @TableField(value = "update_time", fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updateTime;
-    @TableLogic
-    @TableField("deleted")
-    private Integer deleted;
-    public enum TaskStatus {
-        PAUSED,
-        RUNNING,
-        FAILED,
-        SUCCESS
-    }
-}
-package com.yiyundao.compensation.entity;
-import com.baomidou.mybatisplus.annotation.*;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
-import java.time.LocalDateTime;
-@Data
-@EqualsAndHashCode(callSuper = false)
-public abstract class BaseEntity {
-    @TableId(type = IdType.AUTO)
-    private Long id;
-    @TableField(fill = FieldFill.INSERT)
-    private LocalDateTime createTime;
-    @TableField(fill = FieldFill.INSERT_UPDATE)
-    private LocalDateTime updateTime;
-    @TableField(fill = FieldFill.INSERT)
-    private String createBy;
-    @TableField(fill = FieldFill.INSERT_UPDATE)
-    private String updateBy;
-    @TableLogic
-    @TableField(fill = FieldFill.INSERT)
-    private Integer deleted;
-    @Version
-    private Integer version;
-}package com.yiyundao.compensation.entity;
-import com.baomidou.mybatisplus.annotation.*;
-import lombok.Data;
-import java.time.LocalDateTime;
-@Data
-@TableName("scheduled_task_execution")
-public class ScheduledTaskExecution {
-    @TableId(type = IdType.AUTO)
-    private Long id;
-    @TableField("task_id")
-    private Long taskId;
-    @TableField("task_key")
-    private String taskKey;
-    @TableField("start_time")
-    private LocalDateTime startTime;
-    @TableField("end_time")
-    private LocalDateTime endTime;
-    @TableField("duration_ms")
-    private Long durationMs;
-    @TableField("status")
-    private ExecutionStatus status;
-    @TableField("result")
-    private String result;
-    @TableField("error_message")
-    private String errorMessage;
-    @TableField("trace_id")
-    private String traceId;
-    @TableField(value = "create_time", fill = FieldFill.INSERT)
-    private LocalDateTime createTime;
-    public enum ExecutionStatus {
-        RUNNING,
-        SUCCESS,
-        FAILED,
-        RETRYING
-    }
-}
+ 46637                  PlatformUser u = new PlatformUser();
+ 46638                  u.setProvider("wechat");
+ 46639                  u.setTenantKey(cfg.getCorpId());
+ 46640                  u.setSubjectType("user_id");
+ 46641                  u.setSubjectId(info.getUserid());
+ 46642                  return u;
+ 46643              }
+ 46644          } catch (Exception e) {
+ 46645              log.error("wechat exchange code failed", e);
+ 46646          }
+ 46647          return null;
+ 46648      }
+ 46649  
+ 46650      private PlatformUser dingtalkExchange(String code) {
+ 46651          try {
+ 46652              DingTalkConfigDto cfg = integrationConfigService.getDingTalkConfig();
+ 46653              if (cfg == null) return null;
+ 46654              String url = "https://api.dingtalk.com/v1.0/oauth2/userAccessToken";
+ 46655              DingOAuthTokenReq body = new DingOAuthTokenReq(cfg.getAppKey(), cfg.getAppSecret(), code, "authorization_code");
+ 46656              DingOAuthTokenResp resp = webClient.post().uri(url).bodyValue(body).retrieve().bodyToMono(DingOAuthTokenResp.class).block();
+ 46657              if (resp != null && resp.getAccessToken() != null) {
+ 46658                  PlatformUser u = new PlatformUser();
+ 46659                  u.setProvider("dingtalk");
+ 46660                  u.setTenantKey(cfg.getAppKey());
+ 46661                  // 优先使用 openId 作为平台唯一标识
+ 46662                  String pid = resp.getOpenId() != null ? resp.getOpenId() : resp.getUnionId();
+ 46663                  u.setSubjectType(resp.getOpenId() != null ? "open_id" : "union_id");
+ 46664                  u.setSubjectId(pid);
+ 46665                  return u;
+ 46666              }
+ 46667          } catch (Exception e) {
+ 46668              log.error("dingtalk exchange code failed", e);
+ 46669          }
+ 46670          return null;
+ 46671      }
+ 46672  
+ 46673      private PlatformUser feishuExchange(String code) {
+ 46674          try {
+ 46675              FeishuConfigDto cfg = integrationConfigService.getFeishuConfig();
+ 46676              String url = "https://open.feishu.cn/open-apis/authen/v1/access_token";
+ 46677              FeishuTokenReq body = new FeishuTokenReq("authorization_code", code);
+ 46678              String basic = java.util.Base64.getEncoder().encodeToString((cfg.getAppId() + ":" + cfg.getAppSecret()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+ 46679              FeishuTokenResp resp = webClient.post().uri(url)
+ 46680                      .headers(h -> h.set("Authorization", "Basic " + basic))
+ 46681                      .bodyValue(body)
+ 46682                      .retrieve()
+ 46683                      .bodyToMono(FeishuTokenResp.class)
+ 46684                      .block();
+ 46685              if (resp != null && resp.getCode() == 0 && resp.getData() != null && StringUtils.hasText(resp.getData().getUser_id())) {
+ 46686                  PlatformUser u = new PlatformUser();
+ 46687                  u.setProvider("feishu");
+ 46688                  u.setTenantKey(cfg.getAppId());
+ 46689                  u.setSubjectType("user_id");
+ 46690                  u.setSubjectId(resp.getData().getUser_id());
+ 46691                  return u;
+ 46692              }
+ 46693          } catch (Exception e) {
+ 46694              log.error("feishu exchange code failed", e);
+ 46695          }
+ 46696          return null;
+ 46697      }
+ 46698  
+ 46699      @Data
+ 46700      public static class PlatformUser {
+ 46701          private String provider;
+ 46702          private String tenantKey;
+ 46703          private String subjectType;
+ 46704          private String subjectId;
+ 46705          private String displayName;
+ 46706  
+ 46707          @Deprecated
+ 46708          public String getPlatform() {
+ 46709              return provider;
+ 46710          }
+ 46711  
+ 46712          @Deprecated
+ 46713          public void setPlatform(String platform) {
+ 46714              this.provider = platform;
+ 46715          }
+ 46716  
+ 46717          @Deprecated
+ 46718          public String getPlatformUserId() {
+ 46719              return subjectId;
+ 46720          }
+ 46721  
+ 46722          @Deprecated
+ 46723          public void setPlatformUserId(String platformUserId) {
+ 46724              this.subjectId = platformUserId;
+ 46725          }
+ 46726      }
+ 46727  
+ 46728      @Data
+ 46729      public static class Authorize {
+ 46730          private String url;
+ 46731          private String state;
+ 46732      }
+ 46733  
+ 46734      @Data
+ 46735      private static class WechatTokenResp { private int errcode; private String errmsg; private String access_token; }
+ 46736      @Data
+ 46737      private static class WechatUserInfoResp { private int errcode; private String errmsg; private String userid; }
+ 46738  
+ 46739      @Data
+ 46740      private static class FeishuTokenReq { private String grant_type; private String code; public FeishuTokenReq(String g, String c){this.grant_type=g;this.code=c;} }
+ 46741      @Data
+ 46742      private static class FeishuTokenResp { private int code; private String msg; private FeishuTokenData data; }
+ 46743      @Data
+ 46744      private static class FeishuTokenData { private String access_token; private String refresh_token; private String user_id; }
+ 46745  
+ 46746      @Data
+ 46747      private static class DingOAuthTokenReq { private String clientId; private String clientSecret; private String code; private String grantType; public DingOAuthTokenReq(String id, String sec, String code, String gt){this.clientId=id;this.clientSecret=sec;this.code=code;this.grantType=gt;} }
+ 46748      @Data
+ 46749      private static class DingOAuthTokenResp { private String accessToken; private String refreshToken; private String openId; private String unionId; }
+ 46750  }
+ 46751  
+ 46752  // ===== FILE: src/main/java/com/yiyundao/compensation/service/PlatformTokenCacheService.java =====
+ 46753  package com.yiyundao.compensation.service;
+ 46754  
+ 46755  import lombok.RequiredArgsConstructor;
+ 46756  import org.springframework.data.redis.core.RedisTemplate;
+ 46757  import org.springframework.stereotype.Service;
+ 46758  
+ 46759  import java.util.concurrent.TimeUnit;
+ 46760  
+ 46761  @Service
+ 46762  @RequiredArgsConstructor
+ 46763  public class PlatformTokenCacheService {
+ 46764  
+ 46765      private final RedisTemplate<String, Object> redisTemplate;
+ 46766  
+ 46767      private static final String KEY_OAUTH_TOKEN_PREFIX = "oauth:token:"; // oauth:token:{platform}
+ 46768  
+ 46769      public String getToken(String platform) {
+ 46770          Object v = redisTemplate.opsForValue().get(KEY_OAUTH_TOKEN_PREFIX + platform);
+ 46771          return v == null ? null : String.valueOf(v);
+ 46772      }
+ 46773  
+ 46774      public void setToken(String platform, String token, long ttlSeconds) {
+ 46775          long ttl = Math.max(1, ttlSeconds);
+ 46776          redisTemplate.opsForValue().set(KEY_OAUTH_TOKEN_PREFIX + platform, token, ttl, TimeUnit.SECONDS);
+ 46777      }
+ 46778  }
+ 46779  
+ 46780  
+ 46781  // ===== FILE: src/main/java/com/yiyundao/compensation/service/ScheduledTaskService.java =====
+ 46782  package com.yiyundao.compensation.service;
+ 46783  
+ 46784  import com.baomidou.mybatisplus.extension.service.IService;
+ 46785  import com.yiyundao.compensation.dto.TaskScheduleDTO;
+ 46786  import com.yiyundao.compensation.entity.ScheduledTask;
+ 46787  import com.yiyundao.compensation.entity.ScheduledTaskExecution;
+ 46788  
+ 46789  import java.time.LocalDateTime;
+ 46790  import java.util.List;
+ 46791  
+ 46792  public interface ScheduledTaskService extends IService<ScheduledTask> {
+ 46793  
+ 46794      List<ScheduledTask> listTasksByStatus(ScheduledTask.TaskStatus status);
+ 46795  
+ 46796      Long createTask(TaskScheduleDTO dto);
+ 46797  
+ 46798      void updateTask(Long id, TaskScheduleDTO dto);
+ 46799  
+ 46800      void pauseTask(Long id);
+ 46801  
+ 46802      void resumeTask(Long id);
+ 46803  
+ 46804      void deleteTask(Long id);
+ 46805  
+ 46806      Long triggerTask(Long id);
+ 46807  
+ 46808      List<ScheduledTaskExecution> getExecutionLogs(Long taskId, int limit);
+ 46809  
+ 46810      void executeTask(ScheduledTask task);
+ 46811  
+ 46812      /**
+ 46813       * 根据 Cron 表达式计算下次执行时间
+ 46814       *
+ 46815       * @param cronExpression Cron 表达式
+ 46816       * @return 下次执行时间
+ 46817       */
+ 46818      LocalDateTime calculateNextExecutionTime(String cronExpression);
+ 46819  }
+ 46820  
+ 46821  // ===== FILE: src/main/java/com/yiyundao/compensation/service/TaskHandler.java =====
+ 46822  package com.yiyundao.compensation.service;
+ 46823  
+ 46824  /**
+ 46825   * 定时任务处理器接口
+ 46826   * <p>
+ 46827   * 所有定时任务处理器都需要实现此接口。
+ 46828   * 处理器通过 Spring Bean 名称与 ScheduledTask.handlerBean 字段关联。
+ 46829   * </p>
+ 46830   *
+ 46831   * @author 芙宁娜
+ 46832   * @since 2026-02-01
+ 46833   */
+ 46834  public interface TaskHandler {
+ 46835  
+ 46836      /**
+ 46837       * 获取处理器支持的任务类型
+ 46838       *
+ 46839       * @return 任务类型标识
+ 46840       */
+ 46841      String getTaskType();
+ 46842  
+ 46843      /**
+ 46844       * 执行任务
+ 46845       *
+ 46846       * @param taskKey  任务Key
+ 46847       * @param taskData 任务数据（可选）
+ 46848       * @return 执行结果
+ 46849       * @throws Exception 执行异常
+ 46850       */
+ 46851      TaskExecutionResult execute(String taskKey, Object taskData) throws Exception;
+ 46852  
+ 46853      /**
+ 46854       * 任务执行结果
+ 46855       */
+ 46856      record TaskExecutionResult(
+ 46857              boolean success,
+ 46858              String message,
+ 46859              Object resultData
+ 46860      ) {
+ 46861          public static TaskExecutionResult success(String message) {
+ 46862              return new TaskExecutionResult(true, message, null);
+ 46863          }
+ 46864  
+ 46865          public static TaskExecutionResult success(String message, Object resultData) {
+ 46866              return new TaskExecutionResult(true, message, resultData);
+ 46867          }
+ 46868  
+ 46869          public static TaskExecutionResult failure(String message) {
+ 46870              return new TaskExecutionResult(false, message, null);
+ 46871          }
+ 46872  
+ 46873          public static TaskExecutionResult failure(String message, Object errorData) {
+ 46874              return new TaskExecutionResult(false, message, errorData);
+ 46875          }
+ 46876      }
+ 46877  }
+ 46878  
+ 46879  // ===== FILE: src/main/java/com/yiyundao/compensation/service/WeComAuthService.java =====
+ 46880  package com.yiyundao.compensation.service;
+ 46881  
+ 46882  import com.yiyundao.compensation.interfaces.dto.config.WechatConfigDto;
+ 46883  import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
+ 46884  import com.yiyundao.compensation.modules.system.service.SysConfigService;
+ 46885  import lombok.Data;
+ 46886  import lombok.RequiredArgsConstructor;
+ 46887  import lombok.extern.slf4j.Slf4j;
+ 46888  import org.springframework.core.env.Environment;
+ 46889  import org.springframework.stereotype.Service;
+ 46890  import org.springframework.util.StringUtils;
+ 46891  import org.springframework.web.reactive.function.client.WebClient;
+ 46892  
+ 46893  import java.net.URI;
+ 46894  import java.security.MessageDigest;
+ 46895  import java.time.Instant;
+ 46896  import java.util.*;
+ 46897  
+ 46898  @Slf4j
+ 46899  @Service
+ 46900  @RequiredArgsConstructor
+ 46901  public class WeComAuthService {
+ 46902  
+ 46903      private final IntegrationConfigService integrationConfigService;
+ 46904      private final SysConfigService sysConfigService;
+ 46905      private final AuthTokenService authTokenService;
+ 46906      private final PlatformTokenCacheService platformTokenCacheService;
+ 46907      private final WebClient webClient;
+ 46908      private final Environment env;
+ 46909  
+ 46910      private static final String PLATFORM = "wechat"; // internal platform code reuse
+ 46911      private static final String API_BASE = "https://qyapi.weixin.qq.com/cgi-bin";
+ 46912      private static final String TRUSTED_REDIRECT_HOSTS_CONFIG_KEY = "oauth.trusted.redirect.hosts";
+ 46913      private static final String TRUSTED_REDIRECT_HOSTS_PROPERTY = "oauth.trusted-redirect-hosts";
+ 46914      private static final String TRUSTED_REDIRECT_HOSTS_ENV = "OAUTH_TRUSTED_REDIRECT_HOSTS";
+ 46915  
+ 46916      @Data
+ 46917      public static class AuthorizeOut { private String url; private String state; private String channel; }
+ 46918  
+ 46919      @Data
+ 46920      public static class SignOut { private String timestamp; private String nonceStr; private String signature; private String corpId; private String agentId; }
+ 46921  
+ 46922      public AuthorizeOut buildAuthorize(String channel, String redirectUri) {
+ 46923          WechatConfigDto cfg = getWeComConfig();
+ 46924          String corpId = cfg != null ? cfg.getCorpId() : null;
+ 46925          String agentId = cfg != null ? cfg.getAgentId() : null;
+ 46926          String scope = Optional.ofNullable(env.getProperty("WECOM_LOGIN_SCOPE")).filter(StringUtils::hasText).orElse("snsapi_base");
+ 46927          validateConfig(corpId, agentId);
+ 46928          validateRedirectUri(redirectUri);
+ 46929  
+ 46930          String state = UUID.randomUUID().toString().replace("-", "");
+ 46931          int ttl = Optional.ofNullable(sysConfigService.getInt("auth.oauth.state.ttl.seconds", null))
+ 46932                  .orElse(getIntEnv("CSRF_STATE_TTL_SECONDS", 300));
+ 46933          authTokenService.storeOAuthState("wecom", state, ttl);
+ 46934  
+ 46935          String encoded = URI.create(redirectUri).toString();
+ 46936          encoded = java.net.URLEncoder.encode(encoded, java.nio.charset.StandardCharsets.UTF_8);
+ 46937          String url;
+ 46938          if ("wecom".equalsIgnoreCase(channel)) {
+ 46939              url = "https://open.weixin.qq.com/connect/oauth2/authorize?appid=" + corpId
+ 46940                      + "&redirect_uri=" + encoded
+ 46941                      + "&response_type=code&scope=" + scope
+ 46942                      + "&state=" + state
+ 46943                      + "&agentid=" + agentId + "#wechat_redirect";
+ 46944          } else {
+ 46945              url = "https://login.work.weixin.qq.com/wwlogin/sso/login?login_type=CorpApp&appid=" + corpId
+ 46946                      + "&agentid=" + agentId + "&redirect_uri=" + encoded + "&state=" + state;
+ 46947          }
+ 46948          AuthorizeOut out = new AuthorizeOut();
+ 46949          out.setUrl(url); out.setState(state); out.setChannel(channel);
+ 46950          return out;
+ 46951      }
+ 46952  
+ 46953      public TokenUser exchangeCode(String code, String state) {
+ 46954          if (!StringUtils.hasText(state) || !authTokenService.consumeOAuthState("wecom", state)) {
+ 46955              throw new IllegalArgumentException("invalid state");
+ 46956          }
+ 46957          String accessToken = getAccessToken();
+ 46958          if (accessToken == null) {
+ 46959              throw new IllegalStateException("wecom not configured");
+ 46960          }
+ 46961          String url = API_BASE + "/auth/getuserinfo?access_token=" + accessToken + "&code=" + code;
+ 46962          WeComUserInfo resp = webClient.get().uri(url).retrieve().bodyToMono(WeComUserInfo.class).block();
+ 46963          if (resp == null || resp.getErrcode() != 0) {
+ 46964              throw new RuntimeException("wecom error: " + (resp != null ? resp.getErrmsg() : "null"));
+ 46965          }
+ 46966          TokenUser tu = new TokenUser();
+ 46967          tu.setUserid(resp.getUserid());
+ 46968          tu.setExternalUserid(resp.getExternal_userid());
+ 46969          return tu;
+ 46970      }
+ 46971  
+ 46972      public SignOut jsapiSignature(String url) {
+ 46973          String ticket = getJsapiTicket();
+ 46974          WechatConfigDto cfg = getWeComConfig();
+ 46975          String nonce = UUID.randomUUID().toString().replace("-", "");
+ 46976          String ts = String.valueOf(Instant.now().getEpochSecond());
+ 46977          String str = "jsapi_ticket=" + ticket + "&noncestr=" + nonce + "&timestamp=" + ts + "&url=" + url;
+ 46978          String sig = sha1(str);
+ 46979          SignOut out = new SignOut();
+ 46980          out.setTimestamp(ts); out.setNonceStr(nonce); out.setSignature(sig);
+ 46981          out.setCorpId(cfg != null ? cfg.getCorpId() : null);
+ 46982          return out;
+ 46983      }
+ 46984  
+ 46985      public SignOut agentJsapiSignature(String url) {
+ 46986          String ticket = getAgentTicket();
+ 46987          WechatConfigDto cfg = getWeComConfig();
+ 46988          String nonce = UUID.randomUUID().toString().replace("-", "");
+ 46989          String ts = String.valueOf(Instant.now().getEpochSecond());
+ 46990          String str = "jsapi_ticket=" + ticket + "&noncestr=" + nonce + "&timestamp=" + ts + "&url=" + url;
+ 46991          String sig = sha1(str);
+ 46992          SignOut out = new SignOut();
+ 46993          out.setTimestamp(ts); out.setNonceStr(nonce); out.setSignature(sig);
+ 46994          out.setCorpId(cfg != null ? cfg.getCorpId() : null);
+ 46995          out.setAgentId(cfg != null ? cfg.getAgentId() : null);
+ 46996          return out;
+ 46997      }
+ 46998  
+ 46999      private String getAccessToken() {
+ 47000          String cached = platformTokenCacheService.getToken(PLATFORM);
+ 47001          if (StringUtils.hasText(cached)) return cached;
+ 47002          WechatConfigDto cfg = getWeComConfig();
+ 47003          if (cfg == null || !StringUtils.hasText(cfg.getCorpId()) || !StringUtils.hasText(cfg.getCorpSecret())) return null;
+ 47004          String url = API_BASE + "/gettoken?corpid=" + cfg.getCorpId() + "&corpsecret=" + cfg.getCorpSecret();
+ 47005          WeComToken r = webClient.get().uri(url).retrieve().bodyToMono(WeComToken.class).block();
+ 47006          if (r != null && r.getErrcode() == 0 && StringUtils.hasText(r.getAccess_token())) {
+ 47007              int skew = Optional.ofNullable(sysConfigService.getInt("oauth.token.ttl.buffer.seconds", null))
+ 47008                      .orElse(getIntEnv("CACHE_WECHAT_TTL_SKEW_SECONDS", 120));
+ 47009              long ttl = Math.max(60, (r.getExpires_in() != null ? r.getExpires_in() : 7200) - skew);
+ 47010              platformTokenCacheService.setToken(PLATFORM, r.getAccess_token(), ttl);
+ 47011              return r.getAccess_token();
+ 47012          }
+ 47013          log.warn("wecom gettoken failed: {}", r != null ? r.getErrmsg() : "null");
+ 47014          return null;
+ 47015      }
+ 47016  
+ 47017      private String getJsapiTicket() {
+ 47018          String key = "wecom:jsapi_ticket";
+ 47019          String cached = platformTokenCacheService.getToken(key);
+ 47020          if (StringUtils.hasText(cached)) return cached;
+ 47021          String token = getAccessToken();
+ 47022          if (token == null) throw new IllegalStateException("wecom not configured");
+ 47023          String url = API_BASE + "/get_jsapi_ticket?access_token=" + token;
+ 47024          JsTicket r = webClient.get().uri(url).retrieve().bodyToMono(JsTicket.class).block();
+ 47025          if (r != null && r.getErrcode() == 0 && StringUtils.hasText(r.getTicket())) {
+ 47026              int skew = Optional.ofNullable(sysConfigService.getInt("oauth.token.ttl.buffer.seconds", null))
+ 47027                      .orElse(getIntEnv("CACHE_WECHAT_TTL_SKEW_SECONDS", 120));
+ 47028              long ttl = Math.max(60, (r.getExpires_in() != null ? r.getExpires_in() : 7200) - skew);
+ 47029              platformTokenCacheService.setToken(key, r.getTicket(), ttl);
+ 47030              return r.getTicket();
+ 47031          }
+ 47032          throw new RuntimeException("wecom jsapi ticket error: " + (r != null ? r.getErrmsg() : "null"));
+ 47033      }
+ 47034  
+ 47035      private String getAgentTicket() {
+ 47036          String key = "wecom:agent_jsapi_ticket";
+ 47037          String cached = platformTokenCacheService.getToken(key);
+ 47038          if (StringUtils.hasText(cached)) return cached;
+ 47039          String token = getAccessToken();
+ 47040          if (token == null) throw new IllegalStateException("wecom not configured");
+ 47041          String url = API_BASE + "/ticket/get?access_token=" + token + "&type=agent_config";
+ 47042          JsTicket r = webClient.get().uri(url).retrieve().bodyToMono(JsTicket.class).block();
+ 47043          if (r != null && r.getErrcode() == 0 && StringUtils.hasText(r.getTicket())) {
+ 47044              int skew = Optional.ofNullable(sysConfigService.getInt("oauth.token.ttl.buffer.seconds", null))
+ 47045                      .orElse(getIntEnv("CACHE_WECHAT_TTL_SKEW_SECONDS", 120));
+ 47046              long ttl = Math.max(60, (r.getExpires_in() != null ? r.getExpires_in() : 7200) - skew);
+ 47047              platformTokenCacheService.setToken(key, r.getTicket(), ttl);
+ 47048              return r.getTicket();
+ 47049          }
+ 47050          throw new RuntimeException("wecom agent ticket error: " + (r != null ? r.getErrmsg() : "null"));
+ 47051      }
+ 47052  
+ 47053      private void validateConfig(String corpId, String agentId) {
+ 47054          if (!StringUtils.hasText(corpId) || !StringUtils.hasText(agentId)) {
+ 47055              throw new IllegalStateException("wecom config missing");
+ 47056          }
+ 47057          if (corpId.toLowerCase().startsWith("your_") || agentId.toLowerCase().startsWith("your_")) {
+ 47058              throw new IllegalStateException("wecom config placeholders detected");
+ 47059          }
+ 47060      }
+ 47061  
+ 47062      private void validateRedirectUri(String redirectUri) {
+ 47063          try {
+ 47064              URI uri = URI.create(redirectUri);
+ 47065              String scheme = uri.getScheme();
+ 47066              String host = uri.getHost();
+ 47067              int port = uri.getPort();
+ 47068              if (!StringUtils.hasText(scheme) || (!"http".equalsIgnoreCase(scheme) && !"https".equalsIgnoreCase(scheme))) {
+ 47069                  throw new IllegalArgumentException("redirectUri scheme not allowed");
+ 47070              }
+ 47071              if (!StringUtils.hasText(host)) {
+ 47072                  throw new IllegalArgumentException("redirectUri invalid");
+ 47073              }
+ 47074              Set<String> trustedHosts = resolveTrustedRedirectHosts();
+ 47075              if (trustedHosts.isEmpty()) {
+ 47076                  throw new IllegalStateException("trusted hosts not configured");
+ 47077              }
+ 47078              String normalizedHost = host.toLowerCase(Locale.ROOT);
+ 47079              String hostWithPort = port > 0 ? normalizedHost + ":" + port : normalizedHost;
+ 47080              if (!(trustedHosts.contains(hostWithPort) || trustedHosts.contains(normalizedHost))) {
+ 47081                  throw new IllegalArgumentException("redirect host not trusted");
+ 47082              }
+ 47083          } catch (Exception e) {
+ 47084              throw new IllegalArgumentException("redirectUri validation failed: " + e.getMessage());
+ 47085          }
+ 47086      }
+ 47087  
+ 47088      private Set<String> resolveTrustedRedirectHosts() {
+ 47089          String allow = sysConfigService.getString(TRUSTED_REDIRECT_HOSTS_CONFIG_KEY, null);
+ 47090          if (!StringUtils.hasText(allow)) {
+ 47091              // Spring Boot 官方推荐使用 canonical kebab-case key 读取配置
+ 47092              allow = env.getProperty(TRUSTED_REDIRECT_HOSTS_PROPERTY);
+ 47093          }
+ 47094          if (!StringUtils.hasText(allow)) {
+ 47095              allow = env.getProperty(TRUSTED_REDIRECT_HOSTS_CONFIG_KEY);
+ 47096          }
+ 47097          if (!StringUtils.hasText(allow)) {
+ 47098              allow = env.getProperty(TRUSTED_REDIRECT_HOSTS_ENV);
+ 47099          }
+ 47100          Set<String> trustedHosts = new LinkedHashSet<>();
+ 47101          if (!StringUtils.hasText(allow)) {
+ 47102              return trustedHosts;
+ 47103          }
+ 47104          for (String item : allow.split(",")) {
+ 47105              String normalized = normalizeTrustedHost(item);
+ 47106              if (StringUtils.hasText(normalized)) {
+ 47107                  trustedHosts.add(normalized);
+ 47108              }
+ 47109          }
+ 47110          return trustedHosts;
+ 47111      }
+ 47112  
+ 47113      private String normalizeTrustedHost(String item) {
+ 47114          if (!StringUtils.hasText(item)) {
+ 47115              return null;
+ 47116          }
+ 47117          String token = item.trim();
+ 47118          if (!StringUtils.hasText(token)) {
+ 47119              return null;
+ 47120          }
+ 47121          if (token.contains("://")) {
+ 47122              URI uri = URI.create(token);
+ 47123              if (!StringUtils.hasText(uri.getHost())) {
+ 47124                  return null;
+ 47125              }
+ 47126              String host = uri.getHost().toLowerCase(Locale.ROOT);
+ 47127              return uri.getPort() > 0 ? host + ":" + uri.getPort() : host;
+ 47128          }
+ 47129          String normalized = token;
+ 47130          while (normalized.endsWith("/")) {
+ 47131              normalized = normalized.substring(0, normalized.length() - 1);
+ 47132          }
+ 47133          return normalized.toLowerCase(Locale.ROOT);
+ 47134      }
+ 47135  
+ 47136      private WechatConfigDto getWeComConfig() {
+ 47137          WechatConfigDto cfg = integrationConfigService.getWechatConfig();
+ 47138          if (cfg == null || !StringUtils.hasText(cfg.getCorpId())) {
+ 47139              String id = env.getProperty("WECOM_CORP_ID");
+ 47140              String agentId = env.getProperty("WECOM_AGENT_ID");
+ 47141              String secret = env.getProperty("WECOM_CORP_SECRET");
+ 47142              if (StringUtils.hasText(id)) {
+ 47143                  WechatConfigDto c = new WechatConfigDto();
+ 47144                  c.setCorpId(id); c.setAgentId(agentId); c.setCorpSecret(secret);
+ 47145                  return c;
+ 47146              }
+ 47147          }
+ 47148          return cfg;
+ 47149      }
+ 47150  
+ 47151      private int getIntEnv(String key, int def) {
+ 47152          try { return Integer.parseInt(Objects.toString(env.getProperty(key), "" + def)); } catch (Exception e) { return def; }
+ 47153      }
+ 47154  
+ 47155      private static String sha1(String s) {
+ 47156          try {
+ 47157              MessageDigest md = MessageDigest.getInstance("SHA-1");
+ 47158              byte[] out = md.digest(s.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+ 47159              StringBuilder sb = new StringBuilder();
+ 47160              for (byte b : out) sb.append(String.format("%02x", b));
+ 47161              return sb.toString();
+ 47162          } catch (Exception e) {
+ 47163              throw new RuntimeException(e);
+ 47164          }
+ 47165      }
+ 47166  
+ 47167      @Data
+ 47168      private static class WeComToken { private int errcode; private String errmsg; private String access_token; private Integer expires_in; }
+ 47169      @Data
+ 47170      private static class WeComUserInfo { private int errcode; private String errmsg; private String userid; private String openid; private String external_userid; }
+ 47171      @Data
+ 47172      private static class JsTicket { private int errcode; private String errmsg; private String ticket; private Integer expires_in; }
+ 47173  
+ 47174      @Data
+ 47175      public static class TokenUser { private String userid; private String externalUserid; }
+ 47176  }
+ 47177  
+ 47178  // ===== FILE: src/main/java/com/yiyundao/compensation/service/YunzhanghuClient.java =====
+ 47179  package com.yiyundao.compensation.service;
+ 47180  
+ 47181  import com.yiyundao.compensation.interfaces.dto.config.YunzhanghuConfigDto;
+ 47182  import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
+ 47183  import com.yunzhanghu.sdk.YzhException;
+ 47184  import com.yunzhanghu.sdk.base.YzhConfig;
+ 47185  import com.yunzhanghu.sdk.base.YzhRequest;
+ 47186  import com.yunzhanghu.sdk.base.YzhResponse;
+ 47187  import com.yunzhanghu.sdk.notify.NotifyClient;
+ 47188  import com.yunzhanghu.sdk.notify.domain.NotifyRequest;
+ 47189  import com.yunzhanghu.sdk.notify.domain.NotifyResponse;
+ 47190  import com.yunzhanghu.sdk.payment.PaymentClient;
+ 47191  import com.yunzhanghu.sdk.payment.domain.CreateAlipayOrderRequest;
+ 47192  import com.yunzhanghu.sdk.payment.domain.CreateAlipayOrderResponse;
+ 47193  import com.yunzhanghu.sdk.payment.domain.GetOrderRequest;
+ 47194  import com.yunzhanghu.sdk.payment.domain.GetOrderResponse;
+ 47195  import com.yunzhanghu.sdk.payment.domain.NotifyOrderRequest;
+ 47196  import lombok.RequiredArgsConstructor;
+ 47197  import lombok.extern.slf4j.Slf4j;
+ 47198  import org.springframework.stereotype.Service;
+ 47199  import org.springframework.util.StringUtils;
+ 47200  
+ 47201  import java.math.BigDecimal;
+ 47202  import java.util.Map;
+ 47203  
+ 47204  @Slf4j
+ 47205  @Service
+ 47206  @RequiredArgsConstructor
+ 47207  public class YunzhanghuClient {
+ 47208  
+ 47209      private final IntegrationConfigService integrationConfigService;
+ 47210  
+ 47211      public YzhResponse<CreateAlipayOrderResponse> createAlipayOrder(String orderId,
+ 47212                                                                       BigDecimal amount,
+ 47213                                                                       String realName,
+ 47214                                                                       String alipayAccount,
+ 47215                                                                       String idCardNo,
+ 47216                                                                       String phoneNo,
+ 47217                                                                       String remark,
+ 47218                                                                       String dealerUserId,
+ 47219                                                                       String dealerUserNickname) throws YzhException {
+ 47220          YunzhanghuConfigDto config = getRequiredConfig();
+ 47221          CreateAlipayOrderRequest request = new CreateAlipayOrderRequest();
+ 47222          request.setOrderId(orderId);
+ 47223          request.setDealerId(config.getDealerId());
+ 47224          request.setBrokerId(config.getBrokerId());
+ 47225          request.setRealName(realName);
+ 47226          request.setCardNo(alipayAccount);
+ 47227          request.setIdCard(idCardNo);
+ 47228          request.setPhoneNo(phoneNo);
+ 47229          request.setPay(amount == null ? null : amount.toPlainString());
+ 47230          request.setPayRemark(remark);
+ 47231          request.setNotifyUrl(config.getNotifyUrl());
+ 47232          request.setProjectId(config.getProjectId());
+ 47233          request.setDealerPlatformName(config.getDealerPlatformName());
+ 47234          request.setDealerUserId(dealerUserId);
+ 47235          request.setDealerUserNickname(dealerUserNickname);
+ 47236          if (StringUtils.hasText(config.getCheckName())) {
+ 47237              request.setCheckName(config.getCheckName());
+ 47238          }
+ 47239  
+ 47240          return createPaymentClient().createAlipayOrder(YzhRequest.build(request));
+ 47241      }
+ 47242  
+ 47243      public YzhResponse<GetOrderResponse> queryOrder(String orderId) throws YzhException {
+ 47244          GetOrderRequest request = new GetOrderRequest();
+ 47245          request.setOrderId(orderId);
+ 47246          request.setChannel("alipay");
+ 47247          return createPaymentClient().getOrder(YzhRequest.build(request));
+ 47248      }
+ 47249  
+ 47250      public NotifyResponse<NotifyOrderRequest> decodeOrderNotify(Map<String, String> callbackParams) {
+ 47251          NotifyRequest notifyRequest = new NotifyRequest();
+ 47252          notifyRequest.setData(callbackParams == null ? null : callbackParams.get("data"));
+ 47253          notifyRequest.setMess(callbackParams == null ? null : callbackParams.get("mess"));
+ 47254          notifyRequest.setTimestamp(callbackParams == null ? null : callbackParams.get("timestamp"));
+ 47255          notifyRequest.setSign(callbackParams == null ? null : callbackParams.get("sign"));
+ 47256          return createNotifyClient().notifyDecoder(notifyRequest, NotifyOrderRequest.class);
+ 47257      }
+ 47258  
+ 47259      public boolean healthCheck() {
+ 47260          try {
+ 47261              buildConfig();
+ 47262              return true;
+ 47263          } catch (Exception ex) {
+ 47264              log.warn("云账户配置校验失败: {}", ex.getMessage());
+ 47265              return false;
+ 47266          }
+ 47267      }
+ 47268  
+ 47269      public YzhConfig buildConfig() {
+ 47270          YunzhanghuConfigDto config = getRequiredConfig();
+ 47271          YzhConfig yzhConfig = new YzhConfig();
+ 47272          yzhConfig.setDealerId(config.getDealerId());
+ 47273          yzhConfig.setBrokerId(config.getBrokerId());
+ 47274          yzhConfig.setYzhAppKey(config.getAppKey());
+ 47275          yzhConfig.setYzh3DesKey(config.getDes3Key());
+ 47276          yzhConfig.setYzhRsaPrivateKey(config.getRsaPrivateKey());
+ 47277          yzhConfig.setYzhRsaPublicKey(config.getRsaPublicKey());
+ 47278          yzhConfig.setYzhUrl(config.getUrl().trim());
+ 47279          yzhConfig.setSignType(parseSignType(config.getSignType()));
+ 47280          yzhConfig.setIsDebug(config.getIsDebug() == null || config.getIsDebug());
+ 47281          return yzhConfig;
+ 47282      }
+ 47283  
+ 47284      private PaymentClient createPaymentClient() {
+ 47285          return new PaymentClient(buildConfig());
+ 47286      }
+ 47287  
+ 47288      private NotifyClient createNotifyClient() {
+ 47289          return new NotifyClient(buildConfig());
+ 47290      }
+ 47291  
+ 47292      private YzhConfig.SignType parseSignType(String signType) {
+ 47293          if (!StringUtils.hasText(signType)) {
+ 47294              return YzhConfig.SignType.RSA;
+ 47295          }
+ 47296          try {
+ 47297              return YzhConfig.SignType.valueOf(signType.trim().toUpperCase());
+ 47298          } catch (IllegalArgumentException ex) {
+ 47299              throw new IllegalStateException("云账户签名类型不支持: " + signType);
+ 47300          }
+ 47301      }
+ 47302  
+ 47303      private YunzhanghuConfigDto getRequiredConfig() {
+ 47304          YunzhanghuConfigDto config = integrationConfigService.getYunzhanghuConfig();
+ 47305          if (config == null) {
+ 47306              throw new IllegalStateException("云账户配置不存在或未启用");
+ 47307          }
+ 47308          requireText(config.getDealerId(), "dealerId");
+ 47309          requireText(config.getBrokerId(), "brokerId");
+ 47310          requireText(config.getAppKey(), "appKey");
+ 47311          requireText(config.getDes3Key(), "3desKey");
+ 47312          requireText(config.getRsaPrivateKey(), "rsaPrivateKey");
+ 47313          requireText(config.getRsaPublicKey(), "rsaPublicKey");
+ 47314          requireText(config.getUrl(), "url");
+ 47315          if (!StringUtils.hasText(config.getSignType())) {
+ 47316              config.setSignType("rsa");
+ 47317          }
+ 47318          return config;
+ 47319      }
+ 47320  
+ 47321      private void requireText(String value, String key) {
+ 47322          if (!StringUtils.hasText(value)) {
+ 47323              throw new IllegalStateException("云账户配置缺少必填项: " + key);
+ 47324          }
+ 47325      }
+ 47326  }
+ 47327  
+ 47328  // ===== FILE: src/main/java/com/yiyundao/compensation/service/impl/FileUploadValidator.java =====
+ 47329  package com.yiyundao.compensation.service.impl;
+ 47330  
+ 47331  import com.yiyundao.compensation.config.FileStorageProperties;
+ 47332  import org.springframework.util.StringUtils;
+ 47333  import org.springframework.web.multipart.MultipartFile;
+ 47334  
+ 47335  final class FileUploadValidator {
+ 47336  
+ 47337      private FileUploadValidator() {
+ 47338      }
+ 47339  
+ 47340      static void validate(MultipartFile file, FileStorageProperties properties) {
+ 47341          if (file == null) {
+ 47342              throw new IllegalArgumentException("文件不能为空");
+ 47343          }
+ 47344          if (file.isEmpty()) {
+ 47345              throw new IllegalArgumentException("文件不能为空");
+ 47346          }
+ 47347          if (properties == null) {
+ 47348              throw new IllegalArgumentException("文件存储配置不能为空");
+ 47349          }
+ 47350  
+ 47351          String filename = StringUtils.getFilename(file.getOriginalFilename());
+ 47352          String extension = getFileExtension(filename).toLowerCase();
+ 47353  
+ 47354          if (!properties.getAllowedExtensions().contains(extension)) {
+ 47355              throw new IllegalArgumentException("不支持的文件类型: " + extension);
+ 47356          }
+ 47357  
+ 47358          if (file.getSize() > properties.getMaxFileSize()) {
+ 47359              throw new IllegalArgumentException("文件大小超出限制");
+ 47360          }
+ 47361      }
+ 47362  
+ 47363      private static String getFileExtension(String filename) {
+ 47364          if (filename == null) {
+ 47365              return "";
+ 47366          }
+ 47367          int lastDotIndex = filename.lastIndexOf('.');
+ 47368          return lastDotIndex > 0 ? filename.substring(lastDotIndex + 1) : "";
+ 47369      }
+ 47370  }
+ 47371  
+ 47372  // ===== FILE: src/main/java/com/yiyundao/compensation/service/impl/LocalFileService.java =====
+ 47373  package com.yiyundao.compensation.service.impl;
+ 47374  
+ 47375  import com.yiyundao.compensation.config.FileStorageProperties;
+ 47376  import com.yiyundao.compensation.service.FileService;
+ 47377  import lombok.RequiredArgsConstructor;
+ 47378  import lombok.extern.slf4j.Slf4j;
+ 47379  import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+ 47380  import org.springframework.stereotype.Service;
+ 47381  import org.springframework.web.multipart.MultipartFile;
+ 47382  
+ 47383  import jakarta.annotation.PostConstruct;
+ 47384  import java.io.IOException;
+ 47385  import java.io.InputStream;
+ 47386  import java.nio.file.Files;
+ 47387  import java.nio.file.Path;
+ 47388  import java.nio.file.Paths;
+ 47389  import java.nio.file.StandardCopyOption;
+ 47390  import java.time.LocalDate;
+ 47391  import java.time.format.DateTimeFormatter;
+ 47392  import java.util.UUID;
+ 47393  
+ 47394  @Slf4j
+ 47395  @Service
+ 47396  @RequiredArgsConstructor
+ 47397  @ConditionalOnProperty(name = "file-storage.active", havingValue = "local", matchIfMissing = true)
+ 47398  public class LocalFileService implements FileService {
+ 47399  
+ 47400      private final FileStorageProperties properties;
+ 47401      private Path rootLocation;
+ 47402  
+ 47403      @PostConstruct
+ 47404      public void init() {
+ 47405          if (this.rootLocation != null) {
+ 47406              return;
+ 47407          }
+ 47408          this.rootLocation = Paths.get(properties.getLocal().getBasePath());
+ 47409          try {
+ 47410              Files.createDirectories(rootLocation);
+ 47411          } catch (IOException e) {
+ 47412              throw new RuntimeException("无法创建文件存储目录", e);
+ 47413          }
+ 47414      }
+ 47415  
+ 47416      @Override
+ 47417      public String upload(MultipartFile file, String category) {
+ 47418          return upload(file, category, null);
+ 47419      }
+ 47420  
+ 47421      @Override
+ 47422      public String upload(MultipartFile file, String category, String fileName) {
+ 47423          FileUploadValidator.validate(file, properties);
+ 47424          validateCategory(category);
+ 47425          validateCustomFileName(fileName);
+ 47426  
+ 47427          if (fileName == null || fileName.isEmpty()) {
+ 47428              String originalFilename = file.getOriginalFilename();
+ 47429              String extension = getFileExtension(originalFilename);
+ 47430              fileName = generateFileName(extension);
+ 47431          }
+ 47432  
+ 47433          try {
+ 47434              ensureInitialized();
+ 47435              String datePath = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+ 47436              String relativePath = category + "/" + datePath + "/" + fileName;
+ 47437              Path destinationFile = rootLocation.resolve(relativePath).normalize();
+ 47438              if (!destinationFile.startsWith(rootLocation)) {
+ 47439                  throw new IllegalArgumentException("非法文件路径");
+ 47440              }
+ 47441  
+ 47442              Files.createDirectories(destinationFile.getParent());
+ 47443              Files.copy(file.getInputStream(), destinationFile, StandardCopyOption.REPLACE_EXISTING);
+ 47444  
+ 47445              log.info("文件上传成功: path={}, size={}", relativePath, file.getSize());
+ 47446              return relativePath;
+ 47447  
+ 47448          } catch (IOException e) {
+ 47449              throw new RuntimeException("文件上传失败", e);
+ 47450          }
+ 47451      }
+ 47452  
+ 47453      @Override
+ 47454      public void delete(String fileKey) {
+ 47455          ensureInitialized();
+ 47456          validateFileKey(fileKey);
+ 47457          Path file = rootLocation.resolve(fileKey).normalize();
+ 47458          if (!file.startsWith(rootLocation)) {
+ 47459              throw new IllegalArgumentException("非法文件路径");
+ 47460          }
+ 47461          try {
+ 47462              Files.deleteIfExists(file);
+ 47463              log.info("文件删除成功: path={}", fileKey);
+ 47464          } catch (IOException e) {
+ 47465              throw new RuntimeException("文件删除失败", e);
+ 47466          }
+ 47467      }
+ 47468  
+ 47469      @Override
+ 47470      public String getUrl(String fileKey) {
+ 47471          return properties.getLocal().getBaseUrl() + "/" + fileKey;
+ 47472      }
+ 47473  
+ 47474      @Override
+ 47475      public InputStream getInputStream(String fileKey) {
+ 47476          ensureInitialized();
+ 47477          validateFileKey(fileKey);
+ 47478          try {
+ 47479              Path file = rootLocation.resolve(fileKey).normalize();
+ 47480              if (!file.startsWith(rootLocation)) {
+ 47481                  throw new IllegalArgumentException("非法文件路径");
+ 47482              }
+ 47483              return Files.newInputStream(file);
+ 47484          } catch (IOException e) {
+ 47485              throw new RuntimeException("Failed to get input stream for file: " + fileKey, e);
+ 47486          }
+ 47487      }
+ 47488  
+ 47489      @Override
+ 47490      public boolean exists(String fileKey) {
+ 47491          ensureInitialized();
+ 47492          validateFileKey(fileKey);
+ 47493          Path file = rootLocation.resolve(fileKey).normalize();
+ 47494          if (!file.startsWith(rootLocation)) {
+ 47495              return false;
+ 47496          }
+ 47497          return Files.exists(file);
+ 47498      }
+ 47499  
+ 47500      @Override
+ 47501      public long getFileSize(String fileKey) {
+ 47502          ensureInitialized();
+ 47503          validateFileKey(fileKey);
+ 47504          try {
+ 47505              Path file = rootLocation.resolve(fileKey).normalize();
+ 47506              if (!file.startsWith(rootLocation)) {
+ 47507                  return -1;
+ 47508              }
+ 47509              return Files.size(file);
+ 47510          } catch (IOException e) {
+ 47511              return -1;
+ 47512          }
+ 47513      }
+ 47514  
+ 47515      private void ensureInitialized() {
+ 47516          if (rootLocation == null) {
+ 47517              init();
+ 47518          }
+ 47519      }
+ 47520  
+ 47521      private void validateCategory(String category) {
+ 47522          if (category == null || category.isBlank()) {
+ 47523              throw new IllegalArgumentException("category 不能为空");
+ 47524          }
+ 47525          if (category.startsWith("/") || category.contains("\\") || category.contains("..")) {
+ 47526              throw new IllegalArgumentException("非法 category");
+ 47527          }
+ 47528      }
+ 47529  
+ 47530      private void validateCustomFileName(String fileName) {
+ 47531          if (fileName == null || fileName.isEmpty()) {
+ 47532              return;
+ 47533          }
+ 47534          if (fileName.contains("/") || fileName.contains("\\") || fileName.contains("..")) {
+ 47535              throw new IllegalArgumentException("非法 fileName");
+ 47536          }
+ 47537      }
+ 47538  
+ 47539      private void validateFileKey(String fileKey) {
+ 47540          if (fileKey == null || fileKey.isBlank()) {
+ 47541              throw new IllegalArgumentException("fileKey 不能为空");
+ 47542          }
+ 47543          if (fileKey.startsWith("/") || fileKey.contains("\\") || fileKey.contains("..")) {
+ 47544              throw new IllegalArgumentException("非法 fileKey");
+ 47545          }
+ 47546      }
+ 47547  
+ 47548      private String getFileExtension(String filename) {
+ 47549          if (filename == null) {
+ 47550              return "";
+ 47551          }
+ 47552          int lastDotIndex = filename.lastIndexOf('.');
+ 47553          return lastDotIndex > 0 ? filename.substring(lastDotIndex + 1) : "";
+ 47554      }
+ 47555  
+ 47556      private String generateFileName(String extension) {
+ 47557          String uuid = UUID.randomUUID().toString().replace("-", "");
+ 47558          return extension.isEmpty() ? uuid : uuid + "." + extension;
+ 47559      }
+ 47560  }
+ 47561  
+ 47562  // ===== FILE: src/main/java/com/yiyundao/compensation/service/impl/MinioFileService.java =====
+ 47563  package com.yiyundao.compensation.service.impl;
+ 47564  
+ 47565  import com.yiyundao.compensation.config.FileStorageProperties;
+ 47566  import com.yiyundao.compensation.service.FileService;
+ 47567  import io.minio.*;
+ 47568  import io.minio.http.Method;
+ 47569  import lombok.RequiredArgsConstructor;
+ 47570  import lombok.extern.slf4j.Slf4j;
+ 47571  import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+ 47572  import org.springframework.stereotype.Service;
+ 47573  import org.springframework.web.multipart.MultipartFile;
+ 47574  
+ 47575  import jakarta.annotation.PostConstruct;
+ 47576  import java.io.InputStream;
+ 47577  import java.time.LocalDate;
+ 47578  import java.time.format.DateTimeFormatter;
+ 47579  import java.util.UUID;
+ 47580  
+ 47581  @Slf4j
+ 47582  @Service
+ 47583  @RequiredArgsConstructor
+ 47584  @ConditionalOnProperty(name = "file-storage.active", havingValue = "minio")
+ 47585  public class MinioFileService implements FileService {
+ 47586  
+ 47587      private final FileStorageProperties properties;
+ 47588      private MinioClient minioClient;
+ 47589      private FileService fallbackService;
+ 47590  
+ 47591      @PostConstruct
+ 47592      public void init() {
+ 47593          try {
+ 47594              FileStorageProperties.MinioStorage minio = properties.getMinio();
+ 47595              minioClient = MinioClient.builder()
+ 47596                      .endpoint(minio.getEndpoint())
+ 47597                      .credentials(minio.getAccessKey(), minio.getSecretKey())
+ 47598                      .build();
+ 47599  
+ 47600              ensureBucketExists(minio.getBucket());
+ 47601  
+ 47602          } catch (Exception e) {
+ 47603              log.warn("MinIO 客户端初始化失败，将使用本地存储: {}", e.getMessage());
+ 47604              LocalFileService localFileService = new LocalFileService(properties);
+ 47605              localFileService.init();
+ 47606              fallbackService = localFileService;
+ 47607          }
+ 47608      }
+ 47609  
+ 47610      private void ensureBucketExists(String bucketName) {
+ 47611          try {
+ 47612              boolean exists = minioClient.bucketExists(
+ 47613                      BucketExistsArgs.builder().bucket(bucketName).build()
+ 47614              );
+ 47615              if (!exists) {
+ 47616                  minioClient.makeBucket(
+ 47617                          MakeBucketArgs.builder().bucket(bucketName).build()
+ 47618                  );
+ 47619                  log.info("创建 MinIO Bucket: {}", bucketName);
+ 47620              }
+ 47621          } catch (Exception e) {
+ 47622              log.warn("检查 Bucket 失败: {}", e.getMessage());
+ 47623          }
+ 47624      }
+ 47625  
+ 47626      @Override
+ 47627      public String upload(MultipartFile file, String category) {
+ 47628          return upload(file, category, null);
+ 47629      }
+ 47630  
+ 47631      @Override
+ 47632      public String upload(MultipartFile file, String category, String fileName) {
+ 47633          if (fallbackService != null) {
+ 47634              return fallbackService.upload(file, category, fileName);
+ 47635          }
+ 47636          FileUploadValidator.validate(file, properties);
+ 47637          try {
+ 47638              String extension = getFileExtension(file.getOriginalFilename());
+ 47639              if (fileName == null || fileName.isEmpty()) {
+ 47640                  fileName = generateFileName(extension);
+ 47641              }
+ 47642  
+ 47643              String datePath = LocalDate.now().format(DateTimeFormatter.ofPattern("yyyy/MM/dd"));
+ 47644              String objectName = category + "/" + datePath + "/" + fileName;
+ 47645  
+ 47646              minioClient.putObject(
+ 47647                      PutObjectArgs.builder()
+ 47648                              .bucket(properties.getMinio().getBucket())
+ 47649                              .object(objectName)
+ 47650                              .stream(file.getInputStream(), file.getSize(), -1)
+ 47651                              .contentType(file.getContentType())
+ 47652                              .build()
+ 47653              );
+ 47654  
+ 47655              log.info("文件上传成功: object={}, size={}", objectName, file.getSize());
+ 47656              return objectName;
+ 47657  
+ 47658          } catch (Exception e) {
+ 47659              throw new RuntimeException("MinIO 文件上传失败", e);
+ 47660          }
+ 47661      }
+ 47662  
+ 47663      @Override
+ 47664      public void delete(String fileKey) {
+ 47665          if (fallbackService != null) {
+ 47666              fallbackService.delete(fileKey);
+ 47667              return;
+ 47668          }
+ 47669          try {
+ 47670              minioClient.removeObject(
+ 47671                      RemoveObjectArgs.builder()
+ 47672                              .bucket(properties.getMinio().getBucket())
+ 47673                              .object(fileKey)
+ 47674                              .build()
+ 47675              );
+ 47676              log.info("文件删除成功: object={}", fileKey);
+ 47677          } catch (Exception e) {
+ 47678              throw new RuntimeException("MinIO 文件删除失败", e);
+ 47679          }
+ 47680      }
+ 47681  
+ 47682      @Override
+ 47683      public String getUrl(String fileKey) {
+ 47684          if (fallbackService != null) {
+ 47685              return fallbackService.getUrl(fileKey);
+ 47686          }
+ 47687          try {
+ 47688              return minioClient.getPresignedObjectUrl(
+ 47689                      GetPresignedObjectUrlArgs.builder()
+ 47690                              .bucket(properties.getMinio().getBucket())
+ 47691                              .object(fileKey)
+ 47692                              .method(Method.GET)
+ 47693                              .expiry(24 * 60 * 60)
+ 47694                              .build()
+ 47695              );
+ 47696          } catch (Exception e) {
+ 47697              throw new RuntimeException("获取文件 URL 失败", e);
+ 47698          }
+ 47699      }
+ 47700  
+ 47701      @Override
+ 47702      public InputStream getInputStream(String fileKey) {
+ 47703          if (fallbackService != null) {
+ 47704              return fallbackService.getInputStream(fileKey);
+ 47705          }
+ 47706          try {
+ 47707              return minioClient.getObject(
+ 47708                      GetObjectArgs.builder()
+ 47709                              .bucket(properties.getMinio().getBucket())
+ 47710                              .object(fileKey)
+ 47711                              .build()
+ 47712              );
+ 47713          } catch (Exception e) {
+ 47714              throw new RuntimeException("获取文件流失败", e);
+ 47715          }
+ 47716      }
+ 47717  
+ 47718      @Override
+ 47719      public boolean exists(String fileKey) {
+ 47720          if (fallbackService != null) {
+ 47721              return fallbackService.exists(fileKey);
+ 47722          }
+ 47723          try {
+ 47724              minioClient.statObject(
+ 47725                      StatObjectArgs.builder()
+ 47726                              .bucket(properties.getMinio().getBucket())
+ 47727                              .object(fileKey)
+ 47728                              .build()
+ 47729              );
+ 47730              return true;
+ 47731          } catch (Exception e) {
+ 47732              return false;
+ 47733          }
+ 47734      }
+ 47735  
+ 47736      @Override
+ 47737      public long getFileSize(String fileKey) {
+ 47738          if (fallbackService != null) {
+ 47739              return fallbackService.getFileSize(fileKey);
+ 47740          }
+ 47741          try {
+ 47742              StatObjectResponse stat = minioClient.statObject(
+ 47743                      StatObjectArgs.builder()
+ 47744                              .bucket(properties.getMinio().getBucket())
+ 47745                              .object(fileKey)
+ 47746                              .build()
+ 47747              );
+ 47748              return stat.size();
+ 47749          } catch (Exception e) {
+ 47750              return -1;
+ 47751          }
+ 47752      }
+ 47753  
+ 47754      private String getFileExtension(String filename) {
+ 47755          if (filename == null) {
+ 47756              return "";
+ 47757          }
+ 47758          int lastDotIndex = filename.lastIndexOf('.');
+ 47759          return lastDotIndex > 0 ? filename.substring(lastDotIndex + 1) : "";
+ 47760      }
+ 47761  
+ 47762      private String generateFileName(String extension) {
+ 47763          String uuid = UUID.randomUUID().toString().replace("-", "");
+ 47764          return extension.isEmpty() ? uuid : uuid + "." + extension;
+ 47765      }
+ 47766  }
+ 47767  
+ 47768  // ===== FILE: src/main/java/com/yiyundao/compensation/service/impl/ScheduledTaskServiceImpl.java =====
+ 47769  package com.yiyundao.compensation.service.impl;
+ 47770  
+ 47771  import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+ 47772  import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+ 47773  import com.yiyundao.compensation.dto.TaskScheduleDTO;
+ 47774  import com.yiyundao.compensation.entity.ScheduledTask;
+ 47775  import com.yiyundao.compensation.entity.ScheduledTaskExecution;
+ 47776  import com.yiyundao.compensation.mapper.ScheduledTaskExecutionMapper;
+ 47777  import com.yiyundao.compensation.mapper.ScheduledTaskMapper;
+ 47778  import com.yiyundao.compensation.service.ScheduledTaskService;
+ 47779  import com.yiyundao.compensation.service.TaskHandler;
+ 47780  import lombok.RequiredArgsConstructor;
+ 47781  import lombok.extern.slf4j.Slf4j;
+ 47782  import org.springframework.context.ApplicationContext;
+ 47783  import org.springframework.scheduling.support.CronExpression;
+ 47784  import org.springframework.stereotype.Service;
+ 47785  import org.springframework.transaction.annotation.Transactional;
+ 47786  
+ 47787  import java.time.LocalDateTime;
+ 47788  import java.util.List;
+ 47789  import java.util.Map;
+ 47790  import java.util.concurrent.ConcurrentHashMap;
+ 47791  
+ 47792  @Slf4j
+ 47793  @Service
+ 47794  @RequiredArgsConstructor
+ 47795  public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, ScheduledTask>
+ 47796          implements ScheduledTaskService {
+ 47797  
+ 47798      private final ScheduledTaskExecutionMapper executionMapper;
+ 47799      private final ApplicationContext applicationContext;
+ 47800  
+ 47801      /**
+ 47802       * 任务处理器缓存（Bean Name -> Handler Instance）
+ 47803       */
+ 47804      private final Map<String, TaskHandler> handlerCache = new ConcurrentHashMap<>();
+ 47805  
+ 47806      @Override
+ 47807      public List<ScheduledTask> listTasksByStatus(ScheduledTask.TaskStatus status) {
+ 47808          return list(new LambdaQueryWrapper<ScheduledTask>()
+ 47809                  .eq(ScheduledTask::getStatus, status)
+ 47810                  .orderByDesc(ScheduledTask::getCreateTime));
+ 47811      }
+ 47812  
+ 47813      @Override
+ 47814      @Transactional(rollbackFor = Exception.class)
+ 47815      public Long createTask(TaskScheduleDTO dto) {
+ 47816          ScheduledTask task = new ScheduledTask();
+ 47817          task.setTaskKey(dto.getTaskKey());
+ 47818          task.setTaskName(dto.getTaskName());
+ 47819          task.setTaskGroup(dto.getTaskGroup());
+ 47820          task.setCronExpression(dto.getCronExpression());
+ 47821          task.setDescription(dto.getDescription());
+ 47822          task.setStatus(ScheduledTask.TaskStatus.PAUSED);
+ 47823          task.setRetryCount(0);
+ 47824          task.setMaxRetryCount(dto.getMaxRetryCount() != null ? dto.getMaxRetryCount() : 3);
+ 47825          task.setRetryIntervalSeconds(dto.getRetryIntervalSeconds() != null ? dto.getRetryIntervalSeconds() : 60);
+ 47826          task.setAlarmEnabled(dto.getAlarmEnabled());
+ 47827          task.setAlarmReceivers(dto.getAlarmReceivers());
+ 47828          task.setHandlerBean(dto.getHandlerBean());
+ 47829          task.setNextExecuteTime(calculateNextExecutionTime(dto.getCronExpression()));
+ 47830  
+ 47831          save(task);
+ 47832          return task.getId();
+ 47833      }
+ 47834  
+ 47835      @Override
+ 47836      @Transactional(rollbackFor = Exception.class)
+ 47837      public void updateTask(Long id, TaskScheduleDTO dto) {
+ 47838          ScheduledTask task = getById(id);
+ 47839          if (task == null) {
+ 47840              throw new RuntimeException("任务不存在: " + id);
+ 47841          }
+ 47842  
+ 47843          task.setTaskName(dto.getTaskName());
+ 47844          task.setTaskGroup(dto.getTaskGroup());
+ 47845          task.setCronExpression(dto.getCronExpression());
+ 47846          task.setDescription(dto.getDescription());
+ 47847          task.setMaxRetryCount(dto.getMaxRetryCount() != null ? dto.getMaxRetryCount() : task.getMaxRetryCount());
+ 47848          task.setRetryIntervalSeconds(dto.getRetryIntervalSeconds() != null ? dto.getRetryIntervalSeconds() : task.getRetryIntervalSeconds());
+ 47849          task.setAlarmEnabled(dto.getAlarmEnabled());
+ 47850          task.setAlarmReceivers(dto.getAlarmReceivers());
+ 47851          task.setHandlerBean(dto.getHandlerBean());
+ 47852          task.setNextExecuteTime(calculateNextExecutionTime(dto.getCronExpression()));
+ 47853  
+ 47854          updateById(task);
+ 47855      }
+ 47856  
+ 47857      @Override
+ 47858      @Transactional(rollbackFor = Exception.class)
+ 47859      public void pauseTask(Long id) {
+ 47860          ScheduledTask task = getById(id);
+ 47861          if (task != null) {
+ 47862              task.setStatus(ScheduledTask.TaskStatus.PAUSED);
+ 47863              updateById(task);
+ 47864          }
+ 47865      }
+ 47866  
+ 47867      @Override
+ 47868      @Transactional(rollbackFor = Exception.class)
+ 47869      public void resumeTask(Long id) {
+ 47870          ScheduledTask task = getById(id);
+ 47871          if (task != null) {
+ 47872              task.setStatus(ScheduledTask.TaskStatus.RUNNING);
+ 47873              task.setNextExecuteTime(calculateNextExecutionTime(task.getCronExpression()));
+ 47874              updateById(task);
+ 47875          }
+ 47876      }
+ 47877  
+ 47878      @Override
+ 47879      @Transactional(rollbackFor = Exception.class)
+ 47880      public void deleteTask(Long id) {
+ 47881          removeById(id);
+ 47882      }
+ 47883  
+ 47884      @Override
+ 47885      @Transactional(rollbackFor = Exception.class)
+ 47886      public Long triggerTask(Long id) {
+ 47887          ScheduledTask task = getById(id);
+ 47888          if (task == null) {
+ 47889              throw new RuntimeException("任务不存在: " + id);
+ 47890          }
+ 47891  
+ 47892          // 创建执行记录
+ 47893          ScheduledTaskExecution execution = new ScheduledTaskExecution();
+ 47894          execution.setTaskId(task.getId());
+ 47895          execution.setTaskKey(task.getTaskKey());
+ 47896          execution.setStartTime(LocalDateTime.now());
+ 47897          execution.setStatus(ScheduledTaskExecution.ExecutionStatus.RUNNING);
+ 47898          executionMapper.insert(execution);
+ 47899  
+ 47900          // 执行任务
+ 47901          executeTask(task);
+ 47902  
+ 47903          return execution.getId();
+ 47904      }
+ 47905  
+ 47906      @Override
+ 47907      public List<ScheduledTaskExecution> getExecutionLogs(Long taskId, int limit) {
+ 47908          return executionMapper.selectList(new LambdaQueryWrapper<ScheduledTaskExecution>()
+ 47909                  .eq(ScheduledTaskExecution::getTaskId, taskId)
+ 47910                  .orderByDesc(ScheduledTaskExecution::getStartTime)
+ 47911                  .last("LIMIT " + limit));
+ 47912      }
+ 47913  
+ 47914      @Override
+ 47915      public void executeTask(ScheduledTask task) {
+ 47916          log.info("开始执行任务: taskKey={}, handlerBean={}", task.getTaskKey(), task.getHandlerBean());
+ 47917          long startTime = System.currentTimeMillis();
+ 47918          TaskHandler.TaskExecutionResult result = null;
+ 47919  
+ 47920          try {
+ 47921              // 根据 handlerBean 获取任务处理器
+ 47922              TaskHandler handler = getTaskHandler(task.getHandlerBean());
+ 47923  
+ 47924              if (handler == null) {
+ 47925                  throw new RuntimeException("未找到任务处理器: handlerBean=" + task.getHandlerBean());
+ 47926              }
+ 47927  
+ 47928              // 执行任务
+ 47929              result = handler.execute(task.getTaskKey(), null);
+ 47930  
+ 47931              if (!result.success()) {
+ 47932                  throw new RuntimeException("任务执行失败: " + result.message());
+ 47933              }
+ 47934  
+ 47935              // 更新任务状态
+ 47936              task.setLastExecuteTime(LocalDateTime.now());
+ 47937              task.setStatus(ScheduledTask.TaskStatus.SUCCESS);
+ 47938              task.setLastResult("SUCCESS: " + result.message());
+ 47939              task.setRetryCount(0);
+ 47940              task.setNextExecuteTime(calculateNextExecutionTime(task.getCronExpression()));
+ 47941              updateById(task);
+ 47942  
+ 47943              log.info("任务执行成功: taskKey={}, handler={}, duration={}ms, message={}",
+ 47944                      task.getTaskKey(), task.getHandlerBean(), System.currentTimeMillis() - startTime, result.message());
+ 47945  
+ 47946          } catch (Exception e) {
+ 47947              log.error("任务执行失败: taskKey={}, handlerBean={}", task.getTaskKey(), task.getHandlerBean(), e);
+ 47948  
+ 47949              task.setStatus(ScheduledTask.TaskStatus.FAILED);
+ 47950              task.setLastResult("FAILED: " + e.getMessage());
+ 47951              task.setRetryCount(task.getRetryCount() + 1);
+ 47952              updateById(task);
+ 47953  
+ 47954              // 检查是否需要重试
+ 47955              if (task.getRetryCount() < task.getMaxRetryCount()) {
+ 47956                  log.info("任务将在 {} 秒后重试: taskKey={}, retryCount={}/{}",
+ 47957                          task.getRetryIntervalSeconds(), task.getTaskKey(), task.getRetryCount(), task.getMaxRetryCount());
+ 47958              } else {
+ 47959                  log.error("任务重试次数已达上限: taskKey={}, maxRetryCount={}",
+ 47960                          task.getTaskKey(), task.getMaxRetryCount());
+ 47961              }
+ 47962  
+ 47963              throw new RuntimeException("任务执行失败: " + e.getMessage(), e);
+ 47964          }
+ 47965      }
+ 47966  
+ 47967      /**
+ 47968       * 根据 handlerBean 获取任务处理器
+ 47969       *
+ 47970       * @param handlerBean handlerBean 名称
+ 47971       * @return 任务处理器实例
+ 47972       */
+ 47973      private TaskHandler getTaskHandler(String handlerBean) {
+ 47974          if (handlerBean == null || handlerBean.isBlank()) {
+ 47975              return null;
+ 47976          }
+ 47977  
+ 47978          // 先从缓存获取
+ 47979          TaskHandler handler = handlerCache.get(handlerBean);
+ 47980          if (handler != null) {
+ 47981              return handler;
+ 47982          }
+ 47983  
+ 47984          // 从 Spring 容器获取
+ 47985          try {
+ 47986              handler = applicationContext.getBean(handlerBean, TaskHandler.class);
+ 47987              if (handler != null) {
+ 47988                  handlerCache.put(handlerBean, handler);
+ 47989                  log.debug("已加载任务处理器: handlerBean={}, taskType={}", handlerBean, handler.getTaskType());
+ 47990              }
+ 47991              return handler;
+ 47992          } catch (Exception e) {
+ 47993              log.warn("获取任务处理器失败: handlerBean={}", handlerBean, e);
+ 47994              return null;
+ 47995          }
+ 47996      }
+ 47997  
+ 47998      @Override
+ 47999      public LocalDateTime calculateNextExecutionTime(String cronExpression) {
+ 48000          try {
+ 48001              CronExpression cron = CronExpression.parse(cronExpression);
+ 48002              return cron.next(LocalDateTime.now());
+ 48003          } catch (Exception e) {
+ 48004              log.warn("解析 Cron 表达式失败: {}", cronExpression);
+ 48005              return null;
+ 48006          }
+ 48007      }
+ 48008  }
+ 48009  
+ 48010  // ===== FILE: src/main/resources/mapper/AuditLogMapper.xml =====
+ 48011  <?xml version="1.0" encoding="UTF-8"?>
+ 48012  <!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+ 48013  <mapper namespace="com.yiyundao.compensation.infrastructure.dao.AuditLogMapper">
+ 48014  
+ 48015      <!-- 根据时间范围查询 -->
+ 48016      <select id="findByTimeRange" resultType="com.yiyundao.compensation.modules.audit.entity.AuditLog">
+ 48017          SELECT * FROM audit_log
+ 48018          WHERE create_time &gt;= #{startTime}
+ 48019          AND create_time &lt;= #{endTime}
+ 48020          ORDER BY create_time DESC
+ 48021      </select>
+ 48022  
+ 48023      <!-- 分页查询 -->
+ 48024      <select id="queryByPage" resultType="com.yiyundao.compensation.modules.audit.entity.AuditLog">
+ 48025          SELECT * FROM audit_log
+ 48026          <where>
+ 48027              <if test="request.username != null and request.username != ''">
+ 48028                  AND username = #{request.username}
+ 48029              </if>
+ 48030              <if test="request.operation != null and request.operation != ''">
+ 48031                  AND operation LIKE CONCAT('%', #{request.operation}, '%')
+ 48032              </if>
+ 48033              <if test="request.businessType != null and request.businessType != ''">
+ 48034                  AND business_type = #{request.businessType}
+ 48035              </if>
+ 48036              <if test="request.requestIp != null and request.requestIp != ''">
+ 48037                  AND request_ip = #{request.requestIp}
+ 48038              </if>
+ 48039              <if test="request.responseResult != null and request.responseResult != ''">
+ 48040                  AND response_result = #{request.responseResult}
+ 48041              </if>
+ 48042              <if test="request.startTime != null">
+ 48043                  AND create_time &gt;= #{request.startTime}
+ 48044              </if>
+ 48045              <if test="request.endTime != null">
+ 48046                  AND create_time &lt;= #{request.endTime}
+ 48047              </if>
+ 48048              <if test="request.keyword != null and request.keyword != ''">
+ 48049                  AND (operation LIKE CONCAT('%', #{request.keyword}, '%')
+ 48050                  OR username LIKE CONCAT('%', #{request.keyword}, '%')
+ 48051                  OR error_msg LIKE CONCAT('%', #{request.keyword}, '%'))
+ 48052              </if>
+ 48053          </where>
+ 48054          ORDER BY create_time DESC
+ 48055          LIMIT #{request.size} OFFSET #{request.offset}
+ 48056      </select>
+ 48057  
+ 48058  </mapper>
+ 48059  
+ 48060  // ===== FILE: src/main/resources/mapper/PayrollBatchMapper.xml =====
+ 48061  <?xml version="1.0" encoding="UTF-8"?>
+ 48062  <!DOCTYPE mapper
+ 48063          PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+ 48064          "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+ 48065  <mapper namespace="com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper">
+ 48066  
+ 48067      <!-- 查询批次列表并聚合汇总数据 -->
+ 48068      <select id="selectBatchSummaryList" resultType="com.yiyundao.compensation.interfaces.vo.payroll.PayrollBatchSummaryVO">
+ 48069          SELECT
+ 48070              pb.id AS batch_id,
+ 48071              pb.payment_batch_no AS batch_no,
+ 48072              pb.pay_cycle_id AS pay_cycle_id,
+ 48073              pb.period_label AS period_label,
+ 48074              pb.type AS payroll_type,
+ 48075              pb.currency AS currency,
+ 48076              pb.status AS status,
+ 48077              pb.remark AS remark,
+ 48078              pb.create_time AS created_at,
+ 48079              pb.update_time AS updated_at,
+ 48080              COALESCE(summary.employee_count, 0) AS total_employees,
+ 48081              COALESCE(summary.line_count, 0) AS total_lines,
+ 48082              COALESCE(summary.gross_total, 0) AS gross_total,
+ 48083              COALESCE(summary.net_total, 0) AS net_total,
+ 48084              COALESCE(warning_summary.warnings, '[]') AS warnings
+ 48085          FROM payroll_batch pb
+ 48086          LEFT JOIN (
+ 48087              SELECT
+ 48088                  batch_id,
+ 48089                  COUNT(DISTINCT employee_id) AS employee_count,
+ 48090                  COUNT(*) AS line_count,
+ 48091                  COALESCE(SUM(gross_amount), 0) AS gross_total,
+ 48092                  COALESCE(SUM(net_amount), 0) AS net_total
+ 48093              FROM payroll_line pl
+ 48094              WHERE pl.deleted = 0
+ 48095              GROUP BY batch_id
+ 48096          ) summary ON pb.id = summary.batch_id
+ 48097          LEFT JOIN (
+ 48098              SELECT
+ 48099                  batch_id,
+ 48100                  CONCAT('[', GROUP_CONCAT(DISTINCT CONCAT('"', REPLACE(pl.warning, '"', '\\"'), '"') SEPARATOR ','), ']') AS warnings
+ 48101              FROM payroll_line pl
+ 48102              WHERE pl.deleted = 0 AND pl.warning IS NOT NULL AND pl.warning != ''
+ 48103              GROUP BY batch_id
+ 48104          ) warning_summary ON pb.id = warning_summary.batch_id
+ 48105          WHERE pb.deleted = 0
+ 48106          <if test="type != null and type != ''">
+ 48107              AND pb.type = #{type}
+ 48108          </if>
+ 48109          <if test="periodLabel != null and periodLabel != ''">
+ 48110              AND pb.period_label = #{periodLabel}
+ 48111          </if>
+ 48112          <if test="status != null and status != ''">
+ 48113              AND pb.status = #{status}
+ 48114          </if>
+ 48115          ORDER BY pb.update_time DESC
+ 48116          LIMIT #{offset}, #{size}
+ 48117      </select>
+ 48118  
+ 48119      <!-- 统计符合条件的批次数量 -->
+ 48120      <select id="countBatchSummary" resultType="long">
+ 48121          SELECT COUNT(*)
+ 48122          FROM payroll_batch pb
+ 48123          WHERE pb.deleted = 0
+ 48124          <if test="type != null and type != ''">
+ 48125              AND pb.type = #{type}
+ 48126          </if>
+ 48127          <if test="periodLabel != null and periodLabel != ''">
+ 48128              AND pb.period_label = #{periodLabel}
+ 48129          </if>
+ 48130          <if test="status != null and status != ''">
+ 48131              AND pb.status = #{status}
+ 48132          </if>
+ 48133      </select>
+ 48134  
+ 48135  </mapper>
+ 48136  

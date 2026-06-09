@@ -131,6 +131,12 @@ public class BindPlatformResult {
         private String occupiedEmployeeNo;
 
         /**
+         * 被占用的系统用户ID
+         */
+        @Schema(description = "被占用的系统用户ID")
+        private Long occupiedUserId;
+
+        /**
          * 被占用的平台提供方
          */
         @Schema(description = "被占用的平台提供方")

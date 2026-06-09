@@ -38,3 +38,16 @@ export function toMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
   return String(err);
 }
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+export function withActionPrefix(action: string, err: unknown): string {
+  const message = toMessage(err).trim() || '请求失败，请稍后重试';
+  const actionPrefix = new RegExp(`^${escapeRegExp(action)}\\s*[:：]`);
+  if (actionPrefix.test(message)) {
+    return message;
+  }
+  return `${action}：${message}`;
+}

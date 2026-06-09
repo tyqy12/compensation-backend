@@ -4,24 +4,37 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.enums.PayrollType;
+import com.yiyundao.compensation.interfaces.dto.payroll.SalaryTemplateResponseDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.SalaryTemplateUpsertRequest;
 import com.yiyundao.compensation.modules.payroll.entity.SalaryTemplate;
 import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateService;
+import com.yiyundao.compensation.security.SecurityAnnotations;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 @Slf4j
 @RestController
 @RequestMapping("/payroll/templates")
+@SecurityAnnotations.IsFinanceOrAdmin
 @RequiredArgsConstructor
 public class SalaryTemplateController {
+
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 200;
+    private static final String STATUS_ENABLED = "enabled";
+    private static final String STATUS_DISABLED = "disabled";
 
     private final SalaryTemplateService salaryTemplateService;
     private final ObjectMapper objectMapper;
@@ -43,10 +56,16 @@ public class SalaryTemplateController {
                 return errors;
             }
 
+            Set<String> itemCodes = new HashSet<>();
             for (int i = 0; i < root.size(); i++) {
                 JsonNode item = root.get(i);
                 if (!item.has("code") || item.get("code").asText().isBlank()) {
                     errors.add("itemsJson[" + i + "]: 缺少code字段或code为空");
+                } else {
+                    String code = item.get("code").asText().trim();
+                    if (!itemCodes.add(code)) {
+                        errors.add("itemsJson[" + i + "]: code重复: " + code);
+                    }
                 }
                 if (!item.has("name") || item.get("name").asText().isBlank()) {
                     errors.add("itemsJson[" + i + "]: 缺少name字段或name为空");
@@ -68,6 +87,7 @@ public class SalaryTemplateController {
                 if (item.has("max") && !item.get("max").isNumber()) {
                     errors.add("itemsJson[" + i + "]: max必须是数字类型");
                 }
+                validateItemAmountBounds(item, i, errors);
             }
         } catch (Exception e) {
             errors.add("itemsJson解析失败: " + e.getMessage());
@@ -98,6 +118,8 @@ public class SalaryTemplateController {
                 JsonNode tax = root.get("tax");
                 if (tax.has("rate") && !tax.get("rate").isNumber()) {
                     errors.add("taxRuleJson.tax.rate必须是数字类型");
+                } else if (tax.has("rate")) {
+                    validateRate(tax.get("rate"), "taxRuleJson.tax.rate", errors);
                 }
                 if (tax.has("applyOn")) {
                     String applyOn = tax.get("applyOn").asText();
@@ -113,6 +135,8 @@ public class SalaryTemplateController {
                 JsonNode social = root.get("social");
                 if (social.has("rate") && !social.get("rate").isNumber()) {
                     errors.add("taxRuleJson.social.rate必须是数字类型");
+                } else if (social.has("rate")) {
+                    validateRate(social.get("rate"), "taxRuleJson.social.rate", errors);
                 }
                 if (social.has("applyOn")) {
                     String applyOn = social.get("applyOn").asText();
@@ -146,7 +170,7 @@ public class SalaryTemplateController {
     }
 
     @PostMapping
-    public ApiResponse<SalaryTemplate> create(@Valid @RequestBody SalaryTemplateUpsertRequest req) {
+    public ApiResponse<SalaryTemplateResponseDto> create(@Valid @RequestBody SalaryTemplateUpsertRequest req) {
         // JSON语法验证
         List<String> itemsErrors = validateItemsJson(req.getItemsJson());
         if (!itemsErrors.isEmpty()) {
@@ -157,13 +181,15 @@ public class SalaryTemplateController {
         if (!taxErrors.isEmpty()) {
             return ApiResponse.error(ErrorCode.PARAM_INVALID, "taxRuleJson验证失败: " + String.join("; ", taxErrors));
         }
+        String normalizedType = normalizeTemplateType(req.getType());
+        String normalizedStatus = normalizeTemplateStatus(req.getStatus(), STATUS_ENABLED);
 
         SalaryTemplate t = new SalaryTemplate();
         t.setName(req.getName());
-        t.setType(req.getType());
+        t.setType(normalizedType);
         t.setItemsJson(req.getItemsJson());
         t.setTaxRuleJson(req.getTaxRuleJson());
-        t.setStatus(req.getStatus() == null ? "enabled" : req.getStatus());
+        t.setStatus(normalizedStatus);
         t.setDataVersion(1L); // 初始版本号
 
         try {
@@ -174,11 +200,11 @@ public class SalaryTemplateController {
             return ApiResponse.error(ErrorCode.SYSTEM_ERROR, "创建薪资模板失败");
         }
 
-        return ApiResponse.success(t);
+        return ApiResponse.success(SalaryTemplateResponseDto.from(t));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<SalaryTemplate> update(@PathVariable Long id, @Valid @RequestBody SalaryTemplateUpsertRequest req) {
+    public ApiResponse<SalaryTemplateResponseDto> update(@PathVariable Long id, @Valid @RequestBody SalaryTemplateUpsertRequest req) {
         SalaryTemplate t = salaryTemplateService.getById(id);
         if (t == null) return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "template not found");
 
@@ -196,6 +222,8 @@ public class SalaryTemplateController {
                 return ApiResponse.error(ErrorCode.PARAM_INVALID, "taxRuleJson验证失败: " + String.join("; ", taxErrors));
             }
         }
+        String normalizedType = req.getType() != null ? normalizeTemplateType(req.getType()) : null;
+        String normalizedStatus = req.getStatus() != null ? normalizeTemplateStatus(req.getStatus(), null) : null;
 
         // 版本控制：只有当内容真正变化时才递增版本
         boolean contentChanged = false;
@@ -216,10 +244,10 @@ public class SalaryTemplateController {
         }
 
         t.setName(req.getName() != null ? req.getName() : t.getName());
-        t.setType(req.getType() != null ? req.getType() : t.getType());
+        t.setType(normalizedType != null ? normalizedType : t.getType());
         t.setItemsJson(req.getItemsJson() != null ? req.getItemsJson() : t.getItemsJson());
         t.setTaxRuleJson(req.getTaxRuleJson() != null ? req.getTaxRuleJson() : t.getTaxRuleJson());
-        if (req.getStatus() != null) t.setStatus(req.getStatus());
+        if (normalizedStatus != null) t.setStatus(normalizedStatus);
 
         try {
             salaryTemplateService.updateById(t);
@@ -229,7 +257,7 @@ public class SalaryTemplateController {
             return ApiResponse.error(ErrorCode.SYSTEM_ERROR, "更新薪资模板失败");
         }
 
-        return ApiResponse.success(t);
+        return ApiResponse.success(SalaryTemplateResponseDto.from(t));
     }
 
     /**
@@ -253,25 +281,93 @@ public class SalaryTemplateController {
     }
 
     @GetMapping
-    public ApiResponse<Page<SalaryTemplate>> list(@RequestParam(defaultValue = "1") int page,
-                                                  @RequestParam(defaultValue = "10") int size,
-                                                  @RequestParam(required = false) String type,
-                                                  @RequestParam(required = false) String status) {
-        Page<SalaryTemplate> p = new Page<>(page, size);
+    public ApiResponse<Page<SalaryTemplateResponseDto>> list(@RequestParam(defaultValue = "1") int page,
+                                                             @RequestParam(defaultValue = "10") int size,
+                                                             @RequestParam(required = false) String type,
+                                                             @RequestParam(required = false) String status) {
+        Page<SalaryTemplate> p = new Page<>(safePage(page), safeSize(size));
         LambdaQueryWrapper<SalaryTemplate> qw = new LambdaQueryWrapper<>();
-        if (type != null && !type.isBlank()) qw.eq(SalaryTemplate::getType, type);
-        if (status != null && !status.isBlank()) qw.eq(SalaryTemplate::getStatus, status);
+        if (type != null && !type.isBlank()) qw.eq(SalaryTemplate::getType, normalizeTemplateTypeFilter(type));
+        if (status != null && !status.isBlank()) qw.eq(SalaryTemplate::getStatus, normalizeTemplateStatusFilter(status));
         qw.orderByDesc(SalaryTemplate::getVersion); // 按版本号降序排列
-        return ApiResponse.success(salaryTemplateService.page(p, qw));
+        return ApiResponse.success(toResponsePage(salaryTemplateService.page(p, qw)));
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<SalaryTemplate> get(@PathVariable Long id) {
+    public ApiResponse<SalaryTemplateResponseDto> get(@PathVariable Long id) {
         SalaryTemplate template = salaryTemplateService.getById(id);
         if (template == null) {
             return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "template not found");
         }
-        return ApiResponse.success(template);
+        return ApiResponse.success(SalaryTemplateResponseDto.from(template));
+    }
+
+    private static Page<SalaryTemplateResponseDto> toResponsePage(Page<SalaryTemplate> source) {
+        Page<SalaryTemplateResponseDto> target = new Page<>(source.getCurrent(), source.getSize(), source.getTotal());
+        target.setPages(source.getPages());
+        target.setRecords(source.getRecords().stream()
+            .map(SalaryTemplateResponseDto::from)
+            .toList());
+        return target;
+    }
+
+    private int safePage(int page) {
+        return page < 1 ? 1 : page;
+    }
+
+    private int safeSize(int size) {
+        if (size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
+    }
+
+    private String normalizeTemplateTypeFilter(String type) {
+        return normalizeTemplateType(type);
+    }
+
+    private String normalizeTemplateType(String type) {
+        PayrollType payrollType = PayrollType.fromCode(type.trim());
+        if (payrollType == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "无效的模板类型: " + type);
+        }
+        return payrollType.getCode();
+    }
+
+    private String normalizeTemplateStatusFilter(String status) {
+        return normalizeTemplateStatus(status, null);
+    }
+
+    private String normalizeTemplateStatus(String status, String defaultStatus) {
+        if (status == null) {
+            return defaultStatus;
+        }
+        String normalizedStatus = status.trim().toLowerCase();
+        if (!STATUS_ENABLED.equals(normalizedStatus) && !STATUS_DISABLED.equals(normalizedStatus)) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "无效的模板状态: " + status);
+        }
+        return normalizedStatus;
+    }
+
+    private void validateItemAmountBounds(JsonNode item, int index, List<String> errors) {
+        BigDecimal min = item.has("min") && item.get("min").isNumber() ? item.get("min").decimalValue() : null;
+        BigDecimal max = item.has("max") && item.get("max").isNumber() ? item.get("max").decimalValue() : null;
+        if (min != null && min.compareTo(BigDecimal.ZERO) < 0) {
+            errors.add("itemsJson[" + index + "]: min不能小于0");
+        }
+        if (max != null && max.compareTo(BigDecimal.ZERO) < 0) {
+            errors.add("itemsJson[" + index + "]: max不能小于0");
+        }
+        if (min != null && max != null && min.compareTo(max) > 0) {
+            errors.add("itemsJson[" + index + "]: min不能大于max");
+        }
+    }
+
+    private void validateRate(JsonNode rateNode, String fieldName, List<String> errors) {
+        BigDecimal rate = rateNode.decimalValue();
+        if (rate.compareTo(BigDecimal.ZERO) < 0 || rate.compareTo(BigDecimal.ONE) > 0) {
+            errors.add(fieldName + "必须在0到1之间");
+        }
     }
 
     /**

@@ -53,8 +53,6 @@ public enum PayrollBatchStatus {
         return this == LOCKED
                 || this == CONFIRMING
                 || this == DISPUTE_PROCESSING
-                || this == CONFIRMED
-                || this == APPROVED
                 || this == REJECTED;
     }
 }

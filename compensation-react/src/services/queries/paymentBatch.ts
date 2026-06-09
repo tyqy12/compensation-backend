@@ -9,6 +9,12 @@ export type PaymentBatch = PaymentBatchVO;
 // 支付记录数据类型定义
 export type PaymentRecord = PaymentRecordItemVO;
 
+const STARTABLE_BATCH_STATUSES = new Set(['submitted', 'approved']);
+
+export function isStartablePaymentBatch(batch: Pick<PaymentBatch, 'status'>): boolean {
+  return STARTABLE_BATCH_STATUSES.has(batch.status || '');
+}
+
 export interface TransferValidationIssue {
   recordId?: number;
   employeeId?: number;
@@ -52,6 +58,35 @@ export interface PaymentRecordQueryParams {
 // 转账状态查询结果
 export type TransferStatus = string;
 
+export type PaymentBatchListResponse = PagedResponse<PaymentBatch> & {
+  list: PaymentBatch[];
+};
+
+export async function fetchPaymentBatches(params: PaymentBatchQueryParams): Promise<PaymentBatchListResponse> {
+  const queryParams = {
+    page: params.current || 1,
+    size: params.pageSize || 10,
+    status: params.status,
+    paymentType: params.paymentType,
+    startDate: params.startDate,
+    endDate: params.endDate,
+    keyword: params.keyword,
+    sortBy: params.sortBy || 'submitTime',
+    order: params.order || 'desc',
+  };
+
+  const cleanParams = Object.fromEntries(
+    Object.entries(queryParams).filter(([, value]) => value !== undefined && value !== ''),
+  );
+
+  const { data } = await api.get('/payment/batch', { params: cleanParams });
+  const pagedData = unwrap<PagedResponse<PaymentBatch>>(data);
+  return {
+    ...pagedData,
+    list: pagedData.records || [],
+  };
+}
+
 // 查询支付批次列表
 export function usePaymentBatchesQuery(
   params: PaymentBatchQueryParams,
@@ -60,30 +95,7 @@ export function usePaymentBatchesQuery(
   return useQuery({
     queryKey: ['paymentBatches', params],
     queryFn: async () => {
-      const queryParams = {
-        page: params.current || 1,
-        size: params.pageSize || 10,
-        status: params.status,
-        paymentType: params.paymentType,
-        startDate: params.startDate,
-        endDate: params.endDate,
-        keyword: params.keyword,
-        sortBy: params.sortBy || 'submitTime',
-        order: params.order || 'desc',
-      };
-
-      // 移除空值参数
-      const cleanParams = Object.fromEntries(
-        Object.entries(queryParams).filter(([, value]) => value !== undefined && value !== ''),
-      );
-
-      const { data } = await api.get('/payment/batch', { params: cleanParams });
-      const pagedData = unwrap<PagedResponse<PaymentBatch>>(data);
-      // 将 records 映射为 list，兼容前端代码使用 .list 的习惯
-      return {
-        ...pagedData,
-        list: pagedData.records || [],
-      };
+      return fetchPaymentBatches(params);
     },
     enabled: options?.enabled,
   });
@@ -144,7 +156,7 @@ export function useTransferStatusQuery(outBizNo: string, options?: { enabled?: b
   });
 }
 
-export async function checkBatchTransfer(batchNo: string, persistFailure: boolean = true) {
+export async function checkBatchTransfer(batchNo: string, persistFailure: boolean = false) {
   const { data } = await api.get(`/payment/batch/${batchNo}/precheck`, {
     params: { persistFailure },
   });

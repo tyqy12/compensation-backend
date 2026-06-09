@@ -3,8 +3,10 @@ package com.yiyundao.compensation.interfaces.controller.admin;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.dto.UserPlatformBindingResult;
 import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
@@ -13,6 +15,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -68,7 +71,7 @@ class UserBindingControllerQueryParamCompatibilityTest {
     @Test
     void shouldIgnoreLegacyPlatformTypeWhenProviderMissing() {
         when(request.getParameter("platformType")).thenReturn("wechat");
-        ApiResponse<Map<String, Object>> response = controller.userBindings(1, 10, null, null, request);
+        ApiResponse<Map<String, Object>> response = controller.userBindings(1, 10, null, null, null, null, request);
 
         verify(legacyPlatformFieldPolicy).handleLegacyInput(
                 eq("admin_user_bindings_query"),
@@ -80,5 +83,37 @@ class UserBindingControllerQueryParamCompatibilityTest {
 
         assertNotNull(response.getData());
         assertEquals(0L, response.getData().get("total"));
+    }
+
+    @Test
+    void shouldClampPageAndSizeBeforeQuerying() {
+        when(request.getParameter("platformType")).thenReturn(null);
+
+        controller.userBindings(-1, 1000, null, null, null, null, request);
+
+        ArgumentCaptor<Page<SysUser>> captor = ArgumentCaptor.forClass(Page.class);
+        verify(sysUserService).page(captor.capture(), any(LambdaQueryWrapper.class));
+        assertEquals(1, captor.getValue().getCurrent());
+        assertEquals(200, captor.getValue().getSize());
+    }
+
+    @Test
+    void bindShouldReturnWorkflowIdWhenApprovalIsStarted() {
+        SysUser user = new SysUser();
+        user.setId(10L);
+        when(sysUserService.getById(10L)).thenReturn(user);
+        when(userBindingService.bindPlatform(10L, "wechat", "wx-conflict"))
+                .thenReturn(UserPlatformBindingResult.pendingApproval(7104L, "平台账号冲突，已发起审批"));
+
+        UserBindingController.BindingForm form = new UserBindingController.BindingForm();
+        form.setProvider("wechat");
+        form.setSubjectId("wx-conflict");
+
+        ApiResponse<Map<String, Object>> response = controller.bind(10L, form);
+
+        assertEquals(ErrorCode.SUCCESS.getCode(), response.getCode());
+        assertEquals("平台账号冲突，已发起审批", response.getMessage());
+        assertEquals("PENDING_APPROVAL", response.getData().get("status"));
+        assertEquals(7104L, response.getData().get("workflowId"));
     }
 }

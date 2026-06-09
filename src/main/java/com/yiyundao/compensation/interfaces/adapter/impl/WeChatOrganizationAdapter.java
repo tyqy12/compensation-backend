@@ -1,7 +1,9 @@
 package com.yiyundao.compensation.interfaces.adapter.impl;
 
+import com.yiyundao.compensation.common.utils.SecretLogSanitizer;
 import com.yiyundao.compensation.interfaces.adapter.OrganizationAdapter;
 import com.yiyundao.compensation.dto.OrganizationSyncResult;
+import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
@@ -94,38 +96,42 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                                     Employee byEmpId = employeeServiceProvider.getObject().getByEmployeeId(extEmployeeId);
                                     if (byEmpId != null) {
                                         Employee update = candidate;
-                                        employeeServiceProvider.getObject().updateEmployee(byEmpId.getId(), update);
+                                        EmployeeVO updatedVo = employeeServiceProvider.getObject().updateEmployee(byEmpId.getId(), update);
+                                        Employee persisted = resolvePersistedEmployee(byEmpId, updatedVo != null ? updatedVo.getId() : null);
+                                        userBindingServiceProvider.getObject().ensureUserForEmployee(persisted);
                                         updateCount++;
                                         log.debug("回填并更新企微员工(通过工号匹配): {}", candidate.getName());
                                         continue;
                                     }
                                 }
-                                employeeServiceProvider.getObject().createEmployee(candidate);
+                                EmployeeVO createdVo = employeeServiceProvider.getObject().createEmployee(candidate);
+                                Employee persisted = resolvePersistedEmployee(candidate, createdVo != null ? createdVo.getId() : null);
                                 // 自动创建并绑定后台用户账号
-                                userBindingServiceProvider.getObject().ensureUserForEmployee(candidate);
+                                userBindingServiceProvider.getObject().ensureUserForEmployee(persisted);
                                 newCount++;
                                 log.debug("新增企微员工: {}", user.getName());
                             } else {
                                 Employee updateInfo = convertToEmployee(user, dept);
-                                employeeServiceProvider.getObject().updateEmployee(existingEmployee.getId(), updateInfo);
-                                Employee refreshed = employeeServiceProvider.getObject().getById(existingEmployee.getId());
-                                userBindingServiceProvider.getObject()
-                                        .ensureUserForEmployee(refreshed != null ? refreshed : existingEmployee);
+                                EmployeeVO updatedVo = employeeServiceProvider.getObject().updateEmployee(existingEmployee.getId(), updateInfo);
+                                Employee persisted = resolvePersistedEmployee(
+                                        existingEmployee,
+                                        updatedVo != null ? updatedVo.getId() : existingEmployee.getId());
+                                userBindingServiceProvider.getObject().ensureUserForEmployee(persisted);
                                 updateCount++;
                                 log.debug("更新企微员工: {}", user.getName());
                             }
 
                         } catch (Exception e) {
-                            String error = "同步员工失败: " + user.getName() + " - " + e.getMessage();
+                            String error = "同步员工失败: " + user.getName() + " - " + SecretLogSanitizer.sanitize(e);
                             errors.add(error);
-                            log.error("同步企微员工失败: {}", user.getName(), e);
+                            log.error("同步企微员工失败: {}, error={}", user.getName(), SecretLogSanitizer.sanitize(e));
                         }
                     }
 
                 } catch (Exception e) {
-                    String error = "同步部门失败: " + dept.getName() + " - " + e.getMessage();
+                    String error = "同步部门失败: " + dept.getName() + " - " + SecretLogSanitizer.sanitize(e);
                     errors.add(error);
-                    log.error("同步企微部门失败: {}", dept.getName(), e);
+                    log.error("同步企微部门失败: {}, error={}", dept.getName(), SecretLogSanitizer.sanitize(e));
                 }
             }
 
@@ -140,8 +146,8 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             return result;
 
         } catch (Exception e) {
-            log.error("企业微信组织架构同步异常", e);
-            return OrganizationSyncResult.failure(PLATFORM_TYPE, "同步异常: " + e.getMessage(), null);
+            log.error("企业微信组织架构同步异常: {}", SecretLogSanitizer.sanitize(e));
+            return OrganizationSyncResult.failure(PLATFORM_TYPE, "同步异常: " + SecretLogSanitizer.sanitize(e), null);
         }
     }
 
@@ -186,7 +192,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                 }
             }
         } catch (Exception e) {
-            log.error("企微fetchAllEmployees异常", e);
+            log.error("企微fetchAllEmployees异常: {}", SecretLogSanitizer.sanitize(e));
         }
         return new java.util.ArrayList<>(seen.values());
     }
@@ -235,7 +241,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                 }
             }
         } catch (Exception e) {
-            log.error("获取企微部门树异常", e);
+            log.error("获取企微部门树异常: {}", SecretLogSanitizer.sanitize(e));
         }
         return roots;
     }
@@ -263,7 +269,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             }
 
         } catch (Exception e) {
-            log.error("获取企微用户信息失败: {}", platformUserId, e);
+            log.error("获取企微用户信息失败: {}, error={}", platformUserId, SecretLogSanitizer.sanitize(e));
         }
 
         return null;
@@ -296,7 +302,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             return employees;
 
         } catch (Exception e) {
-            log.error("获取企微部门员工失败: {}", departmentId, e);
+            log.error("获取企微部门员工失败: {}, error={}", departmentId, SecretLogSanitizer.sanitize(e));
             return new ArrayList<>();
         }
     }
@@ -326,7 +332,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                     .subscribe(response -> log.info("企微通知发送结果: {}", response));
 
         } catch (Exception e) {
-            log.error("发送企微审批通知失败", e);
+            log.error("发送企微审批通知失败: {}", SecretLogSanitizer.sanitize(e));
         }
     }
 
@@ -336,7 +342,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             String accessToken = getAccessToken();
             return accessToken != null;
         } catch (Exception e) {
-            log.error("检查企微连接失败", e);
+            log.error("检查企微连接失败: {}", SecretLogSanitizer.sanitize(e));
             return false;
         }
     }
@@ -381,12 +387,12 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                 platformTokenCacheService.setToken(PLATFORM_TYPE, token, ttl);
                 return token;
             } else {
-                log.error("获取企微访问令牌失败: {}", response != null ? response.getErrmsg() : "null response");
+                log.error("获取企微访问令牌失败: {}", response != null ? SecretLogSanitizer.sanitize(response.getErrmsg()) : "null response");
                 return null;
             }
 
         } catch (Exception e) {
-            log.error("获取企微访问令牌异常", e);
+            log.error("获取企微访问令牌异常: {}", SecretLogSanitizer.sanitize(e));
             return null;
         }
     }
@@ -417,7 +423,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             }
             log.warn("获取企微部门列表失败: {}", resp != null ? resp.getErrmsg() : "null response");
         } catch (Exception e) {
-            log.error("获取企微部门列表异常", e);
+            log.error("获取企微部门列表异常: {}", SecretLogSanitizer.sanitize(e));
         }
         return new ArrayList<>();
     }
@@ -434,7 +440,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
                 return resp.getDepartment();
             }
         } catch (Exception e) {
-            log.error("获取企微部门列表异常", e);
+            log.error("获取企微部门列表异常: {}", SecretLogSanitizer.sanitize(e));
         }
         return new ArrayList<>();
     }
@@ -454,7 +460,7 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             log.warn("获取企微部门用户失败: departmentId={}, fetchChild={}, err={}",
                     departmentId, fetchChild, resp != null ? resp.getErrmsg() : "null response");
         } catch (Exception e) {
-            log.error("获取企微部门用户异常: departmentId={}, fetchChild={}", departmentId, fetchChild, e);
+            log.error("获取企微部门用户异常: departmentId={}, fetchChild={}, error={}", departmentId, fetchChild, SecretLogSanitizer.sanitize(e));
         }
         return new ArrayList<>();
     }
@@ -554,6 +560,17 @@ public class WeChatOrganizationAdapter implements OrganizationAdapter {
             return null;
         }
         return value.trim();
+    }
+
+    private Employee resolvePersistedEmployee(Employee fallback, Long id) {
+        Long employeeId = id != null ? id : (fallback != null ? fallback.getId() : null);
+        if (employeeId != null) {
+            Employee persisted = employeeServiceProvider.getObject().getById(employeeId);
+            if (persisted != null) {
+                return persisted;
+            }
+        }
+        return fallback;
     }
 
     // 内部类定义

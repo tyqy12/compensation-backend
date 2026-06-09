@@ -104,3 +104,7 @@ legacy:
   platform-field:
     mode: warn
     workflow-data-mode: warn
+
+migration:
+  runner:
+    enabled: false

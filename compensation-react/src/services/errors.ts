@@ -14,6 +14,7 @@ export function setApiErrorHandler(h: (info: ApiErrorInfo) => void) {
 }
 
 export function notifyApiError(info: ApiErrorInfo) {
-  if (handler) handler(info);
+  if (!handler) return false;
+  handler(info);
+  return true;
 }
-

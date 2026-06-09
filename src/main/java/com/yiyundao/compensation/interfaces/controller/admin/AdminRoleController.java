@@ -1,14 +1,19 @@
 package com.yiyundao.compensation.interfaces.controller.admin;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.infrastructure.dao.SysRoleMapper;
 import com.yiyundao.compensation.infrastructure.dao.SysUserRoleMapper;
+import com.yiyundao.compensation.interfaces.dto.admin.ResourceResponseDto;
 import com.yiyundao.compensation.modules.rbac.entity.SysResource;
 import com.yiyundao.compensation.modules.rbac.entity.SysRole;
 import com.yiyundao.compensation.modules.rbac.entity.SysUserRole;
 import com.yiyundao.compensation.modules.rbac.service.ResourceService;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
+import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
@@ -35,6 +40,7 @@ public class AdminRoleController {
     private final SysUserService sysUserService;
     private final EmployeeService employeeService;
     private final ExternalIdentityService externalIdentityService;
+    private final ObjectMapper objectMapper;
 
     // 用户拥有角色列表
     @GetMapping("/users/{id}/roles")
@@ -50,18 +56,7 @@ public class AdminRoleController {
     public ApiResponse<String> setUserRoles(@PathVariable Long id, @RequestBody SetUserRolesRequest req) {
         // 获取当前操作人ID
         Long operatorId = getCurrentUserId();
-
-        // 1. 先撤销用户所有现有角色
-        userRoleService.revokeAllRoles(id, operatorId);
-
-        // 2. 授予新角色（使用 UserRoleService，带审计信息）
-        List<Long> roleIds = req.getRoleIds();
-        if (roleIds != null && !roleIds.isEmpty()) {
-            userRoleService.grantRoles(id, roleIds, operatorId);
-        }
-
-        // 3. 递增 permission_version 使缓存失效
-        sysUserService.incrementPermissionVersion(id);
+        userRoleService.replaceUserRoles(id, req != null ? req.getRoleIds() : null, operatorId);
 
         return ApiResponse.success("OK");
     }
@@ -78,13 +73,16 @@ public class AdminRoleController {
                 SysUser user = sysUserService.findByUsername(username);
                 if (user != null) return user.getId();
             }
-        } catch (Exception ignored) {}
-        return 1L; // 默认管理员
+        } catch (Exception ignored) {
+        }
+        throw new BusinessException(ErrorCode.UNAUTHORIZED, "未识别到当前登录用户");
     }
     // 用户有效权限资源列表（合并角色授权与个性授权）
     @GetMapping("/users/{id}/effective-resources")
-    public ApiResponse<List<SysResource>> getUserEffectiveResources(@PathVariable Long id) {
-        return ApiResponse.success(resourceService.getUserResources(id));
+    public ApiResponse<List<ResourceResponseDto>> getUserEffectiveResources(@PathVariable Long id) {
+        return ApiResponse.success(resourceService.getUserResources(id).stream()
+                .map(resource -> ResourceResponseDto.from(resource, objectMapper))
+                .toList());
     }
 
     // 用户聚合搜索：支持用户名/真实姓名/邮箱/手机号 + 员工姓名/工号 关联
@@ -98,19 +96,19 @@ public class AdminRoleController {
         int p = Math.max(1, page);
         int s = Math.min(Math.max(1, size), 100);
 
-        // 使用单条分页查询（包含子查询命中 employee）
+        // 先用参数化 wrapper 匹配员工，再合并到用户分页条件，避免在 inSql 中拼接原始 SQL。
         com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.yiyundao.compensation.modules.user.entity.SysUser> qw =
                 new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
         if (!kw.isBlank()) {
+            java.util.List<Long> matchedEmployeeIds = findEmployeeIdsByKeyword(kw);
             qw.and(w -> w.like(com.yiyundao.compensation.modules.user.entity.SysUser::getUsername, kw)
                          .or().like(com.yiyundao.compensation.modules.user.entity.SysUser::getRealName, kw)
                          .or().like(com.yiyundao.compensation.modules.user.entity.SysUser::getEmail, kw)
                          .or().like(com.yiyundao.compensation.modules.user.entity.SysUser::getPhone, kw)
-                         .or().inSql(com.yiyundao.compensation.modules.user.entity.SysUser::getEmployeeId,
-                                 "SELECT id FROM employee WHERE deleted=0 AND (name LIKE '%" + kw.replace("'","''") + "%'"
-                                 + " OR employee_id LIKE '%" + kw.replace("'","''") + "%'"
-                                 + " OR phone LIKE '%" + kw.replace("'","''") + "%'"
-                                 + " OR email LIKE '%" + kw.replace("'","''") + "%')"));
+                         .or(!matchedEmployeeIds.isEmpty())
+                         .in(!matchedEmployeeIds.isEmpty(),
+                                 com.yiyundao.compensation.modules.user.entity.SysUser::getEmployeeId,
+                                 matchedEmployeeIds));
         }
         qw.orderByAsc(com.yiyundao.compensation.modules.user.entity.SysUser::getCreateTime);
 
@@ -205,6 +203,25 @@ public class AdminRoleController {
         resp.put("current", result.getCurrent());
         resp.put("size", result.getSize());
         return ApiResponse.success(resp);
+    }
+
+    private java.util.List<Long> findEmployeeIdsByKeyword(String keyword) {
+        if (keyword == null || keyword.isBlank()) {
+            return java.util.List.of();
+        }
+        java.util.List<Employee> employees = employeeService.list(new LambdaQueryWrapper<Employee>()
+                .select(Employee::getId)
+                .and(w -> w.like(Employee::getName, keyword)
+                        .or().like(Employee::getEmployeeId, keyword)
+                        .or().like(Employee::getPhone, keyword)
+                        .or().like(Employee::getEmail, keyword)));
+        if (employees == null || employees.isEmpty()) {
+            return java.util.List.of();
+        }
+        return employees.stream()
+                .map(Employee::getId)
+                .filter(Objects::nonNull)
+                .toList();
     }
 
     // 用户有效权限详情（含actions）

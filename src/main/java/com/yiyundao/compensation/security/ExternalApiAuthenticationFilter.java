@@ -36,25 +36,27 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
     private final ExternalApiContext externalApiContext;
     private final ObjectMapper objectMapper;
     private final ExternalApiTokenService externalApiTokenService;
+    private final ClientIpResolver clientIpResolver;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
-        String uri = request.getRequestURI();
-        if (!uri.startsWith("/api/v1/")) {
+        String uri = getApplicationPath(request);
+        if (!isExternalApiRequest(uri)) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        if (uri.startsWith("/api/v1/oauth/token")) {
+        if (isTokenEndpoint(uri)) {
             filterChain.doFilter(request, response);
             return;
         }
 
         long begin = System.currentTimeMillis();
-        String clientIp = resolveClientIp(request);
+        String clientIp = clientIpResolver.resolve(request);
+        ExternalApiTokenService.ParsedToken parsedToken;
         try {
-            ExternalApiTokenService.ParsedToken parsedToken = authenticate(request, response);
+            parsedToken = authenticate(request, response);
             if (parsedToken == null) {
                 return;
             }
@@ -62,9 +64,12 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
             if (app == null) {
                 return;
             }
+            List<String> scopes = validateCurrentScopes(app, parsedToken, response);
+            if (scopes == null) {
+                return;
+            }
             appRateLimitService.checkRate(app.getClientId(), clientIp);
 
-            List<String> scopes = parsedToken.scopes();
             ExternalApiContext.ExternalApiClient clientContext = ExternalApiContext.ExternalApiClient.builder()
                     .appId(app.getId())
                     .clientId(app.getClientId())
@@ -80,24 +85,9 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
                     parsedToken.toAuthorities()
             );
             SecurityContextHolder.getContext().setAuthentication(authentication);
-            filterChain.doFilter(request, response);
-            auditLogService.record(
-                    "外部API调用",
-                    request.getMethod(),
-                    uri,
-                    clientIp,
-                    request.getHeader("User-Agent"),
-                    "EXTERNAL_API",
-                    parsedToken.clientId(),
-                    parsedToken.clientId(),
-                    "clientId=" + parsedToken.clientId(),
-                    "OK",
-                    null,
-                    System.currentTimeMillis() - begin
-            );
         } catch (AppRateLimitServiceImpl.RateLimitExceededException e) {
             writeJson(response, ErrorCode.TOO_MANY_REQUESTS, "请求过于频繁，请稍后再试");
-            auditLogService.record(
+            recordAudit(
                     "外部API调用",
                     request.getMethod(),
                     uri,
@@ -110,9 +100,10 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
                     "FAILED",
                     "rate limit", System.currentTimeMillis() - begin
             );
+            return;
         } catch (ExpiredJwtException e) {
             writeJson(response, ErrorCode.UNAUTHORIZED, "访问令牌已过期");
-            auditLogService.record(
+            recordAudit(
                     "外部API调用",
                     request.getMethod(),
                     uri,
@@ -125,10 +116,11 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
                     "FAILED",
                     "token expired", System.currentTimeMillis() - begin
             );
+            return;
         } catch (JwtException e) {
             log.warn("外部 API 令牌解析失败: {}", e.getMessage());
             writeJson(response, ErrorCode.TOKEN_INVALID, "访问令牌无效");
-            auditLogService.record(
+            recordAudit(
                     "外部API调用",
                     request.getMethod(),
                     uri,
@@ -141,10 +133,11 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
                     "FAILED",
                     "token invalid", System.currentTimeMillis() - begin
             );
+            return;
         } catch (Exception e) {
-            log.warn("外部 API 鉴权失败: {}", e.getMessage());
-            writeJson(response, ErrorCode.UNAUTHORIZED, e.getMessage());
-            auditLogService.record(
+            log.warn("外部 API 鉴权处理异常: {}", e.getMessage());
+            writeJson(response, ErrorCode.SYSTEM_ERROR, "外部 API 鉴权处理异常");
+            recordAudit(
                     "外部API调用",
                     request.getMethod(),
                     uri,
@@ -155,11 +148,92 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
                     null,
                     null,
                     "FAILED",
-                    e.getMessage(), System.currentTimeMillis() - begin
+                    "authentication error", System.currentTimeMillis() - begin
+            );
+            return;
+        } finally {
+            if (SecurityContextHolder.getContext().getAuthentication() == null) {
+                externalApiContext.clear();
+            }
+        }
+
+        try {
+            filterChain.doFilter(request, response);
+            int status = response.getStatus();
+            boolean success = status < HttpServletResponse.SC_BAD_REQUEST;
+            recordAudit(
+                    "外部API调用",
+                    request.getMethod(),
+                    uri,
+                    clientIp,
+                    request.getHeader("User-Agent"),
+                    "EXTERNAL_API",
+                    parsedToken.clientId(),
+                    parsedToken.clientId(),
+                    "clientId=" + parsedToken.clientId(),
+                    success ? "OK" : "FAILED",
+                    success ? null : "http status " + status,
+                    System.currentTimeMillis() - begin
             );
         } finally {
             externalApiContext.clear();
         }
+    }
+
+    private void recordAudit(String operation,
+                             String method,
+                             String path,
+                             String clientIp,
+                             String userAgent,
+                             String businessType,
+                             String businessKey,
+                             String username,
+                             String detail,
+                             String result,
+                             String errorMessage,
+                             long durationMs) {
+        try {
+            auditLogService.record(
+                    operation,
+                    method,
+                    path,
+                    clientIp,
+                    userAgent,
+                    businessType,
+                    businessKey,
+                    username,
+                    detail,
+                    result,
+                    errorMessage,
+                    durationMs
+            );
+        } catch (Exception e) {
+            log.warn("外部 API 审计记录失败: {}", e.getMessage());
+        }
+    }
+
+    private boolean isExternalApiRequest(String uri) {
+        return isPathOrChild(uri, "/openapi")
+                || isPathOrChild(uri, "/v1/payroll")
+                || isPathOrChild(uri, "/v1/payslips")
+                || uri.equals("/v1/ping");
+    }
+
+    private boolean isPathOrChild(String uri, String path) {
+        return uri.equals(path) || uri.startsWith(path + "/");
+    }
+
+    private boolean isTokenEndpoint(String uri) {
+        return uri.equals("/v1/oauth/token") || uri.equals("/api/v1/oauth/token");
+    }
+
+    private String getApplicationPath(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (StringUtils.hasText(contextPath) && uri.startsWith(contextPath + "/")) {
+            return uri.substring(contextPath.length());
+        }
+        return uri;
     }
 
     private ExternalApiTokenService.ParsedToken authenticate(HttpServletRequest request, HttpServletResponse response) throws IOException {
@@ -208,16 +282,20 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
         return app;
     }
 
-    private String resolveClientIp(HttpServletRequest request) {
-        String ip = request.getHeader("X-Forwarded-For");
-        if (StringUtils.hasText(ip)) {
-            return ip.split(",")[0].trim();
+    private List<String> validateCurrentScopes(AppRegistry app,
+                                               ExternalApiTokenService.ParsedToken parsedToken,
+                                               HttpServletResponse response) throws IOException {
+        List<String> currentScopes = appRegistryService.resolveScopes(app);
+        List<String> tokenScopes = parsedToken.scopes();
+        if (tokenScopes == null || tokenScopes.isEmpty()) {
+            writeJson(response, ErrorCode.FORBIDDEN, "访问令牌缺少访问范围");
+            return null;
         }
-        ip = request.getHeader("X-Real-IP");
-        if (StringUtils.hasText(ip)) {
-            return ip.trim();
+        if (currentScopes == null || currentScopes.isEmpty() || !currentScopes.containsAll(tokenScopes)) {
+            writeJson(response, ErrorCode.FORBIDDEN, "访问令牌访问范围已失效");
+            return null;
         }
-        return request.getRemoteAddr();
+        return tokenScopes;
     }
 
     private void writeJson(HttpServletResponse response, ErrorCode errorCode, String message) throws IOException {

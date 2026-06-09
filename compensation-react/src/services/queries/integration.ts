@@ -195,13 +195,13 @@ export function useTestIntegrationMutation() {
   });
 }
 
-// ===== 向后兼容的旧接口 =====
+// ===== 向后兼容旧页面 API，统一走当前后端 /admin/integration-configs 路径 =====
 
 export function useIntegrationQuery(platform: Platform) {
   return useQuery({
     queryKey: qk.integration(platform),
     queryFn: async () => {
-      const { data } = await api.get(`/system/integration/${platform}`);
+      const { data } = await api.get(`/admin/integration-configs/${platform}`);
       return unwrap<IntegrationConfig>(data);
     },
     enabled: Boolean(platform),
@@ -212,7 +212,7 @@ export function useSaveIntegrationMutation(platform: Platform) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (payload: Partial<IntegrationConfig>) => {
-      const { data } = await api.put(`/system/integration/${platform}`, payload);
+      const { data } = await api.put(`/admin/integration-configs/${platform}`, payload);
       return unwrap<IntegrationConfig>(data);
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: qk.integration(platform) }),
@@ -222,7 +222,7 @@ export function useSaveIntegrationMutation(platform: Platform) {
 export function useTestConnectionMutation(platform: Platform) {
   return useMutation({
     mutationFn: async () => {
-      const { data } = await api.post(`/system/integration/${platform}/test-connection`);
+      const { data } = await api.post(`/admin/integration-configs/${platform}/test-connection`);
       return unwrap<TestConnectionResult>(data);
     },
   });

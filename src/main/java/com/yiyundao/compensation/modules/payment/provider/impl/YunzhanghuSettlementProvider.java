@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.modules.payment.provider.impl;
 
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.enums.PayrollType;
 import com.yiyundao.compensation.enums.PaymentStatus;
@@ -12,6 +13,8 @@ import com.yiyundao.compensation.modules.payment.provider.SettlementRequest;
 import com.yiyundao.compensation.modules.payment.provider.SettlementResult;
 import com.yiyundao.compensation.modules.payment.provider.SettlementStatus;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
+import com.yiyundao.compensation.modules.payment.support.PaymentCallbackLogSanitizer;
+import com.yiyundao.compensation.modules.payment.support.PaymentRecordStatusTransitions;
 import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
 import com.yiyundao.compensation.service.EncryptionService;
 import com.yiyundao.compensation.service.YunzhanghuClient;
@@ -148,13 +151,15 @@ public class YunzhanghuSettlementProvider implements SettlementProvider {
             }
             if (!response.isSuccess()) {
                 log.warn("云账户查单失败: orderNo={}, code={}, msg={}",
-                        providerOrderNo, response.getCode(), response.getMessage());
+                        PaymentCallbackLogSanitizer.sanitizeField("order_id", providerOrderNo),
+                        response.getCode(), response.getMessage());
                 return SettlementStatus.PROCESSING;
             }
             GetOrderResponse data = response.getData();
             return mapYunzhanghuStatus(data.getStatus(), data.getStatusDetail());
         } catch (Exception ex) {
-            log.error("云账户查单异常: orderNo={}", providerOrderNo, ex);
+            log.error("云账户查单异常: orderNo={}",
+                    PaymentCallbackLogSanitizer.sanitizeField("order_id", providerOrderNo), ex);
             return SettlementStatus.PROCESSING;
         }
     }
@@ -202,11 +207,19 @@ public class YunzhanghuSettlementProvider implements SettlementProvider {
 
         PaymentRecord record = paymentRecordService.getByProviderOrderNo(PROVIDER_CODE, providerOrderNo);
         if (record == null) {
-            log.warn("云账户回调未匹配到支付记录: orderNo={}", providerOrderNo);
-        } else {
-            persistRecord(record.getId(), providerOrderNo, data.getRef(), metadata,
-                    mapPaymentStatus(status), null, null);
+            log.warn("云账户回调未匹配到支付记录: orderNo={}",
+                    PaymentCallbackLogSanitizer.sanitizeField("order_id", providerOrderNo));
+            return SettlementCallbackResult.builder()
+                    .success(false)
+                    .bizNo(providerOrderNo)
+                    .status(status)
+                    .errorMsg("云账户回调未匹配到支付记录")
+                    .metadata(metadata)
+                    .build();
         }
+
+        persistRecord(record, providerOrderNo, data.getRef(), metadata,
+                mapPaymentStatus(status), null, null);
 
         return SettlementCallbackResult.builder()
                 .success(true)
@@ -263,6 +276,25 @@ public class YunzhanghuSettlementProvider implements SettlementProvider {
         return employeeService;
     }
 
+    private void persistRecord(PaymentRecord currentRecord,
+                               String providerOrderNo,
+                               String providerTradeNo,
+                               Map<String, Object> metadata,
+                               PaymentStatus status,
+                               String errorCode,
+                               String errorMsg) {
+        if (currentRecord == null || currentRecord.getId() == null) {
+            return;
+        }
+        if (!PaymentRecordStatusTransitions.isAllowed(currentRecord.getStatus(), status)) {
+            log.warn("云账户状态更新被忽略: recordId={}, currentStatus={}, targetStatus={}, orderNo={}",
+                    currentRecord.getId(), currentRecord.getStatus(), status,
+                    PaymentCallbackLogSanitizer.sanitizeField("order_id", providerOrderNo));
+            return;
+        }
+        persistRecord(currentRecord.getId(), providerOrderNo, providerTradeNo, metadata, status, errorCode, errorMsg);
+    }
+
     private void persistRecord(Long recordId,
                                String providerOrderNo,
                                String providerTradeNo,
@@ -270,28 +302,28 @@ public class YunzhanghuSettlementProvider implements SettlementProvider {
                                PaymentStatus status,
                                String errorCode,
                                String errorMsg) {
-        PaymentRecord update = new PaymentRecord();
-        update.setId(recordId);
-        update.setProviderCode(PROVIDER_CODE);
-        update.setProviderOrderNo(providerOrderNo);
-        update.setStatus(status);
-        update.setProviderMetadata(serializeMetadata(metadata));
+        UpdateWrapper<PaymentRecord> wrapper = new UpdateWrapper<PaymentRecord>()
+                .eq("id", recordId)
+                .set("provider_code", PROVIDER_CODE)
+                .set("provider_order_no", providerOrderNo)
+                .set("status", status.getCode())
+                .set("provider_metadata", serializeMetadata(metadata));
         if (StringUtils.hasText(providerTradeNo)) {
-            update.setProviderTradeNo(providerTradeNo);
+            wrapper.set("provider_trade_no", providerTradeNo);
         }
         if (StringUtils.hasText(errorCode)) {
-            update.setErrorCode(errorCode);
+            wrapper.set("error_code", errorCode);
         }
         if (StringUtils.hasText(errorMsg)) {
-            update.setErrorMsg(errorMsg);
+            wrapper.set("error_msg", errorMsg);
         }
         if (status == PaymentStatus.SUCCESS) {
-            update.setPaymentTime(LocalDateTime.now());
+            wrapper.set("payment_time", LocalDateTime.now())
+                    .set("error_code", null)
+                    .set("error_msg", null);
         }
-        if (status == PaymentStatus.SUCCESS || status == PaymentStatus.FAILED || status == PaymentStatus.CANCELLED) {
-            update.setNotificationTime(LocalDateTime.now());
-        }
-        paymentRecordService.updateById(update);
+        PaymentRecordStatusTransitions.applyAllowedStatusGuard(wrapper, status);
+        paymentRecordService.update(wrapper);
     }
 
     private String resolveProviderOrderNo(SettlementRequest request, PaymentRecord record) {

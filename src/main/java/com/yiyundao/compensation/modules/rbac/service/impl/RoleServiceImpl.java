@@ -446,6 +446,7 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
     @Override
     public Map<SysResource, Set<String>> getRoleResources(Long roleId) {
         Assert.notNull(roleId, "角色ID不能为空");
+        getByIdOrThrow(roleId);
 
         List<SysRoleResource> assignments = roleResourceMapper.selectList(
                 new LambdaQueryWrapper<SysRoleResource>().eq(SysRoleResource::getRoleId, roleId));

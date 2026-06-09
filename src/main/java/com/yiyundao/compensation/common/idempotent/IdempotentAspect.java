@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.common.idempotent;
 
 import com.yiyundao.compensation.common.exception.BusinessException;
+import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -12,6 +13,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.core.annotation.Order;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.expression.ExpressionException;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -70,19 +72,27 @@ public class IdempotentAspect {
 
         // 解析幂等键
         Object[] args = joinPoint.getArgs();
-        String idempotentKey = lockService.parseKey(idempotent.key(), args, null);
+        String idempotentKey;
+        try {
+            idempotentKey = lockService.parseKey(idempotent.key(), args, null);
+        } catch (ExpressionException | IllegalArgumentException e) {
+            log.warn("幂等键解析失败: method={}, keyExpression={}, error={}",
+                    method.getName(), idempotent.key(), e.getMessage());
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "幂等键配置错误，请联系管理员");
+        }
 
         if (!StringUtils.hasText(idempotentKey)) {
             log.warn("幂等键解析失败: method={}, keyExpression={}",
                     method.getName(), idempotent.key());
-            return joinPoint.proceed();
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "幂等键配置错误，请联系管理员");
         }
 
-        String lockKey = buildLockKey(idempotentKey, idempotent.lockPrefix());
+        String lockKey = lockService.buildLockKey(idempotentKey, idempotent.lockPrefix());
 
+        boolean lockAcquired = false;
         try {
             // 尝试获取锁
-            boolean locked = lockService.tryLock(lockKey, idempotent.expireSeconds(), idempotent.lockPrefix());
+            boolean locked = lockService.tryLock(idempotentKey, idempotent.expireSeconds(), idempotent.lockPrefix());
 
             if (!locked) {
                 log.info("幂等锁获取失败: key={}, method={}", idempotentKey, method.getName());
@@ -101,17 +111,21 @@ public class IdempotentAspect {
                 throw new BusinessException(ErrorCode.BUSINESS_ERROR, idempotent.message());
             }
 
+            lockAcquired = true;
             log.debug("幂等锁获取成功: key={}, method={}", idempotentKey, method.getName());
 
             // 执行方法
             Object result = joinPoint.proceed();
+            if (idempotent.deleteOnError() && isErrorResponse(result)) {
+                unlockAfterFailure(idempotentKey, idempotent.lockPrefix());
+            }
 
             return result;
 
-        } catch (Exception e) {
-            // 如果配置了删除锁
-            if (idempotent.deleteOnError() && !(e instanceof BusinessException)) {
-                lockService.unlock(lockKey, idempotent.lockPrefix());
+        } catch (Throwable e) {
+            // 如果业务执行失败且配置了删除锁，释放当前线程持有的锁，允许修正后立即重试。
+            if (lockAcquired && idempotent.deleteOnError()) {
+                unlockAfterFailure(idempotentKey, idempotent.lockPrefix());
             }
             throw e;
         } finally {
@@ -120,14 +134,16 @@ public class IdempotentAspect {
         }
     }
 
-    /**
-     * 构建锁键
-     */
-    private String buildLockKey(String key, String prefix) {
-        if (prefix == null || prefix.isEmpty()) {
-            return "idempotent:lock:" + key;
+    private boolean isErrorResponse(Object result) {
+        return result instanceof ApiResponse<?> response && !response.isSuccess();
+    }
+
+    private void unlockAfterFailure(String key, String lockPrefix) {
+        try {
+            lockService.unlock(key, lockPrefix);
+        } catch (Exception unlockError) {
+            log.warn("业务失败后释放幂等锁失败: key={}, error={}", key, unlockError.getMessage());
         }
-        return prefix + "lock:" + key;
     }
 
     /**
@@ -148,7 +164,7 @@ public class IdempotentAspect {
      */
     public void cacheResponse(String key, Object response, int expireSeconds) {
         try {
-            String lockKey = "idempotent:lock:" + key;
+            String lockKey = lockService.buildLockKey(key, IdempotentLockService.DEFAULT_LOCK_PREFIX);
             redisTemplate.opsForValue().set(lockKey + ":response", response, expireSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {
             log.warn("缓存响应失败: {}", e.getMessage());

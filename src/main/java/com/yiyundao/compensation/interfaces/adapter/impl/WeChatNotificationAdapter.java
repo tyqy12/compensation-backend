@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.interfaces.adapter.impl;
 
+import com.yiyundao.compensation.common.utils.SecretLogSanitizer;
 import com.yiyundao.compensation.enums.NotificationChannel;
 import com.yiyundao.compensation.interfaces.adapter.NotificationAdapter;
 import com.yiyundao.compensation.modules.notification.entity.NotificationRecord;
@@ -64,8 +65,8 @@ public class WeChatNotificationAdapter implements NotificationAdapter {
             }
 
         } catch (Exception e) {
-            log.error("企业微信通知发送异常: recordId={}", record.getId(), e);
-            return NotificationSendResult.failure("发送异常: " + e.getMessage());
+            log.error("企业微信通知发送异常: recordId={}, error={}", record.getId(), SecretLogSanitizer.sanitize(e));
+            return NotificationSendResult.failure("发送异常: " + SecretLogSanitizer.sanitize(e));
         }
     }
 
@@ -93,7 +94,7 @@ public class WeChatNotificationAdapter implements NotificationAdapter {
             String accessToken = getAccessToken();
             return accessToken != null;
         } catch (Exception e) {
-            log.error("企业微信连接检查失败", e);
+            log.error("企业微信连接检查失败: {}", SecretLogSanitizer.sanitize(e));
             return false;
         }
     }
@@ -131,12 +132,12 @@ public class WeChatNotificationAdapter implements NotificationAdapter {
             if (response != null && "0".equals(String.valueOf(response.get("errcode")))) {
                 return String.valueOf(response.get("access_token"));
             } else {
-                log.error("获取企业微信access_token失败: {}", response);
+                log.error("获取企业微信access_token失败: {}", SecretLogSanitizer.sanitize(response));
                 return null;
             }
 
         } catch (Exception e) {
-            log.error("获取企业微信access_token异常", e);
+            log.error("获取企业微信access_token异常: {}", SecretLogSanitizer.sanitize(e));
             return null;
         }
     }

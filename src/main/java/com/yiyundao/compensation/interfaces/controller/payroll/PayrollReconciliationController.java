@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/payroll/reconciliations")
 @RequiredArgsConstructor
-@SecurityAnnotations.IsFinanceOrHrOrManagerOrAdmin
+@SecurityAnnotations.IsFinanceOrAdmin
 public class PayrollReconciliationController {
 
     private final PayrollFlowQueryService payrollFlowQueryService;

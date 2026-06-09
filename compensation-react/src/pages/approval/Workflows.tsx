@@ -48,7 +48,11 @@ import {
   type ApprovalWorkflowDetail,
   type ApprovalQueryParams,
 } from '@services/queries/approval';
-import { getPagedRecords } from '@types/api';
+import {
+  buildApprovalSearchParams,
+  getApprovalTableRecords,
+  type ApprovalTab,
+} from './workflowPageUtils';
 
 const { Search } = Input;
 const { RangePicker } = DatePicker;
@@ -63,11 +67,13 @@ const statusEnum: Record<string, { text: string; color: string }> = {
 
 const workflowTypeEnum: Record<string, { text: string; color: string }> = {
   BATCH: { text: '批量支付', color: 'blue' },
+  PAYROLL_DISTRIBUTION: { text: '薪资发放', color: 'green' },
   ADHOC: { text: '临时支付', color: 'orange' },
   OFFLINE: { text: '架构外员工', color: 'purple' },
+  PERMISSION: { text: '权限授权', color: 'cyan' },
+  PAYROLL_DISPUTE: { text: '薪酬异议', color: 'magenta' },
 };
 
-// ==================== 工具函数 ====================
 const formatDateTime = (value?: string): string =>
   value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—';
 
@@ -78,7 +84,7 @@ const ApprovalWorkflows: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Tab 状态: list | pending | my
-  const [activeTab, setActiveTab] = useState<'list' | 'pending' | 'my'>(() => {
+  const [activeTab, setActiveTab] = useState<ApprovalTab>(() => {
     const tab = searchParams.get('tab');
     if (tab === 'pending' || tab === 'my') return tab;
     return 'list';
@@ -112,20 +118,14 @@ const ApprovalWorkflows: React.FC = () => {
   const rejectMutation = useRejectMutation();
 
   // ==================== URL 同步 ====================
-  const updateUrlParams = useCallback((params: ApprovalQueryParams) => {
-    const next = new URLSearchParams();
-    if (params.current) next.set('page', String(params.current));
-    if (params.pageSize) next.set('size', String(params.pageSize));
-    if (params.status) next.set('status', params.status);
-    if (params.workflowType) next.set('workflowType', params.workflowType);
-    if (params.keyword) next.set('keyword', params.keyword);
-    if (params.startDate) next.set('startDate', params.startDate);
-    if (params.endDate) next.set('endDate', params.endDate);
-    if (params.sortBy) next.set('sortBy', params.sortBy);
-    if (params.order) next.set('order', params.order);
-    next.set('tab', activeTab);
-    setSearchParams(next);
+  const updateUrlParams = useCallback((params: ApprovalQueryParams, tab: ApprovalTab = activeTab) => {
+    setSearchParams(buildApprovalSearchParams(params, tab));
   }, [activeTab, setSearchParams]);
+
+  const applyQueryParams = useCallback((nextParams: ApprovalQueryParams, tab: ApprovalTab = activeTab) => {
+    setQueryParams(nextParams);
+    updateUrlParams(nextParams, tab);
+  }, [activeTab, updateUrlParams]);
 
   // ==================== 数据查询 ====================
   const {
@@ -173,14 +173,14 @@ const ApprovalWorkflows: React.FC = () => {
     }
   }, [activeTab, pendingData, myData, workflowsData, pendingLoading, myLoading, workflowsLoading]);
 
-  const records = useMemo(() => getPagedRecords(currentData.data), [currentData.data]);
+  const records = useMemo(() => getApprovalTableRecords(currentData.data), [currentData.data]);
 
   // ==================== 处理函数 ====================
-  const handleTabChange = useCallback((newTab: 'list' | 'pending' | 'my') => {
+  const handleTabChange = useCallback((newTab: ApprovalTab) => {
+    const nextParams = { ...queryParams, current: 1 };
     setActiveTab(newTab);
-    setQueryParams(prev => ({ ...prev, current: 1 }));
-    updateUrlParams({ ...queryParams, current: 1 });
-  }, [queryParams, updateUrlParams]);
+    applyQueryParams(nextParams, newTab);
+  }, [applyQueryParams, queryParams]);
 
   const handleViewDetail = useCallback((id: number) => {
     setSelectedWorkflowId(id);
@@ -276,13 +276,14 @@ const ApprovalWorkflows: React.FC = () => {
       valueEnum: statusEnum,
       render: (_, record) => {
         const info = getApprovalStatusInfo(record.status as any);
-        return <Tag color={info.color} icon={info.status === 'pending' ? <SyncOutlined spin /> : undefined}>{info.text}</Tag>;
+        return <Tag color={info.color} icon={record.status === 'pending' ? <SyncOutlined spin /> : undefined}>{info.text}</Tag>;
       },
     },
     {
-      title: '发起人ID',
-      dataIndex: 'initiatorId',
-      width: 100,
+      title: '发起人',
+      dataIndex: 'initiatorName',
+      width: 120,
+      render: (_, record) => record.initiatorName || record.initiatorId || '—',
     },
     {
       title: '提交时间',
@@ -326,8 +327,8 @@ const ApprovalWorkflows: React.FC = () => {
         value={queryParams.keyword}
         onChange={(e) => setQueryParams(prev => ({ ...prev, keyword: e.target.value || undefined }))}
         onSearch={(keyword) => {
-          setQueryParams(prev => ({ ...prev, current: 1 }));
-          updateUrlParams({ ...queryParams, keyword, current: 1 });
+          const nextParams = { ...queryParams, keyword: keyword || undefined, current: 1 };
+          applyQueryParams(nextParams);
         }}
       />
       <Select
@@ -336,8 +337,8 @@ const ApprovalWorkflows: React.FC = () => {
         allowClear
         value={queryParams.status}
         onChange={(val) => {
-          setQueryParams(prev => ({ ...prev, current: 1 }));
-          updateUrlParams({ ...queryParams, status: val, current: 1 });
+          const nextParams = { ...queryParams, status: val, current: 1 };
+          applyQueryParams(nextParams);
         }}
         options={Object.entries(statusEnum).map(([k, v]) => ({ label: v.text, value: k }))}
       />
@@ -347,8 +348,8 @@ const ApprovalWorkflows: React.FC = () => {
         allowClear
         value={queryParams.workflowType}
         onChange={(val) => {
-          setQueryParams(prev => ({ ...prev, current: 1 }));
-          updateUrlParams({ ...queryParams, workflowType: val, current: 1 });
+          const nextParams = { ...queryParams, workflowType: val, current: 1 };
+          applyQueryParams(nextParams);
         }}
         options={Object.entries(workflowTypeEnum).map(([k, v]) => ({ label: v.text, value: k }))}
       />
@@ -359,34 +360,29 @@ const ApprovalWorkflows: React.FC = () => {
             : undefined
         }
         onChange={(dates, dateStrings) => {
-          setQueryParams(prev => ({
-            ...prev,
+          const nextParams = {
+            ...queryParams,
             current: 1,
             startDate: dateStrings[0] || undefined,
             endDate: dateStrings[1] || undefined,
-          }));
-          updateUrlParams({
-            ...queryParams,
-            startDate: dateStrings[0],
-            endDate: dateStrings[1],
-            current: 1,
-          });
+          };
+          applyQueryParams(nextParams);
         }}
         placeholder={['开始日期', '结束日期']}
       />
       <Button
         icon={<ReloadOutlined />}
         onClick={() => {
-          setQueryParams(prev => ({
-            ...prev,
+          const nextParams = {
+            ...queryParams,
             current: 1,
             status: undefined,
             workflowType: undefined,
             keyword: undefined,
             startDate: undefined,
             endDate: undefined,
-          }));
-          updateUrlParams({ ...queryParams, current: 1, status: undefined, workflowType: undefined, keyword: undefined, startDate: undefined, endDate: undefined });
+          };
+          applyQueryParams(nextParams);
           refreshAll();
         }}
       >
@@ -400,7 +396,7 @@ const ApprovalWorkflows: React.FC = () => {
     <PageContainer
       title="审批管理"
       tabActiveKey={activeTab}
-      onTabChange={(key) => handleTabChange(key as 'list' | 'pending' | 'my')}
+      onTabChange={(key) => handleTabChange(key as ApprovalTab)}
       tabs={{
         items: [
           { key: 'list', label: '全部审批' },
@@ -431,8 +427,8 @@ const ApprovalWorkflows: React.FC = () => {
           const sortBy = Array.isArray(sorter) ? sorter[0]?.field : sorter.field;
           const order = Array.isArray(sorter) ? (sorter[0]?.order === 'ascend' ? 'asc' : 'desc') : (sorter.order === 'ascend' ? 'asc' : 'desc');
 
-          setQueryParams(prev => ({ ...prev, current, pageSize, sortBy, order }));
-          updateUrlParams({ ...queryParams, current, pageSize, sortBy, order });
+          const nextParams = { ...queryParams, current, pageSize, sortBy, order };
+          applyQueryParams(nextParams);
         }}
         toolBarRender={() => [
           <Button

@@ -62,9 +62,9 @@ public class EncryptionService {
         boolean isProdLike = Arrays.stream(environment.getActiveProfiles())
                 .anyMatch(p -> p.equalsIgnoreCase("prod") || p.equalsIgnoreCase("production") || p.equalsIgnoreCase("staging"));
 
-        // 获取动态配置的密钥，如果不可用则使用fallback
-        String sm4Key = getCurrentSm4Key();
-        String aesKey = getCurrentAesKey();
+        EncryptionConfigDto config = loadEncryptionConfig();
+        String sm4Key = resolveSm4Key(config);
+        String aesKey = resolveAesKey(config);
 
         // 生产/预发布严格校验：不得使用默认占位符，且长度不少于16字符
         if (isProdLike) {
@@ -82,7 +82,7 @@ public class EncryptionService {
         }
 
         // 初始化密钥缓存
-        refreshKeys();
+        refreshKeys(config);
 
         log.info("Encryption service initialized (profiles: {}), keys derived: SM4={}, AES={} bits",
                 String.join(",", environment.getActiveProfiles()),
@@ -91,17 +91,24 @@ public class EncryptionService {
     }
 
     /**
+     * 获取动态加密配置。配置中心或数据库不可用时返回null，由调用方使用fallback配置。
+     */
+    private EncryptionConfigDto loadEncryptionConfig() {
+        try {
+            return integrationConfigService.getEncryptionConfig();
+        } catch (Exception e) {
+            log.warn("获取动态加密配置失败，使用fallback配置", e);
+            return null;
+        }
+    }
+
+    /**
      * 获取当前SM4密钥（优先从动态配置获取）
      */
-    private String getCurrentSm4Key() {
-        try {
-            EncryptionConfigDto config = integrationConfigService.getEncryptionConfig();
-            if (config != null && config.getSm4Key() != null && !config.getSm4Key().trim().isEmpty()) {
-                log.debug("使用动态配置的SM4密钥");
-                return config.getSm4Key();
-            }
-        } catch (Exception e) {
-            log.warn("获取动态SM4密钥失败，使用fallback配置", e);
+    private String resolveSm4Key(EncryptionConfigDto config) {
+        if (config != null && config.getSm4Key() != null && !config.getSm4Key().trim().isEmpty()) {
+            log.debug("使用动态配置的SM4密钥");
+            return config.getSm4Key();
         }
         log.debug("使用fallback SM4密钥");
         return fallbackSm4Key;
@@ -110,15 +117,10 @@ public class EncryptionService {
     /**
      * 获取当前AES密钥（优先从动态配置获取）
      */
-    private String getCurrentAesKey() {
-        try {
-            EncryptionConfigDto config = integrationConfigService.getEncryptionConfig();
-            if (config != null && config.getAesKey() != null && !config.getAesKey().trim().isEmpty()) {
-                log.debug("使用动态配置的AES密钥");
-                return config.getAesKey();
-            }
-        } catch (Exception e) {
-            log.warn("获取动态AES密钥失败，使用fallback配置", e);
+    private String resolveAesKey(EncryptionConfigDto config) {
+        if (config != null && config.getAesKey() != null && !config.getAesKey().trim().isEmpty()) {
+            log.debug("使用动态配置的AES密钥");
+            return config.getAesKey();
         }
         log.debug("使用fallback AES密钥");
         return fallbackAesKey;
@@ -128,8 +130,15 @@ public class EncryptionService {
      * 刷新加密密钥缓存
      */
     private synchronized void refreshKeys() {
-        String sm4Key = getCurrentSm4Key();
-        String aesKey = getCurrentAesKey();
+        refreshKeys(loadEncryptionConfig());
+    }
+
+    /**
+     * 基于已加载配置刷新加密密钥缓存，避免同一次刷新重复查库。
+     */
+    private void refreshKeys(EncryptionConfigDto config) {
+        String sm4Key = resolveSm4Key(config);
+        String aesKey = resolveAesKey(config);
 
         // 派生密钥字节：
         // - SM4 需要 16 字节密钥

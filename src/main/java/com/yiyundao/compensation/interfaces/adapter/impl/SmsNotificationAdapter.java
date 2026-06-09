@@ -6,6 +6,8 @@ import com.aliyun.dysmsapi20170525.models.SendSmsResponse;
 import com.aliyun.tea.TeaException;
 import com.aliyun.teaopenapi.models.Config;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.common.annotation.SensitiveType;
+import com.yiyundao.compensation.common.utils.SecretLogSanitizer;
 import com.yiyundao.compensation.enums.NotificationChannel;
 import com.yiyundao.compensation.interfaces.adapter.NotificationAdapter;
 import com.yiyundao.compensation.interfaces.dto.config.SmsConfigDto;
@@ -17,8 +19,11 @@ import okhttp3.*;
 import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 短信通知适配器 - 支持阿里云、腾讯云、华为云
@@ -28,6 +33,8 @@ import java.util.concurrent.TimeUnit;
 @Component
 @RequiredArgsConstructor
 public class SmsNotificationAdapter implements NotificationAdapter {
+
+    private static final Pattern CHINA_PHONE_PATTERN = Pattern.compile("(?<!\\d)(1[3-9]\\d{9})(?!\\d)");
 
     private final IntegrationConfigService integrationConfigService;
     private final ObjectMapper objectMapper;
@@ -44,13 +51,16 @@ public class SmsNotificationAdapter implements NotificationAdapter {
 
     @Override
     public NotificationSendResult sendNotification(NotificationRecord record) {
+        if (record == null) {
+            return NotificationSendResult.failure("通知记录不能为空");
+        }
         try {
-            log.info("发送短信通知: recordId={}, phone={}", record.getId(), record.getRecipientId());
+            log.info("发送短信通知: recordId={}, phone={}", record.getId(), maskPhone(record.getRecipientId()));
 
             // 验证手机号格式
             String phone = record.getRecipientId();
             if (!isValidPhoneNumber(phone)) {
-                return NotificationSendResult.failure("无效的手机号格式: " + phone);
+                return NotificationSendResult.failure("无效的手机号格式: " + maskPhone(phone));
             }
 
             // 构建短信内容
@@ -66,8 +76,9 @@ public class SmsNotificationAdapter implements NotificationAdapter {
             }
 
         } catch (Exception e) {
-            log.error("短信通知发送异常: recordId={}", record.getId(), e);
-            return NotificationSendResult.failure("发送异常: " + e.getMessage());
+            log.error("短信通知发送异常: recordId={}, errorType={}, error={}",
+                    record.getId(), e.getClass().getSimpleName(), sanitizeForSmsLog(e));
+            return NotificationSendResult.failure("发送异常: " + sanitizeForSmsLog(e));
         }
     }
 
@@ -107,7 +118,8 @@ public class SmsNotificationAdapter implements NotificationAdapter {
             }
 
         } catch (Exception e) {
-            log.error("短信服务连接检查异常", e);
+            log.error("短信服务连接检查异常: errorType={}, error={}",
+                    e.getClass().getSimpleName(), sanitizeForSmsLog(e));
             return false;
         }
     }
@@ -180,7 +192,8 @@ public class SmsNotificationAdapter implements NotificationAdapter {
                     return sendHuaweiSms(phone, content, smsConfig, templateCode);
                 case "mock":
                     // 模拟发送（开发环境）
-                    log.info("模拟发送短信: phone={}, content={}", phone, content);
+                    log.info("模拟发送短信: phone={}, contentLength={}",
+                            maskPhone(phone), content != null ? content.length() : 0);
                     return Math.random() > 0.1;
                 default:
                     log.error("不支持的短信服务商: {}", provider);
@@ -188,7 +201,8 @@ public class SmsNotificationAdapter implements NotificationAdapter {
             }
 
         } catch (Exception e) {
-            log.error("短信发送异常", e);
+            log.error("短信发送异常: errorType={}, error={}",
+                    e.getClass().getSimpleName(), sanitizeForSmsLog(e));
             return false;
         }
     }
@@ -198,7 +212,7 @@ public class SmsNotificationAdapter implements NotificationAdapter {
      */
     private boolean sendAliyunSms(String phone, String content, SmsConfigDto config, String templateCode) {
         try {
-            log.info("使用阿里云发送短信: phone={}, signName={}", phone, config.getSignName());
+            log.info("使用阿里云发送短信: phone={}, signName={}", maskPhone(phone), config.getSignName());
 
             // 初始化客户端
             Config alicloudConfig = new Config()
@@ -236,10 +250,12 @@ public class SmsNotificationAdapter implements NotificationAdapter {
             }
 
         } catch (TeaException e) {
-            log.error("阿里云短信发送失败 (TeaException): code={}, msg={}", e.getCode(), e.getMessage());
+            log.error("阿里云短信发送失败 (TeaException): code={}, msg={}",
+                    e.getCode(), sanitizeForSmsLog(e.getMessage()));
             return false;
         } catch (Exception e) {
-            log.error("阿里云短信发送异常", e);
+            log.error("阿里云短信发送异常: errorType={}, error={}",
+                    e.getClass().getSimpleName(), sanitizeForSmsLog(e));
             return false;
         }
     }
@@ -249,7 +265,7 @@ public class SmsNotificationAdapter implements NotificationAdapter {
      */
     private boolean sendTencentSms(String phone, String content, SmsConfigDto config, String templateCode) {
         try {
-            log.info("使用腾讯云发送短信: phone={}, appId={}", phone, config.getAppId());
+            log.info("使用腾讯云发送短信: phone={}, appId={}", maskPhone(phone), config.getAppId());
 
             // 腾讯云短信API地址
             String endpoint = "https://sms.tencentcloudapi.com";
@@ -319,7 +335,7 @@ public class SmsNotificationAdapter implements NotificationAdapter {
                                 log.info("腾讯云短信发送成功");
                                 return true;
                             } else {
-                                log.error("腾讯云短信发送失败: {}", resp);
+                                log.error("腾讯云短信发送失败: {}", sanitizeForSmsLog(resp));
                             }
                         }
                     }
@@ -329,7 +345,8 @@ public class SmsNotificationAdapter implements NotificationAdapter {
             return false;
 
         } catch (Exception e) {
-            log.error("腾讯云短信发送异常", e);
+            log.error("腾讯云短信发送异常: errorType={}, error={}",
+                    e.getClass().getSimpleName(), sanitizeForSmsLog(e));
             return false;
         }
     }
@@ -362,7 +379,8 @@ public class SmsNotificationAdapter implements NotificationAdapter {
             );
 
         } catch (Exception e) {
-            log.error("生成签名失败", e);
+            log.error("生成签名失败: errorType={}, error={}",
+                    e.getClass().getSimpleName(), sanitizeForSmsLog(e));
             return "";
         }
     }
@@ -372,7 +390,7 @@ public class SmsNotificationAdapter implements NotificationAdapter {
      */
     private boolean sendHuaweiSms(String phone, String content, SmsConfigDto config, String templateCode) {
         try {
-            log.info("使用华为云发送短信: phone={}, sender={}", phone, config.getSender());
+            log.info("使用华为云发送短信: phone={}, sender={}", maskPhone(phone), config.getSender());
 
             // 华为云短信API地址
             String endpoint = config.getEndpoint() != null ?
@@ -410,7 +428,7 @@ public class SmsNotificationAdapter implements NotificationAdapter {
                         log.info("华为云短信发送成功");
                         return true;
                     } else {
-                        log.error("华为云短信发送失败: {}", result);
+                        log.error("华为云短信发送失败: {}", sanitizeForSmsLog(result));
                     }
                 }
             }
@@ -418,8 +436,83 @@ public class SmsNotificationAdapter implements NotificationAdapter {
             return false;
 
         } catch (Exception e) {
-            log.error("华为云短信发送异常", e);
+            log.error("华为云短信发送异常: errorType={}, error={}",
+                    e.getClass().getSimpleName(), sanitizeForSmsLog(e));
             return false;
         }
+    }
+
+    private static String maskPhone(String phone) {
+        if (phone == null || phone.trim().isEmpty()) {
+            return phone;
+        }
+        String value = phone.trim();
+        String digitsOnly = value.replaceAll("\\D", "");
+        if (digitsOnly.matches("1[3-9]\\d{9}")) {
+            return SensitiveType.PHONE.desensitize(digitsOnly);
+        }
+        return maskKeep(value, 3, 4);
+    }
+
+    private static String maskKeep(String value, int keepPrefix, int keepSuffix) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        if (value.length() <= keepPrefix + keepSuffix) {
+            return "***";
+        }
+        return value.substring(0, keepPrefix)
+                + "*".repeat(value.length() - keepPrefix - keepSuffix)
+                + value.substring(value.length() - keepSuffix);
+    }
+
+    private static String sanitizeForSmsLog(Throwable throwable) {
+        return sanitizeForSmsLog(SecretLogSanitizer.sanitize(throwable));
+    }
+
+    private static String sanitizeForSmsLog(String value) {
+        if (value == null || value.isEmpty()) {
+            return value;
+        }
+        String sanitized = SecretLogSanitizer.sanitize(value);
+        Matcher matcher = CHINA_PHONE_PATTERN.matcher(sanitized);
+        StringBuilder result = new StringBuilder();
+        while (matcher.find()) {
+            matcher.appendReplacement(result, Matcher.quoteReplacement(maskPhone(matcher.group(1))));
+        }
+        matcher.appendTail(result);
+        return result.toString();
+    }
+
+    private static Map<String, Object> sanitizeForSmsLog(Map<String, Object> value) {
+        if (value == null || value.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> sanitized = new LinkedHashMap<>();
+        value.forEach((key, item) -> sanitized.put(key, sanitizeForSmsLogValue(key, item)));
+        return sanitized;
+    }
+
+    private static Object sanitizeForSmsLogValue(String key, Object value) {
+        if (value == null) {
+            return null;
+        }
+        String normalizedKey = key == null ? "" : key.trim()
+                .replace('-', '_')
+                .replace('.', '_')
+                .toLowerCase(java.util.Locale.ROOT);
+        if (normalizedKey.contains("phone") || normalizedKey.contains("mobile") || normalizedKey.contains("receiver")) {
+            return maskPhone(String.valueOf(value));
+        }
+        if (value instanceof Map<?, ?> nested) {
+            Map<String, Object> normalized = new LinkedHashMap<>();
+            nested.forEach((nestedKey, nestedValue) ->
+                    normalized.put(String.valueOf(nestedKey), sanitizeForSmsLogValue(String.valueOf(nestedKey), nestedValue)));
+            return normalized;
+        }
+        if (value instanceof CharSequence text) {
+            return sanitizeForSmsLog(text.toString());
+        }
+        return value;
     }
 }

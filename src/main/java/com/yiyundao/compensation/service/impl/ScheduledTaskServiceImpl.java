@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.yiyundao.compensation.dto.TaskScheduleDTO;
 import com.yiyundao.compensation.entity.ScheduledTask;
@@ -27,6 +28,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, ScheduledTask>
         implements ScheduledTaskService {
 
+    private static final int DEFAULT_LOG_LIMIT = 50;
+    private static final int MAX_LOG_LIMIT = 200;
+
     private final ScheduledTaskExecutionMapper executionMapper;
     private final ApplicationContext applicationContext;
 
@@ -45,6 +49,8 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Long createTask(TaskScheduleDTO dto) {
+        LocalDateTime nextExecuteTime = requireNextExecutionTime(dto.getCronExpression());
+
         ScheduledTask task = new ScheduledTask();
         task.setTaskKey(dto.getTaskKey());
         task.setTaskName(dto.getTaskName());
@@ -58,7 +64,7 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
         task.setAlarmEnabled(dto.getAlarmEnabled());
         task.setAlarmReceivers(dto.getAlarmReceivers());
         task.setHandlerBean(dto.getHandlerBean());
-        task.setNextExecuteTime(calculateNextExecutionTime(dto.getCronExpression()));
+        task.setNextExecuteTime(nextExecuteTime);
 
         save(task);
         return task.getId();
@@ -71,6 +77,7 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
         if (task == null) {
             throw new RuntimeException("任务不存在: " + id);
         }
+        LocalDateTime nextExecuteTime = requireNextExecutionTime(dto.getCronExpression());
 
         task.setTaskName(dto.getTaskName());
         task.setTaskGroup(dto.getTaskGroup());
@@ -81,7 +88,7 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
         task.setAlarmEnabled(dto.getAlarmEnabled());
         task.setAlarmReceivers(dto.getAlarmReceivers());
         task.setHandlerBean(dto.getHandlerBean());
-        task.setNextExecuteTime(calculateNextExecutionTime(dto.getCronExpression()));
+        task.setNextExecuteTime(nextExecuteTime);
 
         updateById(task);
     }
@@ -90,31 +97,36 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
     @Transactional(rollbackFor = Exception.class)
     public void pauseTask(Long id) {
         ScheduledTask task = getById(id);
-        if (task != null) {
-            task.setStatus(ScheduledTask.TaskStatus.PAUSED);
-            updateById(task);
+        if (task == null) {
+            throw new RuntimeException("任务不存在: " + id);
         }
+        task.setStatus(ScheduledTask.TaskStatus.PAUSED);
+        updateById(task);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void resumeTask(Long id) {
         ScheduledTask task = getById(id);
-        if (task != null) {
-            task.setStatus(ScheduledTask.TaskStatus.RUNNING);
-            task.setNextExecuteTime(calculateNextExecutionTime(task.getCronExpression()));
-            updateById(task);
+        if (task == null) {
+            throw new RuntimeException("任务不存在: " + id);
         }
+        task.setStatus(ScheduledTask.TaskStatus.RUNNING);
+        task.setNextExecuteTime(requireNextExecutionTime(task.getCronExpression()));
+        updateById(task);
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void deleteTask(Long id) {
+        ScheduledTask task = getById(id);
+        if (task == null) {
+            throw new RuntimeException("任务不存在: " + id);
+        }
         removeById(id);
     }
 
     @Override
-    @Transactional(rollbackFor = Exception.class)
     public Long triggerTask(Long id) {
         ScheduledTask task = getById(id);
         if (task == null) {
@@ -129,8 +141,21 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
         execution.setStatus(ScheduledTaskExecution.ExecutionStatus.RUNNING);
         executionMapper.insert(execution);
 
-        // 执行任务
-        executeTask(task);
+        try {
+            // 执行任务
+            executeTask(task);
+            execution.setStatus(ScheduledTaskExecution.ExecutionStatus.SUCCESS);
+            execution.setResult(task.getLastResult());
+        } catch (RuntimeException ex) {
+            execution.setStatus(ScheduledTaskExecution.ExecutionStatus.FAILED);
+            execution.setErrorMessage(ex.getMessage());
+            throw ex;
+        } finally {
+            LocalDateTime endTime = LocalDateTime.now();
+            execution.setEndTime(endTime);
+            execution.setDurationMs(java.time.Duration.between(execution.getStartTime(), endTime).toMillis());
+            executionMapper.updateById(execution);
+        }
 
         return execution.getId();
     }
@@ -140,60 +165,155 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
         return executionMapper.selectList(new LambdaQueryWrapper<ScheduledTaskExecution>()
                 .eq(ScheduledTaskExecution::getTaskId, taskId)
                 .orderByDesc(ScheduledTaskExecution::getStartTime)
-                .last("LIMIT " + limit));
+                .last("LIMIT " + safeLogLimit(limit)));
+    }
+
+    private int safeLogLimit(int limit) {
+        if (limit < 1) {
+            return DEFAULT_LOG_LIMIT;
+        }
+        return Math.min(limit, MAX_LOG_LIMIT);
     }
 
     @Override
     public void executeTask(ScheduledTask task) {
-        log.info("开始执行任务: taskKey={}, handlerBean={}", task.getTaskKey(), task.getHandlerBean());
+        ScheduledTask executionTask = resolveExecutionTask(task);
+        log.info("开始执行任务: taskKey={}, handlerBean={}", executionTask.getTaskKey(), executionTask.getHandlerBean());
         long startTime = System.currentTimeMillis();
         TaskHandler.TaskExecutionResult result = null;
+        ScheduledTask.TaskStatus previousStatus = executionTask.getStatus();
 
         try {
             // 根据 handlerBean 获取任务处理器
-            TaskHandler handler = getTaskHandler(task.getHandlerBean());
+            TaskHandler handler = getTaskHandler(executionTask.getHandlerBean());
 
             if (handler == null) {
-                throw new RuntimeException("未找到任务处理器: handlerBean=" + task.getHandlerBean());
+                throw new RuntimeException("未找到任务处理器: handlerBean=" + executionTask.getHandlerBean());
             }
 
             // 执行任务
-            result = handler.execute(task.getTaskKey(), null);
+            result = handler.execute(executionTask.getTaskKey(), null);
 
             if (!result.success()) {
                 throw new RuntimeException("任务执行失败: " + result.message());
             }
 
             // 更新任务状态
-            task.setLastExecuteTime(LocalDateTime.now());
-            task.setStatus(ScheduledTask.TaskStatus.SUCCESS);
-            task.setLastResult("SUCCESS: " + result.message());
-            task.setRetryCount(0);
-            task.setNextExecuteTime(calculateNextExecutionTime(task.getCronExpression()));
-            updateById(task);
+            LocalDateTime now = LocalDateTime.now();
+            executionTask.setLastExecuteTime(now);
+            executionTask.setStatus(resolveSuccessStatus(previousStatus));
+            executionTask.setLastResult("SUCCESS: " + result.message());
+            executionTask.setRetryCount(0);
+            executionTask.setNextExecuteTime(calculateNextExecutionTime(executionTask.getCronExpression()));
+            updateExecutionOutcome(executionTask, previousStatus);
+            copyExecutionOutcome(task, executionTask);
 
             log.info("任务执行成功: taskKey={}, handler={}, duration={}ms, message={}",
-                    task.getTaskKey(), task.getHandlerBean(), System.currentTimeMillis() - startTime, result.message());
+                    executionTask.getTaskKey(), executionTask.getHandlerBean(),
+                    System.currentTimeMillis() - startTime, result.message());
 
         } catch (Exception e) {
-            log.error("任务执行失败: taskKey={}, handlerBean={}", task.getTaskKey(), task.getHandlerBean(), e);
+            log.error("任务执行失败: taskKey={}, handlerBean={}", executionTask.getTaskKey(), executionTask.getHandlerBean(), e);
 
-            task.setStatus(ScheduledTask.TaskStatus.FAILED);
-            task.setLastResult("FAILED: " + e.getMessage());
-            task.setRetryCount(task.getRetryCount() + 1);
-            updateById(task);
+            int nextRetryCount = safeRetryCount(executionTask) + 1;
+            int maxRetryCount = safeMaxRetryCount(executionTask);
+            executionTask.setStatus(resolveFailureStatus(previousStatus, nextRetryCount, maxRetryCount));
+            executionTask.setLastResult("FAILED: " + e.getMessage());
+            executionTask.setRetryCount(nextRetryCount);
+            executionTask.setNextExecuteTime(resolveFailureNextExecutionTime(executionTask, nextRetryCount, maxRetryCount));
+            updateExecutionOutcome(executionTask, previousStatus);
+            copyExecutionOutcome(task, executionTask);
 
             // 检查是否需要重试
-            if (task.getRetryCount() < task.getMaxRetryCount()) {
+            if (nextRetryCount < maxRetryCount) {
                 log.info("任务将在 {} 秒后重试: taskKey={}, retryCount={}/{}",
-                        task.getRetryIntervalSeconds(), task.getTaskKey(), task.getRetryCount(), task.getMaxRetryCount());
+                        safeRetryIntervalSeconds(executionTask), executionTask.getTaskKey(), nextRetryCount, maxRetryCount);
             } else {
                 log.error("任务重试次数已达上限: taskKey={}, maxRetryCount={}",
-                        task.getTaskKey(), task.getMaxRetryCount());
+                        executionTask.getTaskKey(), maxRetryCount);
             }
 
             throw new RuntimeException("任务执行失败: " + e.getMessage(), e);
         }
+    }
+
+    private ScheduledTask resolveExecutionTask(ScheduledTask task) {
+        if (task == null || task.getId() == null) {
+            throw new IllegalArgumentException("任务不存在");
+        }
+        ScheduledTask latest = getById(task.getId());
+        return latest != null ? latest : task;
+    }
+
+    private void updateExecutionOutcome(ScheduledTask task, ScheduledTask.TaskStatus previousStatus) {
+        if (task == null || task.getId() == null || previousStatus == null || task.getStatus() == null) {
+            return;
+        }
+        boolean updated = update(new UpdateWrapper<ScheduledTask>()
+                .eq("id", task.getId())
+                .eq("status", previousStatus.getCode())
+                .eq("cron_expression", task.getCronExpression())
+                .eq("handler_bean", task.getHandlerBean())
+                .set("status", task.getStatus().getCode())
+                .set("last_execute_time", task.getLastExecuteTime())
+                .set("last_result", task.getLastResult())
+                .set("retry_count", safeRetryCount(task))
+                .set("next_execute_time", task.getNextExecuteTime()));
+        if (!updated) {
+            log.info("任务状态已变更，跳过执行结果回写: taskId={}, taskKey={}, previousStatus={}, finalStatus={}",
+                    task.getId(), task.getTaskKey(), previousStatus, task.getStatus());
+        }
+    }
+
+    private void copyExecutionOutcome(ScheduledTask target, ScheduledTask source) {
+        if (target == null || source == null) {
+            return;
+        }
+        target.setLastExecuteTime(source.getLastExecuteTime());
+        target.setStatus(source.getStatus());
+        target.setLastResult(source.getLastResult());
+        target.setRetryCount(source.getRetryCount());
+        target.setNextExecuteTime(source.getNextExecuteTime());
+    }
+
+    private ScheduledTask.TaskStatus resolveSuccessStatus(ScheduledTask.TaskStatus previousStatus) {
+        if (previousStatus == ScheduledTask.TaskStatus.RUNNING || previousStatus == ScheduledTask.TaskStatus.PAUSED) {
+            return previousStatus;
+        }
+        return ScheduledTask.TaskStatus.SUCCESS;
+    }
+
+    private ScheduledTask.TaskStatus resolveFailureStatus(ScheduledTask.TaskStatus previousStatus,
+                                                         int retryCount,
+                                                         int maxRetryCount) {
+        if (previousStatus == ScheduledTask.TaskStatus.RUNNING && retryCount < maxRetryCount) {
+            return ScheduledTask.TaskStatus.RUNNING;
+        }
+        if (previousStatus == ScheduledTask.TaskStatus.PAUSED) {
+            return ScheduledTask.TaskStatus.PAUSED;
+        }
+        return ScheduledTask.TaskStatus.FAILED;
+    }
+
+    private LocalDateTime resolveFailureNextExecutionTime(ScheduledTask task, int retryCount, int maxRetryCount) {
+        if (task.getStatus() == ScheduledTask.TaskStatus.RUNNING && retryCount < maxRetryCount) {
+            return LocalDateTime.now().plusSeconds(safeRetryIntervalSeconds(task));
+        }
+        return null;
+    }
+
+    private int safeRetryCount(ScheduledTask task) {
+        return task.getRetryCount() == null || task.getRetryCount() < 0 ? 0 : task.getRetryCount();
+    }
+
+    private int safeMaxRetryCount(ScheduledTask task) {
+        return task.getMaxRetryCount() == null || task.getMaxRetryCount() < 1 ? 1 : task.getMaxRetryCount();
+    }
+
+    private int safeRetryIntervalSeconds(ScheduledTask task) {
+        return task.getRetryIntervalSeconds() == null || task.getRetryIntervalSeconds() < 1
+                ? 60
+                : task.getRetryIntervalSeconds();
     }
 
     /**
@@ -236,5 +356,13 @@ public class ScheduledTaskServiceImpl extends ServiceImpl<ScheduledTaskMapper, S
             log.warn("解析 Cron 表达式失败: {}", cronExpression);
             return null;
         }
+    }
+
+    private LocalDateTime requireNextExecutionTime(String cronExpression) {
+        LocalDateTime nextExecutionTime = calculateNextExecutionTime(cronExpression);
+        if (nextExecutionTime == null) {
+            throw new IllegalArgumentException("无效的 Cron 表达式");
+        }
+        return nextExecutionTime;
     }
 }

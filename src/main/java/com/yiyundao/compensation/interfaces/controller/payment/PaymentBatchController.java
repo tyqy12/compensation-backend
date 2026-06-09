@@ -1,20 +1,28 @@
 package com.yiyundao.compensation.interfaces.controller.payment;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.yiyundao.compensation.common.exception.BusinessException;
+import com.yiyundao.compensation.common.idempotent.Idempotent;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.enums.BatchStatus;
 import com.yiyundao.compensation.infrastructure.dao.EmployeeMapper;
+import com.yiyundao.compensation.modules.payment.dto.PaymentBatchResponse;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.payment.dto.PaymentBatchTransferValidationDto;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
 import com.yiyundao.compensation.enums.PaymentStatus;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
+import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentService;
 import com.yiyundao.compensation.interfaces.vo.payment.PaymentBatchVO;
 import com.yiyundao.compensation.interfaces.vo.payment.PaymentRecordItemVO;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.modules.payment.service.SettlementService;
+import com.yiyundao.compensation.security.SecurityAnnotations;
 import com.yiyundao.compensation.service.EncryptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,6 +37,7 @@ import java.util.stream.Collectors;
 @Slf4j
 @RestController
 @RequestMapping("/payment/batch")
+@SecurityAnnotations.IsFinanceOrAdmin
 @RequiredArgsConstructor
 public class PaymentBatchController {
 
@@ -38,6 +47,8 @@ public class PaymentBatchController {
     private final AuditLogService auditLogService;
     private final EmployeeMapper employeeMapper;
     private final EncryptionService encryptionService;
+    private final PayrollBatchService payrollBatchService;
+    private final PayrollPaymentService payrollPaymentService;
 
     // 分页查询支付批次
     @GetMapping
@@ -65,16 +76,26 @@ public class PaymentBatchController {
     @GetMapping("/{batchNo}")
     public ApiResponse<PaymentBatchVO> detail(@PathVariable String batchNo) {
         PaymentBatch batch = paymentBatchService.getByBatchNo(batchNo);
-        return ApiResponse.success(batch == null ? null : PaymentBatchVO.from(batch));
+        if (batch == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
+        }
+        return ApiResponse.success(PaymentBatchVO.from(batch));
     }
 
     // 获取批次记录列表，可按状态过滤
     @GetMapping("/{batchNo}/records")
     public ApiResponse<List<PaymentRecordItemVO>> records(@PathVariable String batchNo,
                                                           @RequestParam(required = false) String status) {
+        if (paymentBatchService.getByBatchNo(batchNo) == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
+        }
         PaymentStatus st = null;
-        if (status != null) {
-            st = PaymentStatus.fromCode(status);
+        if (org.springframework.util.StringUtils.hasText(status)) {
+            try {
+                st = PaymentStatus.fromCode(status.trim());
+            } catch (IllegalArgumentException ex) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "无效的支付状态: " + status);
+            }
         }
         List<PaymentRecord> list = paymentRecordService.getByBatchNo(batchNo, st);
         Set<Long> employeeIds = list.stream()
@@ -92,19 +113,24 @@ public class PaymentBatchController {
 
     // 启动批量转账（异步）
     @PostMapping("/{batchNo}/start")
+    @Idempotent(key = "'payment:batch:start:' + #p0", expireSeconds = 600, message = "批量转账正在处理中，请勿重复提交", throwOnLockFail = true, deleteOnError = true)
     public ApiResponse<String> start(@PathVariable String batchNo) {
         long begin = System.currentTimeMillis();
         try {
             PaymentBatch batch = paymentBatchService.getByBatchNo(batchNo);
             if (batch == null) {
                 audit("启动批量转账", null, batchNo, "PAYMENT", false, "批次不存在", begin);
-                return ApiResponse.error("批次不存在");
+                return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
+            }
+            if (batch.getStatus() != BatchStatus.SUBMITTED && batch.getStatus() != BatchStatus.APPROVED) {
+                String failMsg = "当前支付批次状态不可启动转账: " + batch.getStatus();
+                audit("启动批量转账", null, batchNo, "PAYMENT", false, failMsg, begin);
+                return ApiResponse.error(ErrorCode.INVALID_STATUS, failMsg);
             }
 
             PaymentBatchTransferValidationDto validation = settlementService.validateBatchForTransfer(batchNo, true);
             if (!Boolean.TRUE.equals(validation.getPass())) {
-                String failMsg = String.format("批次校验未通过：%d条风险记录，请先修复收款信息后再重试",
-                        validation.getBlockedCount() == null ? 0 : validation.getBlockedCount());
+                String failMsg = buildTransferValidationFailureMessage(validation);
                 audit("启动批量转账", null, batchNo, "PAYMENT", false, failMsg, begin);
                 return ApiResponse.error(
                         ErrorCode.BUSINESS_ERROR.getCode(),
@@ -123,10 +149,40 @@ public class PaymentBatchController {
         }
     }
 
+    private String buildTransferValidationFailureMessage(PaymentBatchTransferValidationDto validation) {
+        if (validation != null && validation.getWarnings() != null && !validation.getWarnings().isEmpty()) {
+            return "批次校验未通过：" + String.join("；", validation.getWarnings());
+        }
+        int blockedCount = validation == null || validation.getBlockedCount() == null ? 0 : validation.getBlockedCount();
+        return String.format("批次校验未通过：%d条风险记录，请先修复收款信息后再重试", blockedCount);
+    }
+
     @GetMapping("/{batchNo}/precheck")
     public ApiResponse<PaymentBatchTransferValidationDto> precheck(@PathVariable String batchNo,
-                                                                   @RequestParam(defaultValue = "true") boolean persistFailure) {
+                                                                   @RequestParam(defaultValue = "false") boolean persistFailure) {
+        if (paymentBatchService.getByBatchNo(batchNo) == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
+        }
         return ApiResponse.success(settlementService.validateBatchForTransfer(batchNo, persistFailure));
+    }
+
+    @PostMapping("/{batchNo}/retry-failed")
+    @Idempotent(key = "'payment:batch:retry-failed:' + #p0", expireSeconds = 600, message = "支付重试正在处理中，请勿重复提交", throwOnLockFail = true, deleteOnError = true)
+    public ApiResponse<PaymentBatchResponse> retryFailed(@PathVariable String batchNo,
+                                                         @RequestParam(defaultValue = "true") boolean triggerTransfer) {
+        if (paymentBatchService.getByBatchNo(batchNo) == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
+        }
+        PayrollBatch payrollBatch = payrollBatchService.getOne(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PayrollBatch>()
+                        .eq(PayrollBatch::getPaymentBatchNo, batchNo)
+                        .last("limit 1")
+        );
+        if (payrollBatch == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "未找到关联薪资批次");
+        }
+        PaymentBatch retriedBatch = payrollPaymentService.retryFailedPayment(payrollBatch.getId(), triggerTransfer);
+        return ApiResponse.success(PaymentBatchResponse.from(retriedBatch));
     }
 
     private void audit(String operation, String username, String batchNo, String businessType, boolean success, String detail, long begin) {

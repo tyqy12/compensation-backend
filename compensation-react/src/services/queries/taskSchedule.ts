@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api, { unwrap } from '@services/api';
 
+const TASKS_PATH = '/v1/admin/tasks';
+
 // 任务状态类型
 export type TaskStatus = 'PAUSED' | 'RUNNING' | 'FAILED' | 'SUCCESS';
 
@@ -68,7 +70,7 @@ export function useScheduledTasksQuery(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: ['scheduledTasks'],
     queryFn: async () => {
-      const { data } = await api.get('/api/v1/admin/tasks');
+      const { data } = await api.get(TASKS_PATH);
       return unwrap<ScheduledTask[]>(data);
     },
     enabled: options?.enabled,
@@ -85,7 +87,7 @@ export function useScheduledTaskDetailQuery(
   return useQuery({
     queryKey: ['scheduledTask', id],
     queryFn: async () => {
-      const { data } = await api.get(`/api/v1/admin/tasks/${id}`);
+      const { data } = await api.get(`${TASKS_PATH}/${id}`);
       return unwrap<ScheduledTask>(data);
     },
     enabled: !!id && options?.enabled !== false,
@@ -103,7 +105,7 @@ export function useTaskExecutionLogsQuery(
   return useQuery({
     queryKey: ['taskExecutionLogs', taskId, limit],
     queryFn: async () => {
-      const { data } = await api.get(`/api/v1/admin/tasks/${taskId}/logs`, {
+      const { data } = await api.get(`${TASKS_PATH}/${taskId}/logs`, {
         params: { limit: limit || 50 },
       });
       return unwrap<ScheduledTaskExecution[]>(data);
@@ -122,7 +124,7 @@ export function useCreateTaskMutation() {
 
   return useMutation({
     mutationFn: async (params: TaskScheduleParams) => {
-      const { data } = await api.post('/api/v1/admin/tasks', params);
+      const { data } = await api.post(TASKS_PATH, params);
       return unwrap<number>(data);
     },
     onSuccess: () => {
@@ -139,7 +141,7 @@ export function useUpdateTaskMutation() {
 
   return useMutation({
     mutationFn: async ({ id, params }: { id: number; params: TaskScheduleParams }) => {
-      const { data } = await api.put(`/api/v1/admin/tasks/${id}`, params);
+      const { data } = await api.put(`${TASKS_PATH}/${id}`, params);
       return unwrap<void>(data);
     },
     onSuccess: () => {
@@ -156,7 +158,7 @@ export function useDeleteTaskMutation() {
 
   return useMutation({
     mutationFn: async (id: number) => {
-      const { data } = await api.delete(`/api/v1/admin/tasks/${id}`);
+      const { data } = await api.delete(`${TASKS_PATH}/${id}`);
       return unwrap<void>(data);
     },
     onSuccess: () => {
@@ -173,7 +175,7 @@ export function usePauseTaskMutation() {
 
   return useMutation({
     mutationFn: async (id: number) => {
-      const { data } = await api.post(`/api/v1/admin/tasks/${id}/pause`);
+      const { data } = await api.post(`${TASKS_PATH}/${id}/pause`);
       return unwrap<void>(data);
     },
     onSuccess: () => {
@@ -190,7 +192,7 @@ export function useResumeTaskMutation() {
 
   return useMutation({
     mutationFn: async (id: number) => {
-      const { data } = await api.post(`/api/v1/admin/tasks/${id}/resume`);
+      const { data } = await api.post(`${TASKS_PATH}/${id}/resume`);
       return unwrap<void>(data);
     },
     onSuccess: () => {
@@ -207,7 +209,7 @@ export function useTriggerTaskMutation() {
 
   return useMutation({
     mutationFn: async (id: number) => {
-      const { data } = await api.post(`/api/v1/admin/tasks/${id}/trigger`);
+      const { data } = await api.post(`${TASKS_PATH}/${id}/trigger`);
       return unwrap<number>(data);
     },
     onSuccess: () => {

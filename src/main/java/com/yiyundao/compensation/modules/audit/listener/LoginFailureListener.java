@@ -47,6 +47,7 @@ public class LoginFailureListener {
      * 时间窗口 (5分钟)
      */
     private static final int TIME_WINDOW_MINUTES = 5;
+    private static final int MAX_TRACKED_USERS = 1000;
 
     /**
      * 处理审计日志保存事件
@@ -93,6 +94,8 @@ public class LoginFailureListener {
         }
 
         LocalDateTime now = LocalDateTime.now();
+        pruneExpiredFailures(now);
+        pruneOldestFailureKeysIfNeeded(username);
         LocalDateTime lastTime = lastFailureTime.get(username);
 
         // 检查是否在时间窗口内
@@ -158,5 +161,35 @@ public class LoginFailureListener {
     public void clearFailureCount(String username) {
         loginFailureCount.remove(username);
         lastFailureTime.remove(username);
+    }
+
+    private void pruneExpiredFailures(LocalDateTime now) {
+        LocalDateTime threshold = now.minusMinutes(TIME_WINDOW_MINUTES);
+        lastFailureTime.entrySet().removeIf(entry -> {
+            LocalDateTime failureTime = entry.getValue();
+            boolean expired = failureTime == null || failureTime.isBefore(threshold);
+            if (expired) {
+                loginFailureCount.remove(entry.getKey());
+            }
+            return expired;
+        });
+    }
+
+    private void pruneOldestFailureKeysIfNeeded(String username) {
+        if (loginFailureCount.containsKey(username)) {
+            return;
+        }
+        int overflow = loginFailureCount.size() - MAX_TRACKED_USERS + 1;
+        if (overflow <= 0) {
+            return;
+        }
+        lastFailureTime.entrySet().stream()
+                .sorted(Map.Entry.comparingByValue())
+                .limit(overflow)
+                .map(Map.Entry::getKey)
+                .forEach(key -> {
+                    loginFailureCount.remove(key);
+                    lastFailureTime.remove(key);
+                });
     }
 }

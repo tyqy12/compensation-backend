@@ -3,6 +3,7 @@ package com.yiyundao.compensation.interfaces.controller.admin;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.interfaces.dto.app.AppRegistryCreateRequest;
 import com.yiyundao.compensation.interfaces.dto.app.AppRegistryResponse;
 import com.yiyundao.compensation.interfaces.dto.app.AppRegistrySecretResponse;
@@ -20,6 +21,9 @@ import org.springframework.web.bind.annotation.*;
 @RequiredArgsConstructor
 @SecurityAnnotations.IsAdmin
 public class AppRegistryController {
+
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 200;
 
     private final AppRegistryService appRegistryService;
 
@@ -61,12 +65,14 @@ public class AppRegistryController {
                                                        @RequestParam(defaultValue = "10") int size,
                                                        @RequestParam(required = false) String keyword,
                                                        @RequestParam(required = false) String status) {
-        Page<AppRegistry> p = new Page<>(page, size);
+        Page<AppRegistry> p = new Page<>(safePage(page), safeSize(size));
         LambdaQueryWrapper<AppRegistry> wrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(keyword)) {
-            wrapper.like(AppRegistry::getAppName, keyword)
+            String trimmedKeyword = keyword.trim();
+            wrapper.and(w -> w
+                    .like(AppRegistry::getAppName, trimmedKeyword)
                     .or()
-                    .like(AppRegistry::getClientId, keyword);
+                    .like(AppRegistry::getClientId, trimmedKeyword));
         }
         if (StringUtils.hasText(status)) {
             wrapper.eq(AppRegistry::getStatus, status.trim());
@@ -80,7 +86,21 @@ public class AppRegistryController {
     @GetMapping("/{id}")
     public ApiResponse<AppRegistryResponse> detail(@PathVariable Long id) {
         AppRegistry app = appRegistryService.getById(id);
-        return ApiResponse.success(app == null ? null : toResponse(app));
+        if (app == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "应用不存在");
+        }
+        return ApiResponse.success(toResponse(app));
+    }
+
+    private int safePage(int page) {
+        return page < 1 ? 1 : page;
+    }
+
+    private int safeSize(int size) {
+        if (size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
     }
 
     private AppRegistrySecretResponse toSecretResponse(AppRegistryService.RegisteredClient registeredClient) {

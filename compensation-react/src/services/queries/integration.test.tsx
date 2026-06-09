@@ -9,6 +9,9 @@ import {
   useSaveIntegrationConfigMutation,
   useDisableIntegrationMutation,
   useTestIntegrationMutation,
+  useIntegrationQuery,
+  useSaveIntegrationMutation,
+  useTestConnectionMutation,
 } from './integration';
 import type { IntegrationConfigDetail, Platform, SaveConfigRequest } from '@types/api';
 
@@ -227,6 +230,45 @@ describe('integration queries', () => {
 
     expect(mockApi.post).toHaveBeenCalledWith('/admin/integration-configs/wechat/test-connection');
     expect(response).toEqual({ success: true });
+  });
+
+  it('routes compatibility detail hook through current admin API', async () => {
+    mockApi.get.mockResolvedValue({
+      data: { code: 200, message: 'success', data: mockDetail },
+    });
+
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useIntegrationQuery('wechat'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(mockApi.get).toHaveBeenCalledWith('/admin/integration-configs/wechat');
+  });
+
+  it('routes compatibility save hook through current admin API', async () => {
+    mockApi.put.mockResolvedValue({
+      data: { code: 200, message: 'success', data: mockDetail },
+    });
+
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useSaveIntegrationMutation('wechat'), { wrapper: Wrapper });
+
+    await result.current.mutateAsync(mockDetail);
+
+    expect(mockApi.put).toHaveBeenCalledWith('/admin/integration-configs/wechat', mockDetail);
+  });
+
+  it('routes compatibility connection test hook through current admin API', async () => {
+    mockApi.post.mockResolvedValue({
+      data: { code: 200, message: 'success', data: { success: true } },
+    });
+
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useTestConnectionMutation('wechat'), { wrapper: Wrapper });
+
+    await result.current.mutateAsync();
+
+    expect(mockApi.post).toHaveBeenCalledWith('/admin/integration-configs/wechat/test-connection');
   });
 
   it('propagates errors from API', async () => {

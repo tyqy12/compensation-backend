@@ -110,7 +110,7 @@ public final class SecurityAnnotations {
     /**
      * 组织同步权限
      */
-    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER') or hasAuthority('org:sync')")
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('org:sync')")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface HasOrgSyncPermission {
@@ -123,6 +123,15 @@ public final class SecurityAnnotations {
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface HasOrgReadPermission {
+    }
+
+    /**
+     * 组织同步管理读取权限
+     */
+    @PreAuthorize("hasRole('ADMIN') or hasAuthority('org:read')")
+    @Target({ElementType.METHOD, ElementType.TYPE})
+    @Retention(RetentionPolicy.RUNTIME)
+    public @interface HasOrgAdminReadPermission {
     }
 
     // ==================== OpenAPI 权限注解 ====================

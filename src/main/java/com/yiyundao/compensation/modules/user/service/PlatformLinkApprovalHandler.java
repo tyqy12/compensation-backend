@@ -6,11 +6,8 @@ import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.event.ApprovalCompletedEvent;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.util.StringUtils;
 
 import java.util.Map;
@@ -37,14 +34,12 @@ public class PlatformLinkApprovalHandler {
      * 监听审批完成事件
      * <p>
      * 处理平台绑定审批，审批通过后执行绑定操作。
-     * 使用 @TransactionalEventListener(phase = AFTER_COMMIT) 确保事件处理在审批事务提交后执行。
-     * 使用 @Transactional(propagation = REQUIRES_NEW) 开启新事务，确保平台绑定操作的独立性。
+     * 使用同步事件监听，确保绑定失败时审批事务回滚，避免审批已通过但绑定未生效。
      * </p>
      *
      * @param event 审批完成事件
      */
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    @EventListener
     @SuppressWarnings("unchecked")
     public void onApprovalCompleted(ApprovalCompletedEvent event) {
         ApprovalWorkflow workflow = event.getWorkflow();
@@ -86,16 +81,16 @@ public class PlatformLinkApprovalHandler {
                     throw new IllegalArgumentException("审批数据缺少必需字段: userId");
                 }
 
-                // 执行绑定操作
                 if (provider != null && subjectId != null) {
-                    log.info("执行平台绑定: workflowId={}, userId={}, provider={}, subjectId={}",
-                            workflow.getId(), userId, provider, subjectId);
-                    userBindingService.bindPlatform(userId, provider, subjectId);
-                }
-                if (employeeId != null) {
+                    log.info("执行审批通过的平台绑定: workflowId={}, userId={}, employeeId={}, provider={}, subjectId={}",
+                            workflow.getId(), userId, employeeId, provider, subjectId);
+                    userBindingService.executeApprovedPlatformLink(workflow.getId(), userId, employeeId, provider, subjectId);
+                } else if (employeeId != null) {
                     log.info("执行员工关联: workflowId={}, userId={}, employeeId={}",
                             workflow.getId(), userId, employeeId);
                     userBindingService.bindEmployee(userId, employeeId);
+                } else {
+                    throw new IllegalArgumentException("审批数据缺少可执行的绑定目标");
                 }
 
                 log.info("平台绑定审批处理成功: workflowId={}", workflow.getId());

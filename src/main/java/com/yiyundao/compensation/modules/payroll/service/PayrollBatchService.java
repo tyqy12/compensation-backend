@@ -19,5 +19,13 @@ public interface PayrollBatchService extends IService<PayrollBatch> {
      * @return 是否成功创建支付批次
      */
     boolean retryCreatePaymentBatch(Long batchId);
-}
 
+    /**
+     * 重试创建支付批次，并显式控制是否立即触发统一结算通道。
+     *
+     * @param batchId 薪资批次ID
+     * @param triggerTransfer 是否立即触发支付通道
+     * @return 是否成功创建支付批次
+     */
+    boolean retryCreatePaymentBatch(Long batchId, boolean triggerTransfer);
+}

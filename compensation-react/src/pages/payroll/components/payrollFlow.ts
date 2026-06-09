@@ -88,6 +88,13 @@ export const getCalculationStatusMeta = (status?: string) =>
 export const getDistributionStatusMeta = (status?: string) =>
   distributionStatusMetaMap[normalizeDistributionStatus(status)];
 
+export const isPayrollBatchComputable = (status?: string) => [
+  'locked',
+  'confirming',
+  'dispute_processing',
+  'rejected',
+].includes(normalizeFlowStatus(status));
+
 export const getBatchRevisionText = (batchRevision?: number | null) => {
   const revision = typeof batchRevision === 'number' && batchRevision > 0 ? batchRevision : 1;
   return `R${revision}`;

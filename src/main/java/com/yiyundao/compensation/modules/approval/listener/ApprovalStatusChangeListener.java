@@ -41,13 +41,19 @@ public class ApprovalStatusChangeListener {
         String operation = event.getOperation();
         ApprovalStatus status = parseStatus(operation);
 
+        if (!event.isSuccess()) {
+            log.debug("审批操作失败，仅记录审计事件，不触发审批状态通知: operation={}, businessKey={}",
+                    operation, event.getAuditLog().getBusinessKey());
+            return;
+        }
+
         // 审批通过时触发后续处理
-        if (event.isSuccess() && status == ApprovalStatus.APPROVED) {
+        if (status == ApprovalStatus.APPROVED) {
             handleApprovalApproved(event);
         }
 
         // 审批拒绝时触发通知
-        if (!event.isSuccess() || status == ApprovalStatus.REJECTED) {
+        if (status == ApprovalStatus.REJECTED) {
             handleApprovalRejected(event);
         }
     }

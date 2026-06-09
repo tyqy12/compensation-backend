@@ -63,6 +63,18 @@ class OpenApiPayslipControllerTest {
         assertThat(dto.getNetAmount()).isEqualByComparingTo(BigDecimal.TEN);
     }
 
+    @Test
+    void getPayslipReturnsErrorWhenEmployeeRefMissing() {
+        externalApiContext.set(ExternalApiContext.ExternalApiClient.builder()
+                .scopes(List.of("payslip:read"))
+                .build());
+
+        ApiResponse<OpenApiPayslipDto> response = controller.getPayslip(1L, " ");
+
+        assertThat(response.getCode()).isEqualTo(ErrorCode.PARAM_MISSING.getCode());
+        assertThat(response.getMessage()).contains("employeeRef");
+    }
+
     private static class TestExternalPayrollQueryService implements ExternalPayrollQueryService {
 
         @Override
@@ -98,7 +110,7 @@ class OpenApiPayslipControllerTest {
         }
 
         @Override
-        public OpenApiPayslipDto findPayslip(Long payslipId) {
+        public OpenApiPayslipDto findPayslip(Long payslipId, String employeeRef) {
             return null;
         }
     }

@@ -8,11 +8,14 @@ import com.yiyundao.compensation.interfaces.vo.payroll.PayrollImportItemVO;
 import com.yiyundao.compensation.interfaces.vo.payroll.PayrollImportSalaryItemVO;
 import com.yiyundao.compensation.modules.payroll.service.PayrollCalculationService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollImportService;
+import com.yiyundao.compensation.modules.system.service.SysConfigService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
 import com.yiyundao.compensation.service.NotificationService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -24,8 +27,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * 薪酬导入控制器
@@ -40,10 +45,17 @@ public class PayrollImportController {
     private final PayrollImportService payrollImportService;
     private final PayrollCalculationService payrollCalculationService;
     private final NotificationService notificationService;
+    private final SysConfigService sysConfigService;
 
-    private static final List<String> EXPECTED_HEADERS = Arrays.asList(
+    private static final List<String> EXPECTED_HEADERS = List.of(
             "employeeId", "itemCode", "amount", "note"
     );
+    private static final CSVFormat IMPORT_CSV_FORMAT = CSVFormat.RFC4180.builder()
+            .setHeader()
+            .setSkipHeaderRecord(true)
+            .setIgnoreSurroundingSpaces(true)
+            .setTrim(true)
+            .build();
 
     @PostMapping("/preview")
     @SecurityAnnotations.IsFinanceOrAdmin
@@ -90,8 +102,9 @@ public class PayrollImportController {
         }
 
         try {
+            Long adminUserId = sysConfigService.getLong("system.admin_user_id", 1L);
             notificationService.sendApprovalNotification(
-                    1L,
+                    adminUserId,
                     "PAYROLL_IMPORT",
                     "薪酬导入审核",
                     com.yiyundao.compensation.enums.NotificationType.APPROVAL_PENDING,
@@ -149,22 +162,24 @@ public class PayrollImportController {
             return "仅支持CSV格式文件";
         }
 
-        try (java.io.BufferedReader br = new java.io.BufferedReader(
-                new java.io.InputStreamReader(file.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+        try (java.io.Reader reader = new java.io.InputStreamReader(
+                file.getInputStream(), java.nio.charset.StandardCharsets.UTF_8);
+             CSVParser parser = IMPORT_CSV_FORMAT.parse(reader)) {
 
-            String header = br.readLine();
-            if (header == null || header.trim().isEmpty()) {
+            Map<String, String> headerByLower = parser.getHeaderMap().keySet().stream()
+                    .filter(header -> header != null && !header.trim().isEmpty())
+                    .collect(Collectors.toMap(
+                            header -> header.trim().toLowerCase(Locale.ROOT),
+                            String::trim,
+                            (left, right) -> left
+                    ));
+            if (headerByLower.isEmpty()) {
                 return "CSV文件头部为空";
             }
 
-            List<String> headers = Arrays.stream(header.split(","))
-                    .map(String::trim)
-                    .map(String::toLowerCase)
-                    .toList();
-
             List<String> missingHeaders = new java.util.ArrayList<>();
             for (String expected : EXPECTED_HEADERS) {
-                if (!headers.contains(expected.toLowerCase())) {
+                if (!headerByLower.containsKey(expected.toLowerCase(Locale.ROOT))) {
                     missingHeaders.add(expected);
                 }
             }
@@ -175,8 +190,11 @@ public class PayrollImportController {
             }
 
             List<String> unknownHeaders = new java.util.ArrayList<>();
-            for (String headerCol : headers) {
-                if (!EXPECTED_HEADERS.stream().map(String::toLowerCase).toList().contains(headerCol)) {
+            List<String> expectedLowerHeaders = EXPECTED_HEADERS.stream()
+                    .map(header -> header.toLowerCase(Locale.ROOT))
+                    .toList();
+            for (String headerCol : headerByLower.keySet()) {
+                if (!expectedLowerHeaders.contains(headerCol)) {
                     unknownHeaders.add(headerCol);
                 }
             }

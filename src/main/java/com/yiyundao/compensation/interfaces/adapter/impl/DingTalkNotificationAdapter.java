@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.interfaces.adapter.impl;
 
+import com.yiyundao.compensation.common.utils.SecretLogSanitizer;
 import com.yiyundao.compensation.enums.NotificationChannel;
 import com.yiyundao.compensation.interfaces.adapter.NotificationAdapter;
 import com.yiyundao.compensation.modules.notification.entity.NotificationRecord;
@@ -7,6 +8,7 @@ import com.yiyundao.compensation.modules.system.service.IntegrationConfigService
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 import org.springframework.web.reactive.function.client.WebClient;
 
 import java.util.HashMap;
@@ -64,8 +66,8 @@ public class DingTalkNotificationAdapter implements NotificationAdapter {
             }
 
         } catch (Exception e) {
-            log.error("钉钉通知发送异常: recordId={}", record.getId(), e);
-            return NotificationSendResult.failure("发送异常: " + e.getMessage());
+            log.error("钉钉通知发送异常: recordId={}, error={}", record.getId(), SecretLogSanitizer.sanitize(e));
+            return NotificationSendResult.failure("发送异常: " + SecretLogSanitizer.sanitize(e));
         }
     }
 
@@ -93,7 +95,7 @@ public class DingTalkNotificationAdapter implements NotificationAdapter {
             String accessToken = getAccessToken();
             return accessToken != null;
         } catch (Exception e) {
-            log.error("钉钉连接检查失败", e);
+            log.error("钉钉连接检查失败: {}", SecretLogSanitizer.sanitize(e));
             return false;
         }
     }
@@ -129,12 +131,12 @@ public class DingTalkNotificationAdapter implements NotificationAdapter {
             if (response != null && Integer.valueOf(0).equals(response.get("errcode"))) {
                 return String.valueOf(response.get("access_token"));
             } else {
-                log.error("获取钉钉access_token失败: {}", response);
+                log.error("获取钉钉access_token失败: {}", SecretLogSanitizer.sanitize(response));
                 return null;
             }
 
         } catch (Exception e) {
-            log.error("获取钉钉access_token异常", e);
+            log.error("获取钉钉access_token异常: {}", SecretLogSanitizer.sanitize(e));
             return null;
         }
     }
@@ -147,11 +149,11 @@ public class DingTalkNotificationAdapter implements NotificationAdapter {
 
         // 应用agentId
         Map<String, String> config = integrationConfigService.getDecryptedConfig("dingtalk");
-        if (config != null && config.containsKey("agentId")) {
-            message.put("agent_id", Long.parseLong(config.get("agentId")));
-        } else {
-            message.put("agent_id", 1L); // 默认应用ID
+        String agentId = config != null ? config.get("agentId") : null;
+        if (!StringUtils.hasText(agentId)) {
+            throw new IllegalStateException("钉钉配置缺少 agentId");
         }
+        message.put("agent_id", Long.parseLong(agentId.trim()));
 
         // 接收人
         message.put("userid_list", record.getRecipientId());

@@ -20,7 +20,7 @@ spring:
       host: localhost
       port: 6379
       database: 0
-      password: VPLrhu76
+      password: ${REDIS_PASSWORD:}
       timeout: 5000ms
       lettuce:
         pool:
@@ -39,7 +39,7 @@ spring:
 
 # JWT配置
 jwt:
-  secret: compensation-assistant-dev-secret-key-2024
+  secret: ${JWT_SECRET:change-me-dev-jwt-secret-key-at-least-32-chars}
   expiration: 86400000
   refresh-expiration: 604800000
 
@@ -57,9 +57,9 @@ alipay:
 
 # 企业微信配置
 wechat:
-  corp-id: wwa45e13d8804607c0
-  corp-secret: vGSzMAl6EPPHvxnn7JRH7hXqqpP_jg0jfmP-k6-3nGk
-  agent-id: 1000003
+  corp-id: ${WECHAT_CORP_ID:your_corp_id}
+  corp-secret: ${WECHAT_CORP_SECRET:your_corp_secret}
+  agent-id: ${WECHAT_AGENT_ID:1000003}
 
 # 钉钉配置
 dingtalk:
@@ -86,12 +86,12 @@ encryption:
     key: your_aes_key_32_chars_long_here
 
 migration:
-  audit-log:
-    enabled: true
+  runner:
+    enabled: false
 
 external-api:
   jwt:
-    secret: external-api-dev-secret-key-2024-compensation
+    secret: ${EXTERNAL_API_JWT_SECRET:change-me-external-api-secret-at-least-32-chars}
     expiration-seconds: 1800
   rate-limit:
     per-minute: 600

@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.modules.payroll.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -44,6 +45,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -52,8 +54,22 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class PayrollConfirmationServiceImpl implements PayrollConfirmationService {
 
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 200;
+
     private static final String BUSINESS_TYPE_PAYROLL_DISPUTE = "payroll_dispute";
     private static final String DISPUTE_KEY_PREFIX = "payroll_dispute:line:";
+    private static final List<PayrollBatchStatus> CONFIRMATION_WINDOW_STATUSES = List.of(
+            PayrollBatchStatus.CONFIRMING,
+            PayrollBatchStatus.DISPUTE_PROCESSING,
+            PayrollBatchStatus.CONFIRMED
+    );
+    private static final String CONFIRMATION_WINDOW_BATCH_EXISTS_SQL =
+            "SELECT 1 FROM payroll_batch pb"
+                    + " WHERE pb.id = payroll_line.batch_id"
+                    + " AND pb.deleted = 0"
+                    + " AND COALESCE(pb.confirmation_required, 1) = 1"
+                    + " AND pb.status IN (" + sqlStatusCodes(CONFIRMATION_WINDOW_STATUSES) + ")";
 
     private final PayrollLineService payrollLineService;
     private final PayrollBatchService payrollBatchService;
@@ -73,7 +89,12 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         PayrollBatch batch = requireBatch(line.getBatchId());
         ensureBatchConfirmable(batch);
         ensureLineOperableByCurrentUser(line, operator);
-        confirmSingleLine(line, operator, request != null ? request.getSignature() : null, request != null ? request.getComment() : null);
+        boolean confirmed = confirmSingleLine(line, operator,
+                request != null ? request.getSignature() : null,
+                request != null ? request.getComment() : null);
+        if (!confirmed) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "工资条确认状态已变更，请刷新后重试");
+        }
         refreshBatchConfirmationStatus(batch.getId());
     }
 
@@ -93,10 +114,14 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         if (currentStatus == PayrollConfirmationStatus.OBJECTED && line.getDisputeWorkflowId() != null) {
             return line.getDisputeWorkflowId();
         }
+        if (currentStatus.isFinalForPayment()) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "该工资条已完成确认，不能再提异议");
+        }
 
         Map<String, Object> workflowData = new LinkedHashMap<>();
         workflowData.put("lineId", line.getId());
         workflowData.put("batchId", line.getBatchId());
+        workflowData.put("batchRevision", normalizeRevision(batch.getBatchRevision()));
         workflowData.put("employeeId", line.getEmployeeId());
         workflowData.put("objectionReason", request.getReason().trim());
         if (StringUtils.hasText(request.getComment())) {
@@ -111,15 +136,34 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
                 workflowData
         );
 
+        LocalDateTime objectionAt = LocalDateTime.now();
+        boolean updated = payrollLineService.update(new LambdaUpdateWrapper<PayrollLine>()
+                .eq(PayrollLine::getId, line.getId())
+                .and(w -> w
+                        .isNull(PayrollLine::getConfirmationStatus)
+                        .or()
+                        .eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.PENDING.getCode())
+                        .or()
+                        .eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.OBJECTED_REJECTED.getCode()))
+                .set(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.OBJECTED.getCode())
+                .set(PayrollLine::getObjectionReason, request.getReason().trim())
+                .set(PayrollLine::getObjectionAt, objectionAt)
+                .set(PayrollLine::getDisputeWorkflowId, workflowId)
+                .set(PayrollLine::getConfirmedByUserId, null)
+                .set(PayrollLine::getConfirmedByEmployeeId, null)
+                .set(PayrollLine::getConfirmedAt, null)
+                .set(PayrollLine::getConfirmationComment, null));
+        if (!updated) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "工资条确认状态已变更，请刷新后重试");
+        }
         line.setConfirmationStatus(PayrollConfirmationStatus.OBJECTED.getCode());
         line.setObjectionReason(request.getReason().trim());
-        line.setObjectionAt(LocalDateTime.now());
+        line.setObjectionAt(objectionAt);
         line.setDisputeWorkflowId(workflowId);
         line.setConfirmedByUserId(null);
         line.setConfirmedByEmployeeId(null);
         line.setConfirmedAt(null);
         line.setConfirmationComment(null);
-        payrollLineService.updateById(line);
 
         refreshBatchConfirmationStatus(batch.getId());
         return workflowId;
@@ -139,7 +183,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
 
         int affected = 0;
         for (PayrollLine line : candidates) {
-            if (!isElevatedOperator(operator) && !isAssignee(line, operator.getEmployeeId())) {
+            if (!canOperateAnyConfirmationLine(operator) && !isAssignee(line, operator.getEmployeeId())) {
                 continue;
             }
             if (confirmSingleLine(line, operator, request != null ? request.getSignature() : null,
@@ -181,9 +225,20 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
             if (status.isFinalForPayment()) {
                 continue;
             }
-            line.setConfirmationAssigneeEmployeeId(request.getAssigneeEmployeeId());
-            payrollLineService.updateById(line);
-            affected++;
+            boolean updated = payrollLineService.update(new LambdaUpdateWrapper<PayrollLine>()
+                    .eq(PayrollLine::getId, line.getId())
+                    .and(wrapper -> wrapper
+                            .isNull(PayrollLine::getConfirmationStatus)
+                            .or()
+                            .eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.PENDING.getCode())
+                            .or()
+                            .eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.OBJECTED.getCode())
+                            .or()
+                            .eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.OBJECTED_REJECTED.getCode()))
+                    .set(PayrollLine::getConfirmationAssigneeEmployeeId, request.getAssigneeEmployeeId()));
+            if (updated) {
+                affected++;
+            }
         }
         if (affected > 0) {
             batch.setConfirmationMode(PayrollConfirmationMode.GROUP.getCode());
@@ -219,10 +274,11 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
     @Override
     public Page<PayrollPendingConfirmationDto> pagePendingConfirmations(SysUser currentUser, Long batchId, int page, int size) {
         SysUser operator = requireAuthenticated(currentUser);
-        long current = Math.max(page, 1);
-        long pageSize = Math.max(size, 1);
+        long current = safePage(page);
+        long pageSize = safeSize(size);
 
         LambdaQueryWrapper<PayrollLine> wrapper = new LambdaQueryWrapper<PayrollLine>()
+                .exists(CONFIRMATION_WINDOW_BATCH_EXISTS_SQL)
                 .and(w -> w
                         .isNull(PayrollLine::getConfirmationStatus)
                         .or()
@@ -234,7 +290,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         if (batchId != null) {
             wrapper.eq(PayrollLine::getBatchId, batchId);
         }
-        if (!isElevatedOperator(operator)) {
+        if (!canViewAllPendingConfirmations(operator)) {
             if (operator.getEmployeeId() == null) {
                 return new Page<>(current, pageSize, 0);
             }
@@ -277,6 +333,17 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         return result;
     }
 
+    private int safePage(int page) {
+        return page < 1 ? 1 : page;
+    }
+
+    private int safeSize(int size) {
+        if (size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
+    }
+
     @Override
     @Transactional
     public void handleDisputeWorkflowCompleted(ApprovalWorkflow workflow, ApprovalStatus finalStatus) {
@@ -298,9 +365,17 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         if (line == null) {
             return;
         }
-        if (line.getDisputeWorkflowId() != null && !workflow.getId().equals(line.getDisputeWorkflowId())) {
+        if (!Objects.equals(workflow.getId(), line.getDisputeWorkflowId())) {
             log.info("忽略过期异议回调: workflowId={}, lineId={}, currentWorkflowId={}",
                     workflow.getId(), lineId, line.getDisputeWorkflowId());
+            return;
+        }
+        PayrollBatch batch = payrollBatchService.getById(line.getBatchId());
+        if (batch == null || !matchesCurrentBatchRevision(workflow, batch)) {
+            log.info("忽略过期异议回调: workflowId={}, lineId={}, batchId={}, currentRevision={}, workflowRevision={}",
+                    workflow.getId(), lineId, line.getBatchId(),
+                    batch != null ? batch.getBatchRevision() : null,
+                    parseBatchRevisionFromData(workflow.getWorkflowData()));
             return;
         }
 
@@ -313,7 +388,16 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         } else {
             return;
         }
-        payrollLineService.updateById(line);
+        boolean updated = payrollLineService.update(new LambdaUpdateWrapper<PayrollLine>()
+                .eq(PayrollLine::getId, line.getId())
+                .eq(PayrollLine::getDisputeWorkflowId, workflow.getId())
+                .eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.OBJECTED.getCode())
+                .set(PayrollLine::getConfirmationStatus, line.getConfirmationStatus())
+                .set(PayrollLine::getConfirmationComment, line.getConfirmationComment()));
+        if (!updated) {
+            log.info("忽略已流转异议回调: workflowId={}, lineId={}", workflow.getId(), lineId);
+            return;
+        }
         refreshBatchConfirmationStatus(line.getBatchId());
     }
 
@@ -326,8 +410,21 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         }
 
         if (Boolean.FALSE.equals(batch.getConfirmationRequired())) {
+            if (canMarkConfirmationSkipped(batch.getStatus())) {
+                batch.setStatus(PayrollBatchStatus.CONFIRMED);
+                if (batch.getConfirmationCompletedTime() == null) {
+                    batch.setConfirmationCompletedTime(LocalDateTime.now());
+                }
+                payrollBatchService.updateById(batch);
+            }
             confirmationAggregateService.syncFromLegacyBatch(batchId, batch.getBatchRevision());
-            payrollProcessManager.onConfirmationCompleted(batchId, batch.getBatchRevision());
+            if (batch.getStatus() == PayrollBatchStatus.CONFIRMED) {
+                payrollProcessManager.onConfirmationCompleted(batchId, batch.getBatchRevision());
+            }
+            return;
+        }
+        if (!canRefreshConfirmationStatus(batch.getStatus())) {
+            confirmationAggregateService.syncFromLegacyBatch(batchId, batch.getBatchRevision());
             return;
         }
 
@@ -358,6 +455,20 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         }
     }
 
+    private boolean canMarkConfirmationSkipped(PayrollBatchStatus status) {
+        return status == PayrollBatchStatus.LOCKED
+                || status == PayrollBatchStatus.CONFIRMING
+                || status == PayrollBatchStatus.DISPUTE_PROCESSING
+                || status == PayrollBatchStatus.CONFIRMED;
+    }
+
+    private boolean canRefreshConfirmationStatus(PayrollBatchStatus status) {
+        return status == PayrollBatchStatus.LOCKED
+                || status == PayrollBatchStatus.CONFIRMING
+                || status == PayrollBatchStatus.DISPUTE_PROCESSING
+                || status == PayrollBatchStatus.CONFIRMED;
+    }
+
     private boolean confirmSingleLine(PayrollLine line, SysUser operator, String signature, String comment) {
         if (line == null || operator == null) {
             return false;
@@ -370,15 +481,35 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
             throw new BusinessException(ErrorCode.INVALID_STATUS, "该工资条存在处理中异议，暂不可确认");
         }
 
-        line.setConfirmationStatus(PayrollConfirmationStatus.CONFIRMED.getCode());
-        line.setConfirmedByUserId(operator.getId());
-        line.setConfirmedByEmployeeId(operator.getEmployeeId());
-        line.setConfirmedAt(LocalDateTime.now());
-        line.setConfirmationComment(buildComment(signature, comment, operator));
-        line.setObjectionReason(null);
-        line.setObjectionAt(null);
-        line.setDisputeWorkflowId(null);
-        return payrollLineService.updateById(line);
+        LocalDateTime confirmedAt = LocalDateTime.now();
+        String confirmationComment = buildComment(signature, comment, operator);
+        boolean updated = payrollLineService.update(new LambdaUpdateWrapper<PayrollLine>()
+                .eq(PayrollLine::getId, line.getId())
+                .and(w -> w
+                        .isNull(PayrollLine::getConfirmationStatus)
+                        .or()
+                        .eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.PENDING.getCode())
+                        .or()
+                        .eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.OBJECTED_REJECTED.getCode()))
+                .set(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.CONFIRMED.getCode())
+                .set(PayrollLine::getConfirmedByUserId, operator.getId())
+                .set(PayrollLine::getConfirmedByEmployeeId, operator.getEmployeeId())
+                .set(PayrollLine::getConfirmedAt, confirmedAt)
+                .set(PayrollLine::getConfirmationComment, confirmationComment)
+                .set(PayrollLine::getObjectionReason, null)
+                .set(PayrollLine::getObjectionAt, null)
+                .set(PayrollLine::getDisputeWorkflowId, null));
+        if (updated) {
+            line.setConfirmationStatus(PayrollConfirmationStatus.CONFIRMED.getCode());
+            line.setConfirmedByUserId(operator.getId());
+            line.setConfirmedByEmployeeId(operator.getEmployeeId());
+            line.setConfirmedAt(confirmedAt);
+            line.setConfirmationComment(confirmationComment);
+            line.setObjectionReason(null);
+            line.setObjectionAt(null);
+            line.setDisputeWorkflowId(null);
+        }
+        return updated;
     }
 
     private List<PayrollLine> loadBatchConfirmCandidates(Long batchId, PayrollBatchConfirmRequest request) {
@@ -426,13 +557,8 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         if (status == null) {
             throw new BusinessException(ErrorCode.INVALID_STATUS, "批次状态异常");
         }
-        if (status == PayrollBatchStatus.SUBMITTED
-                || status == PayrollBatchStatus.APPROVED
-                || status == PayrollBatchStatus.PAY_PROCESSING
-                || status == PayrollBatchStatus.PAY_FAILED
-                || status == PayrollBatchStatus.PAID
-                || status == PayrollBatchStatus.ARCHIVED) {
-            throw new BusinessException(ErrorCode.INVALID_STATUS, "当前批次已进入发放阶段，不能再确认或提异议");
+        if (!CONFIRMATION_WINDOW_STATUSES.contains(status)) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "当前批次不在员工确认阶段，不能确认或提异议");
         }
     }
 
@@ -440,7 +566,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         if (line == null || currentUser == null) {
             throw new BusinessException(ErrorCode.ACCESS_DENIED, "无权限操作");
         }
-        if (isElevatedOperator(currentUser)) {
+        if (canOperateAnyConfirmationLine(currentUser)) {
             return;
         }
         if (!isAssignee(line, currentUser.getEmployeeId())) {
@@ -458,7 +584,11 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         return employeeId.equals(assignee);
     }
 
-    private boolean isElevatedOperator(SysUser user) {
+    private boolean canOperateAnyConfirmationLine(SysUser user) {
+        return isFinanceOrAdmin(user);
+    }
+
+    private boolean canViewAllPendingConfirmations(SysUser user) {
         return isFinanceOrAdmin(user) || hasRole(user, SecurityConstants.ROLE_HR);
     }
 
@@ -473,6 +603,12 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         return userRoleService.hasRole(user.getId(), roleCode);
     }
 
+    private static String sqlStatusCodes(List<PayrollBatchStatus> statuses) {
+        return statuses.stream()
+                .map(status -> "'" + status.getCode() + "'")
+                .collect(Collectors.joining(","));
+    }
+
     private String buildComment(String signature, String comment, SysUser operator) {
         String signedBy = StringUtils.hasText(signature)
                 ? signature.trim()
@@ -484,7 +620,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
     }
 
     private String buildDisputeBusinessKey(Long lineId) {
-        return DISPUTE_KEY_PREFIX + lineId;
+        return DISPUTE_KEY_PREFIX + lineId + "-" + System.currentTimeMillis();
     }
 
     private Long parseLineId(ApprovalWorkflow workflow) {
@@ -500,6 +636,10 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
             return null;
         }
         String idPart = key.substring(DISPUTE_KEY_PREFIX.length());
+        int suffixIndex = idPart.indexOf('-');
+        if (suffixIndex >= 0) {
+            idPart = idPart.substring(0, suffixIndex);
+        }
         try {
             return Long.parseLong(idPart);
         } catch (NumberFormatException e) {
@@ -524,6 +664,37 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private boolean matchesCurrentBatchRevision(ApprovalWorkflow workflow, PayrollBatch batch) {
+        Integer workflowRevision = parseBatchRevisionFromData(workflow != null ? workflow.getWorkflowData() : null);
+        if (workflowRevision == null) {
+            return true;
+        }
+        return normalizeRevision(batch != null ? batch.getBatchRevision() : null) == normalizeRevision(workflowRevision);
+    }
+
+    private Integer parseBatchRevisionFromData(String workflowData) {
+        if (!StringUtils.hasText(workflowData)) {
+            return null;
+        }
+        try {
+            Map<String, Object> map = objectMapper.readValue(workflowData, new TypeReference<Map<String, Object>>() {});
+            Object raw = map.get("batchRevision");
+            if (raw instanceof Number number) {
+                return number.intValue();
+            }
+            if (raw != null) {
+                return Integer.parseInt(String.valueOf(raw));
+            }
+            return null;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private int normalizeRevision(Integer revision) {
+        return revision == null || revision < 1 ? 1 : revision;
     }
 
     private PayrollPendingConfirmationDto toPendingDto(PayrollLine line, Employee employee, PayrollBatch batch) {

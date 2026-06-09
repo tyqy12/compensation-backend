@@ -47,8 +47,7 @@ class PlatformLinkApprovalHandlerTest {
 
         handler.onApprovalCompleted(event);
 
-        verify(userBindingService).bindPlatform(5001L, "wechat", "wx_user_5001");
-        verify(userBindingService).bindEmployee(5001L, 6001L);
+        verify(userBindingService).executeApprovedPlatformLink(1101L, 5001L, 6001L, "wechat", "wx_user_5001");
     }
 
     @Test
@@ -67,8 +66,53 @@ class PlatformLinkApprovalHandlerTest {
 
         handler.onApprovalCompleted(event);
 
-        verify(userBindingService).bindPlatform(5002L, "feishu", "fs_user_5002");
-        verify(userBindingService).bindEmployee(5002L, 6002L);
+        verify(userBindingService).executeApprovedPlatformLink(1102L, 5002L, 6002L, "feishu", "fs_user_5002");
+    }
+
+    @Test
+    void shouldBindEmployeeWhenPlatformFieldsAreMissingButEmployeeIdExists() {
+        ApprovalCompletedEvent event = approvedEvent(
+                1104L,
+                """
+                        {
+                          "userId": 5004,
+                          "employeeId": 6004
+                        }
+                        """
+        );
+
+        handler.onApprovalCompleted(event);
+
+        verify(userBindingService).bindEmployee(5004L, 6004L);
+        verify(userBindingService, never()).executeApprovedPlatformLink(
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
+    }
+
+    @Test
+    void shouldRejectApprovedEventWithoutExecutableBindingTarget() {
+        ApprovalCompletedEvent event = approvedEvent(
+                1105L,
+                """
+                        {
+                          "userId": 5005
+                        }
+                        """
+        );
+
+        assertThrows(IllegalArgumentException.class, () -> handler.onApprovalCompleted(event));
+        verify(userBindingService, never()).bindEmployee(
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong());
+        verify(userBindingService, never()).executeApprovedPlatformLink(
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.anyLong(),
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString());
     }
 
     @Test
@@ -93,6 +137,7 @@ class PlatformLinkApprovalHandlerTest {
         assertThrows(IllegalArgumentException.class, () -> strictHandler.onApprovalCompleted(event));
         verify(userBindingService, never()).bindPlatform(5003L, "wechat", "wx_user_5003");
         verify(userBindingService, never()).bindEmployee(5003L, 6003L);
+        verify(userBindingService, never()).executeApprovedPlatformLink(5003L, 5003L, 6003L, "wechat", "wx_user_5003");
     }
 
     private ApprovalCompletedEvent approvedEvent(Long workflowId, String workflowData) {

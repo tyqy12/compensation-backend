@@ -11,6 +11,7 @@ import com.yiyundao.compensation.interfaces.dto.payroll.PayslipObjectionRequest;
 import com.yiyundao.compensation.modules.payroll.service.PayrollConfirmationService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
+import com.yiyundao.compensation.security.SecurityAnnotations;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
 
@@ -141,5 +143,20 @@ class PayrollConfirmationControllerTest {
         assertThat(response.getCode()).isZero();
         assertThat(response.getData().getBatchId()).isEqualTo(6L);
         assertThat(response.getData().getPendingCount()).isEqualTo(2L);
+    }
+
+    @Test
+    void assignShouldRequireFinanceOrAdmin() throws NoSuchMethodException {
+        Method method = PayrollConfirmationController.class.getMethod(
+                "assign", Long.class, PayrollConfirmationAssignRequest.class);
+
+        assertThat(method.isAnnotationPresent(SecurityAnnotations.IsFinanceOrAdmin.class)).isTrue();
+    }
+
+    @Test
+    void summaryShouldRequireFinanceHrOrAdmin() throws NoSuchMethodException {
+        Method method = PayrollConfirmationController.class.getMethod("summary", Long.class);
+
+        assertThat(method.isAnnotationPresent(SecurityAnnotations.IsFinanceOrHrOrAdmin.class)).isTrue();
     }
 }

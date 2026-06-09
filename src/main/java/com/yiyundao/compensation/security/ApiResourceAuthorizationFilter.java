@@ -4,11 +4,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.enums.UserStatus;
 import com.yiyundao.compensation.infrastructure.dao.SysResourceMapper;
 import com.yiyundao.compensation.infrastructure.dao.SysUserMapper;
 import com.yiyundao.compensation.modules.rbac.entity.SysResource;
 import com.yiyundao.compensation.modules.rbac.service.ResourceService;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
+import com.yiyundao.compensation.modules.rbac.service.impl.ResourceChangeListener.ResourceChangeEvent;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
@@ -16,14 +19,22 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.Authentication;
+import org.springframework.transaction.event.TransactionPhase;
+import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.util.AntPathMatcher;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -47,8 +58,47 @@ public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
 
     private final AntPathMatcher pathMatcher = new AntPathMatcher();
 
+    private static final Set<String> FAIL_CLOSED_PREFIXES = Set.of(
+            "/admin",
+            "/v1/admin",
+            "/approval",
+            "/dashboard",
+            "/employee",
+            "/employees",
+            "/payment",
+            "/payroll",
+            "/settlement",
+            "/system"
+    );
+
+    private static final Set<String> UNMATCHED_ALLOW_PREFIXES = Set.of(
+            "/auth",
+            "/actuator",
+            "/openapi",
+            "/v1/oauth",
+            "/v1/payroll",
+            "/v1/payslips",
+            "/v1/ping",
+            "/v1/settlement/callback",
+            "/alipay/notify",
+            "/favicon.ico",
+            "/v3/api-docs",
+            "/swagger-ui",
+            "/webjars"
+    );
+
     private volatile List<SysResource> apiResourcesCache;
     private final AtomicLong lastLoadTs = new AtomicLong(0);
+
+    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT, fallbackExecution = true)
+    public void handleResourceChange(ResourceChangeEvent event) {
+        evictApiResourcesCache();
+    }
+
+    void evictApiResourcesCache() {
+        apiResourcesCache = null;
+        lastLoadTs.set(0);
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -59,10 +109,25 @@ public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
 
         log.debug("ApiResourceAuthorizationFilter: method={}, uri={}, servletPath={}", method, uri, servletPath);
 
-        SysResource matched = matchApiResource(method, uri, servletPath);
-        log.debug("ApiResourceAuthorizationFilter: matched={}", matched != null ? matched.getCode() : "null");
+        List<SysResource> matchedResources = matchApiResources(method, uri, servletPath);
+        log.debug("ApiResourceAuthorizationFilter: matched={}",
+                matchedResources.isEmpty()
+                        ? "null"
+                        : matchedResources.stream().map(SysResource::getCode).toList());
 
-        if (matched == null) {
+        if (matchedResources.isEmpty()) {
+            if (shouldDenyUnmatchedResource(uri, servletPath)) {
+                if (isAuthenticatedAdmin()) {
+                    log.debug("ApiResourceAuthorizationFilter: unmatched protected API resource allowed for admin, method={}, uri={}, servletPath={}",
+                            method, uri, servletPath);
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+                log.warn("ApiResourceAuthorizationFilter: unmatched protected API resource denied, method={}, uri={}, servletPath={}",
+                        method, uri, servletPath);
+                writeJson(response, ErrorCode.FORBIDDEN, "接口未配置访问权限");
+                return;
+            }
             log.debug("ApiResourceAuthorizationFilter: No API resource matched, passing through");
             filterChain.doFilter(request, response);
             return;
@@ -73,13 +138,17 @@ public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
         log.debug("ApiResourceAuthorizationFilter: auth={}, isAuthenticated={}", auth, auth != null ? auth.isAuthenticated() : "null");
 
         if (auth == null || !auth.isAuthenticated()) {
-            writeJson(response, 401, "未登录");
+            writeJson(response, ErrorCode.UNAUTHORIZED, "未登录");
             return;
         }
         String username = auth.getName();
         SysUser user = sysUserMapper.selectOne(new LambdaQueryWrapper<SysUser>().eq(SysUser::getUsername, username).last("limit 1"));
         if (user == null) {
-            writeJson(response, 401, "未登录");
+            writeJson(response, ErrorCode.UNAUTHORIZED, "未登录");
+            return;
+        }
+        if (!UserStatus.ACTIVE.equals(user.getStatus())) {
+            writeJson(response, ErrorCode.UNAUTHORIZED, "账号已禁用");
             return;
         }
 
@@ -89,31 +158,40 @@ public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
             return;
         }
 
-        // 检查用户是否拥有该资源的权限
-        boolean hasResource = resourceService.getUserResources(user.getId())
-                .stream().anyMatch(r -> r.getId().equals(matched.getId()));
-        if (!hasResource) {
-            writeJson(response, 403, "无权限访问该接口");
+        List<SysResource> roleMatchedResources = matchedResources.stream()
+                .filter(resource -> hasRequiredRoles(user.getId(), resource))
+                .toList();
+        if (roleMatchedResources.isEmpty()) {
+            writeJson(response, ErrorCode.FORBIDDEN, "无权限访问该接口（角色不匹配）");
             return;
         }
 
-        // 检查操作权限（HTTP 方法）
-        List<String> actions = resourceService.getUserActions(user.getId()).get(matched.getId());
-        if (actions == null || actions.isEmpty()) {
-            // 没有定义具体操作权限，允许访问
+        Set<Long> grantedResourceIds = new HashSet<>();
+        List<SysResource> userResources = resourceService.getUserResources(user.getId());
+        if (userResources == null) {
+            userResources = List.of();
+        }
+        userResources.stream()
+                .map(SysResource::getId)
+                .forEach(grantedResourceIds::add);
+        List<SysResource> grantedMatchedResources = roleMatchedResources.stream()
+                .filter(resource -> grantedResourceIds.contains(resource.getId()))
+                .toList();
+        if (grantedMatchedResources.isEmpty()) {
+            writeJson(response, ErrorCode.FORBIDDEN, "无权限访问该接口");
+            return;
+        }
+
+        Map<Long, List<String>> userActions = resourceService.getUserActions(user.getId());
+        Map<Long, List<String>> effectiveUserActions = userActions == null ? Map.of() : userActions;
+        if (grantedMatchedResources.stream()
+                .anyMatch(resource -> hasRequiredAction(method, effectiveUserActions.get(resource.getId())))) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // 将 HTTP 方法映射为权限（GET -> read, POST -> write, PUT -> write, DELETE -> delete, PATCH -> write）
         String requiredAction = mapHttpMethodToAction(method);
-        boolean hasPermission = actions.contains("*") || actions.contains(requiredAction) || actions.contains(method.toUpperCase());
-        if (!hasPermission) {
-            writeJson(response, 403, "无权限执行该操作（需要 " + requiredAction + " 权限）");
-            return;
-        }
-
-        filterChain.doFilter(request, response);
+        writeJson(response, ErrorCode.FORBIDDEN, "无权限执行该操作（需要 " + requiredAction + " 权限）");
     }
 
     /**
@@ -148,10 +226,19 @@ public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
         return userRoleService.hasRole(userId, SecurityConstants.ROLE_ADMIN);
     }
 
+    private boolean isAuthenticatedAdmin() {
+        Authentication auth = org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated()) {
+            return false;
+        }
+        return auth.getAuthorities().stream()
+                .anyMatch(authority -> SecurityConstants.ROLE_ADMIN.equals(authority.getAuthority()));
+    }
+
     /**
      * 匹配 API 资源
      */
-    private SysResource matchApiResource(String method, String uri, String servletPath) {
+    private List<SysResource> matchApiResources(String method, String uri, String servletPath) {
         long now = System.currentTimeMillis();
         // 使用常量消除硬编码
         if (apiResourcesCache == null || (now - lastLoadTs.get()) > SecurityConstants.API_RESOURCE_CACHE_TTL_MS) {
@@ -161,13 +248,30 @@ public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
             lastLoadTs.set(now);
         }
 
-        return apiResourcesCache.stream()
+        List<MatchedResource> matched = apiResourcesCache.stream()
                 .filter(resource -> matchesApiResource(resource, method, uri, servletPath))
-                .max(Comparator
-                        .comparingInt((SysResource resource) -> patternSpecificityScore(resourceMatchPattern(resource, uri, servletPath)))
-                        .thenComparing(resource -> resourceMatchPattern(resource, uri, servletPath), Comparator.nullsLast(String::compareTo))
+                .map(resource -> new MatchedResource(
+                        resource,
+                        resourceMatchPattern(resource, uri, servletPath)
+                ))
+                .sorted(Comparator
+                        .comparingInt((MatchedResource matchedResource) -> patternSpecificityScore(matchedResource.pattern()))
+                        .thenComparing(MatchedResource::pattern, Comparator.nullsLast(String::compareTo))
+                        .reversed()
                 )
-                .orElse(null);
+                .toList();
+        if (matched.isEmpty()) {
+            return List.of();
+        }
+
+        MatchedResource best = matched.get(0);
+        int bestScore = patternSpecificityScore(best.pattern());
+        String bestPattern = best.pattern();
+        return matched.stream()
+                .filter(item -> patternSpecificityScore(item.pattern()) == bestScore
+                        && Objects.equals(item.pattern(), bestPattern))
+                .map(MatchedResource::resource)
+                .toList();
     }
 
     private boolean matchesApiResource(SysResource resource, String method, String uri, String servletPath) {
@@ -182,6 +286,46 @@ public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
 
         String pattern = resourceMatchPattern(resource, uri, servletPath);
         return pattern != null;
+    }
+
+    private boolean shouldDenyUnmatchedResource(String uri, String servletPath) {
+        String normalizedUri = normalizePath(uri);
+        String normalizedServletPath = normalizePath(servletPath);
+        if (isAllowedUnmatchedPath(normalizedUri) || isAllowedUnmatchedPath(normalizedServletPath)) {
+            return false;
+        }
+        return isFailClosedPath(normalizedUri) || isFailClosedPath(normalizedServletPath);
+    }
+
+    private boolean isAllowedUnmatchedPath(String path) {
+        if (!StringUtils.hasText(path)) {
+            return false;
+        }
+        return UNMATCHED_ALLOW_PREFIXES.stream().anyMatch(prefix -> matchesPrefix(path, prefix));
+    }
+
+    private boolean isFailClosedPath(String path) {
+        if (!StringUtils.hasText(path)) {
+            return false;
+        }
+        return FAIL_CLOSED_PREFIXES.stream().anyMatch(prefix -> matchesPrefix(path, prefix));
+    }
+
+    private boolean matchesPrefix(String path, String prefix) {
+        return path.equals(prefix) || path.startsWith(prefix + "/");
+    }
+
+    private String normalizePath(String path) {
+        if (!StringUtils.hasText(path)) {
+            return "";
+        }
+        String normalized = path.trim();
+        if (normalized.startsWith("/api/")) {
+            normalized = normalized.substring(4);
+        } else if (normalized.equals("/api")) {
+            normalized = "/";
+        }
+        return normalized.startsWith("/") ? normalized : "/" + normalized;
     }
 
     private String resourceMatchPattern(SysResource resource, String uri, String servletPath) {
@@ -213,6 +357,30 @@ public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
             return withoutPrefix;
         }
         return null;
+    }
+
+    private boolean hasRequiredRoles(Long userId, SysResource resource) {
+        List<String> requiredRoles = extractRoles(resource.getPropsJson());
+        return requiredRoles.isEmpty() || userRoleService.hasAnyRole(userId, requiredRoles.toArray(String[]::new));
+    }
+
+    private boolean hasRequiredAction(String method, List<String> actions) {
+        if (actions == null || actions.isEmpty()) {
+            return true;
+        }
+        String requiredAction = mapHttpMethodToAction(method);
+        String requiredActionUpper = requiredAction.toUpperCase();
+        String methodUpper = method.toUpperCase();
+        return actions.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .anyMatch(action -> "*".equals(action)
+                        || requiredAction.equalsIgnoreCase(action)
+                        || requiredActionUpper.equalsIgnoreCase(action)
+                        || methodUpper.equalsIgnoreCase(action));
+    }
+
+    private record MatchedResource(SysResource resource, String pattern) {
     }
 
     private int patternSpecificityScore(String pattern) {
@@ -257,13 +425,45 @@ public class ApiResourceAuthorizationFilter extends OncePerRequestFilter {
     }
 
     /**
+     * 从 propsJson 提取角色约束，兼容 ["ADMIN"] 和 ["ROLE_ADMIN"]。
+     */
+    private List<String> extractRoles(String propsJson) {
+        if (!StringUtils.hasText(propsJson)) {
+            return List.of();
+        }
+        try {
+            JsonNode node = objectMapper.readTree(propsJson);
+            JsonNode rolesNode = node.get("roles");
+            if (rolesNode == null || rolesNode.isNull()) {
+                return List.of();
+            }
+            List<String> roles = new ArrayList<>();
+            if (rolesNode.isArray()) {
+                rolesNode.forEach(role -> addRoleIfPresent(roles, role.asText()));
+            } else {
+                addRoleIfPresent(roles, rolesNode.asText());
+            }
+            return roles;
+        } catch (Exception ignored) {
+            return List.of();
+        }
+    }
+
+    private void addRoleIfPresent(List<String> roles, String role) {
+        if (!StringUtils.hasText(role)) {
+            return;
+        }
+        roles.add(role.trim());
+    }
+
+    /**
      * 写入 JSON 响应
      */
-    private void writeJson(HttpServletResponse response, int code, String message) throws IOException {
-        response.setStatus(200); // 与全局响应格式保持一致
+    private void writeJson(HttpServletResponse response, ErrorCode errorCode, String message) throws IOException {
+        response.setStatus(errorCode.getHttpStatusCode());
         response.setCharacterEncoding(StandardCharsets.UTF_8.name());
         response.setContentType("application/json;charset=UTF-8");
-        String body = objectMapper.writeValueAsString(ApiResponse.error(code, message));
+        String body = objectMapper.writeValueAsString(ApiResponse.error(errorCode, message));
         response.getWriter().write(body);
     }
 }

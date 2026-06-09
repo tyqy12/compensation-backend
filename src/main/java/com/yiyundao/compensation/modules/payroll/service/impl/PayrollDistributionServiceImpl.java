@@ -24,6 +24,7 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollDistributionServ
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollReconciliationTaskService;
 import com.yiyundao.compensation.modules.payroll.support.PayrollDistributionRoutingSupport;
+import com.yiyundao.compensation.modules.payroll.support.PayrollPaymentEligibilitySupport;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -76,11 +77,14 @@ public class PayrollDistributionServiceImpl
             distribution.setAllowPartial(Boolean.FALSE);
             distribution.setCurrentAttempt(0);
             distribution.setDistributionStatus(PayrollDistributionStatus.PLANNED);
+        } else if (distribution.getDistributionStatus() == PayrollDistributionStatus.CANCELLED) {
+            distribution.setDistributionStatus(PayrollDistributionStatus.PLANNED);
         }
 
         List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, batch.getId())
                 .orderByAsc(PayrollLine::getId));
+        PayrollPaymentEligibilitySupport.requireAllLinesFinalForPayment(batch, lines);
         distribution.setTotalCount(lines.size());
         distribution.setTotalAmount(lines.stream()
                 .map(PayrollLine::getNetAmount)
@@ -129,6 +133,7 @@ public class PayrollDistributionServiceImpl
         if (CollectionUtils.isEmpty(lines)) {
             return List.of();
         }
+        PayrollPaymentEligibilitySupport.requireAllLinesFinalForPayment(batch, lines);
 
         Map<Long, Employee> employeeMap = loadEmployees(lines);
         Map<Long, PayrollDistributionItem> existingByLineId = loadExistingItemMap(distribution.getId());
@@ -143,8 +148,25 @@ public class PayrollDistributionServiceImpl
                 item.setLineId(line.getId());
                 item.setRetryCount(0);
             }
-            item.setAmount(line.getNetAmount() == null ? BigDecimal.ZERO : line.getNetAmount());
+            BigDecimal netAmount = line.getNetAmount() == null ? BigDecimal.ZERO : line.getNetAmount();
+            item.setAmount(netAmount);
             Employee employee = employeeMap.get(line.getEmployeeId());
+            if (netAmount.compareTo(BigDecimal.ZERO) <= 0) {
+                failedSnapshots++;
+                item.setEmployeeName(employee != null ? employee.getName() : null);
+                item.setRecipientName(employee != null ? employee.getName() : null);
+                item.setItemStatus(PayrollDistributionItemStatus.FAILED);
+                item.setFailureReason("净发金额必须大于0");
+                item.setRetryCount(safeRetryLimit(distribution));
+                item.setPaymentMethod("UNKNOWN");
+                item.setProviderCode(null);
+                item.setAccountNoEncrypted(null);
+                item.setAccountNoMasked(null);
+                item.setAccountType(null);
+                persistItem(item);
+                keepIds.add(item.getId());
+                continue;
+            }
             PayrollDistributionRoutingSupport.RouteSnapshot snapshot = routingSupport.buildSnapshot(batch, line, employee);
             if (snapshot.supported()) {
                 item.setEmployeeName(snapshot.employeeName());
@@ -171,11 +193,7 @@ public class PayrollDistributionServiceImpl
                 item.setPaymentMethod("UNKNOWN");
                 item.setProviderCode(null);
             }
-            if (item.getId() == null) {
-                distributionItemMapper.insert(item);
-            } else {
-                distributionItemMapper.updateById(item);
-            }
+            persistItem(item);
             keepIds.add(item.getId());
         }
         deleteStaleItems(distribution.getId(), keepIds);
@@ -184,6 +202,14 @@ public class PayrollDistributionServiceImpl
             log.warn("发放快照构建存在 {} 条不可发放明细: distributionId={}", failedSnapshots, distribution.getId());
         }
         return listActiveItems(distribution.getId());
+    }
+
+    private void persistItem(PayrollDistributionItem item) {
+        if (item.getId() == null) {
+            distributionItemMapper.insert(item);
+        } else {
+            distributionItemMapper.updateById(item);
+        }
     }
 
     @Override
@@ -317,7 +343,7 @@ public class PayrollDistributionServiceImpl
             return PayrollDistributionStatus.COMPLETED;
         }
         boolean hasRetryableFailure = listRetryableItems(distribution.getId()).stream()
-                .anyMatch(item -> item.getRetryCount() == null || item.getRetryCount() < safeRetryLimit(distribution));
+                .anyMatch(item -> isRetryableFailedItem(distribution, item));
         if (successCount == 0) {
             return hasRetryableFailure ? PayrollDistributionStatus.PLANNED : PayrollDistributionStatus.FAILED;
         }
@@ -325,6 +351,28 @@ public class PayrollDistributionServiceImpl
             return PayrollDistributionStatus.PARTIALLY_COMPLETED;
         }
         return hasRetryableFailure ? PayrollDistributionStatus.PLANNED : PayrollDistributionStatus.PARTIALLY_COMPLETED;
+    }
+
+    private boolean isRetryableFailedItem(PayrollDistribution distribution, PayrollDistributionItem item) {
+        if (item == null || item.getItemStatus() != PayrollDistributionItemStatus.FAILED) {
+            return false;
+        }
+        if (item.getRetryCount() != null && item.getRetryCount() >= safeRetryLimit(distribution)) {
+            return false;
+        }
+        if (item.getPaymentRecordId() == null) {
+            return true;
+        }
+        PaymentRecord previousRecord = paymentRecordService.getById(item.getPaymentRecordId());
+        return !hasProviderOrder(previousRecord);
+    }
+
+    private boolean hasProviderOrder(PaymentRecord record) {
+        return record != null
+                && (org.springframework.util.StringUtils.hasText(record.getProviderOrderNo())
+                || org.springframework.util.StringUtils.hasText(record.getProviderTradeNo())
+                || org.springframework.util.StringUtils.hasText(record.getAlipayOrderNo())
+                || org.springframework.util.StringUtils.hasText(record.getAlipayTradeNo()));
     }
 
     private int safeRetryLimit(PayrollDistribution distribution) {

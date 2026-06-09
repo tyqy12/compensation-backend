@@ -12,6 +12,7 @@ import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.modules.user.service.UserBindingService;
+import com.yiyundao.compensation.modules.user.dto.UserPlatformBindingResult;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import jakarta.servlet.http.HttpServletRequest;
@@ -28,12 +29,16 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @RestController
 @RequiredArgsConstructor
 @SecurityAnnotations.IsAdmin
 public class UserBindingController {
+
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 200;
 
     private final SysUserService sysUserService;
     private final UserBindingService userBindingService;
@@ -48,14 +53,19 @@ public class UserBindingController {
             @RequestParam(defaultValue = "10") int pageSize,
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) String provider,
+            @RequestParam(required = false) String username,
+            @RequestParam(required = false) Boolean bound,
             HttpServletRequest request
     ) {
-        Page<SysUser> page = new Page<>(current, pageSize);
+        int safeCurrent = safePage(current);
+        int safePageSize = safeSize(pageSize);
+        Page<SysUser> page = new Page<>(safeCurrent, safePageSize);
         LambdaQueryWrapper<SysUser> queryWrapper = new LambdaQueryWrapper<>();
 
         // 关键字搜索（用户名）
-        if (StringUtils.hasText(keyword)) {
-            queryWrapper.like(SysUser::getUsername, keyword);
+        String usernameKeyword = StringUtils.hasText(keyword) ? keyword : username;
+        if (StringUtils.hasText(usernameKeyword)) {
+            queryWrapper.like(SysUser::getUsername, usernameKeyword);
         }
 
         // 平台类型筛选
@@ -68,19 +78,38 @@ public class UserBindingController {
         String platformFilter = StringUtils.hasText(provider) ? provider : null;
         if (StringUtils.hasText(platformFilter)) {
             String normalizedPlatform = normalizePlatform(platformFilter);
-            List<Long> userIds = externalIdentityService.list(new LambdaQueryWrapper<ExternalIdentity>()
-                            .select(ExternalIdentity::getUserId)
+            List<ExternalIdentity> identities = externalIdentityService.list(new LambdaQueryWrapper<ExternalIdentity>()
+                            .select(ExternalIdentity::getUserId, ExternalIdentity::getEmployeeId)
                             .eq(ExternalIdentity::getProvider, normalizedPlatform)
-                            .eq(ExternalIdentity::getStatus, ExternalIdentityService.STATUS_ACTIVE)
-                            .isNotNull(ExternalIdentity::getUserId))
-                    .stream()
+                            .eq(ExternalIdentity::getStatus, ExternalIdentityService.STATUS_ACTIVE));
+            List<Long> userIds = identities.stream()
                     .map(ExternalIdentity::getUserId)
+                    .filter(Objects::nonNull)
                     .distinct()
                     .toList();
-            if (userIds.isEmpty()) {
-                return ApiResponse.success(emptyPageResponse(current, pageSize));
+            List<Long> employeeIds = identities.stream()
+                    .map(ExternalIdentity::getEmployeeId)
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .toList();
+            if (userIds.isEmpty() && employeeIds.isEmpty()) {
+                return ApiResponse.success(emptyPageResponse(safeCurrent, safePageSize));
             }
-            queryWrapper.in(SysUser::getId, userIds);
+            queryWrapper.and(wrapper -> {
+                if (!userIds.isEmpty()) {
+                    wrapper.in(SysUser::getId, userIds);
+                }
+                if (!employeeIds.isEmpty()) {
+                    if (!userIds.isEmpty()) {
+                        wrapper.or();
+                    }
+                    wrapper.in(SysUser::getEmployeeId, employeeIds);
+                }
+            });
+        }
+
+        if (bound != null) {
+            applyBoundFilter(queryWrapper, bound);
         }
 
         // 排序
@@ -122,6 +151,36 @@ public class UserBindingController {
         return ApiResponse.success(response);
     }
 
+    private int safePage(int page) {
+        return page < 1 ? 1 : page;
+    }
+
+    private int safeSize(int size) {
+        if (size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
+    }
+
+    private void applyBoundFilter(LambdaQueryWrapper<SysUser> queryWrapper, boolean bound) {
+        String activeStatus = ExternalIdentityService.STATUS_ACTIVE.replace("'", "''");
+        if (bound) {
+            queryWrapper.and(wrapper -> wrapper
+                    .isNotNull(SysUser::getEmployeeId)
+                    .or()
+                    .exists("SELECT 1 FROM external_identity ei"
+                            + " WHERE ei.user_id = sys_user.id"
+                            + " AND ei.status = '" + activeStatus + "'"
+                            + " AND ei.deleted = 0"));
+            return;
+        }
+        queryWrapper.isNull(SysUser::getEmployeeId)
+                .notExists("SELECT 1 FROM external_identity ei"
+                        + " WHERE ei.user_id = sys_user.id"
+                        + " AND ei.status = '" + activeStatus + "'"
+                        + " AND ei.deleted = 0");
+    }
+
     @GetMapping("/admin/users/{id}/platform-binding")
     public ApiResponse<BindingVO> get(@PathVariable Long id) {
         SysUser user = sysUserService.getById(id);
@@ -147,7 +206,7 @@ public class UserBindingController {
     }
 
     @PutMapping("/admin/users/{id}/platform-binding")
-    public ApiResponse<Void> bind(@PathVariable Long id, @RequestBody BindingForm form) {
+    public ApiResponse<Map<String, Object>> bind(@PathVariable Long id, @RequestBody BindingForm form) {
         SysUser user = sysUserService.getById(id);
         if (user == null) return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "用户不存在");
         legacyPlatformFieldPolicy.handleLegacyInput(
@@ -159,8 +218,16 @@ public class UserBindingController {
             return ApiResponse.error(ErrorCode.PARAM_MISSING, "平台类型与平台用户ID不能为空");
         }
         try {
-            userBindingService.bindPlatform(id, form.getProvider(), form.getSubjectId());
-            return ApiResponse.success(null);
+            UserPlatformBindingResult result = userBindingService.bindPlatform(id, form.getProvider(), form.getSubjectId());
+            Map<String, Object> data = new HashMap<>();
+            data.put("status", result.status().name());
+            data.put("workflowId", result.workflowId());
+            return ApiResponse.<Map<String, Object>>builder()
+                    .code(ErrorCode.SUCCESS.getCode())
+                    .message(result.message())
+                    .data(data)
+                    .timestamp(LocalDateTime.now())
+                    .build();
         } catch (IllegalArgumentException e) {
             return ApiResponse.error(ErrorCode.PARAM_INVALID, e.getMessage());
         } catch (IllegalStateException e) {

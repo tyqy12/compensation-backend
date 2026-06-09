@@ -3,6 +3,7 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollBasicReportDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollPreviewDto;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
@@ -12,6 +13,7 @@ import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollReportService;
+import com.yiyundao.compensation.modules.payroll.support.CsvExportUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -29,11 +31,24 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class PayrollReportServiceImpl implements PayrollReportService {
+
+    private static final Set<PayrollBatchStatus> REPORTABLE_BATCH_STATUSES = Set.of(
+            PayrollBatchStatus.CONFIRMING,
+            PayrollBatchStatus.DISPUTE_PROCESSING,
+            PayrollBatchStatus.CONFIRMED,
+            PayrollBatchStatus.SUBMITTED,
+            PayrollBatchStatus.APPROVED,
+            PayrollBatchStatus.PAY_PROCESSING,
+            PayrollBatchStatus.PAY_FAILED,
+            PayrollBatchStatus.PAID,
+            PayrollBatchStatus.ARCHIVED
+    );
 
     private final PayrollLineService payrollLineService;
     private final PayrollBatchService payrollBatchService;
@@ -154,17 +169,18 @@ public class PayrollReportServiceImpl implements PayrollReportService {
         PayrollBasicReportDto report = basicReport(batchId, periodLabel, department);
         DecimalFormat format = new DecimalFormat("0.00");
         StringBuilder sb = new StringBuilder();
-        sb.append("Department,Employees,Earnings,Deductions,Gross,Tax,Social,Net\n");
+        CsvExportUtils.appendRow(sb, "Department", "Employees", "Earnings", "Deductions", "Gross", "Tax", "Social", "Net");
         if (report.getDepartments() != null) {
             for (PayrollBasicReportDto.DepartmentSummary summary : report.getDepartments()) {
-                sb.append(summary.getDepartment()).append(',')
-                        .append(summary.getEmployeeCount()).append(',')
-                        .append(format.format(summary.getEarningsTotal())).append(',')
-                        .append(format.format(summary.getDeductionsTotal())).append(',')
-                        .append(format.format(summary.getGrossTotal())).append(',')
-                        .append(format.format(summary.getTaxTotal())).append(',')
-                        .append(format.format(summary.getSocialTotal())).append(',')
-                        .append(format.format(summary.getNetTotal())).append('\n');
+                CsvExportUtils.appendRow(sb,
+                        summary.getDepartment(),
+                        summary.getEmployeeCount(),
+                        format.format(summary.getEarningsTotal()),
+                        format.format(summary.getDeductionsTotal()),
+                        format.format(summary.getGrossTotal()),
+                        format.format(summary.getTaxTotal()),
+                        format.format(summary.getSocialTotal()),
+                        format.format(summary.getNetTotal()));
             }
         }
         return sb.toString().getBytes(StandardCharsets.UTF_8);
@@ -183,13 +199,42 @@ public class PayrollReportServiceImpl implements PayrollReportService {
         if (CollectionUtils.isEmpty(batches)) {
             return Collections.emptyList();
         }
-        List<Long> ids = new ArrayList<>();
+        Map<String, PayrollBatch> latestByType = new LinkedHashMap<>();
         for (PayrollBatch batch : batches) {
-            if (batch != null && batch.getId() != null) {
-                ids.add(batch.getId());
+            if (!isReportableBatch(batch)) {
+                continue;
+            }
+            String type = StringUtils.hasText(batch.getType()) ? batch.getType() : "";
+            latestByType.merge(type, batch, this::newerBatch);
+        }
+        return latestByType.values().stream()
+                .map(PayrollBatch::getId)
+                .collect(Collectors.toList());
+    }
+
+    private boolean isReportableBatch(PayrollBatch batch) {
+        return batch != null
+                && batch.getId() != null
+                && batch.getStatus() != null
+                && REPORTABLE_BATCH_STATUSES.contains(batch.getStatus());
+    }
+
+    private PayrollBatch newerBatch(PayrollBatch current, PayrollBatch candidate) {
+        if (current == null) {
+            return candidate;
+        }
+        if (candidate == null) {
+            return current;
+        }
+        if (current.getCreateTime() != null && candidate.getCreateTime() != null) {
+            int compared = candidate.getCreateTime().compareTo(current.getCreateTime());
+            if (compared != 0) {
+                return compared > 0 ? candidate : current;
             }
         }
-        return ids;
+        Long currentId = current.getId() == null ? Long.MIN_VALUE : current.getId();
+        Long candidateId = candidate.getId() == null ? Long.MIN_VALUE : candidate.getId();
+        return candidateId > currentId ? candidate : current;
     }
 
     private Map<Long, PayrollBatch> loadBatchMap(List<Long> batchIds) {

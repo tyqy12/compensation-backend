@@ -2,6 +2,7 @@ package com.yiyundao.compensation.interfaces.controller.payment;
 
 import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.infrastructure.dao.EmployeeMapper;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
@@ -10,12 +11,14 @@ import com.yiyundao.compensation.modules.payment.provider.SettlementResult;
 import com.yiyundao.compensation.modules.payment.provider.SettlementStatus;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.modules.payment.service.SettlementService;
+import com.yiyundao.compensation.security.SecurityAnnotations;
 import com.yiyundao.compensation.service.EncryptionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/payment")
+@SecurityAnnotations.IsFinanceOrAdmin
 @RequiredArgsConstructor
 public class PaymentRecordController {
 
@@ -29,7 +32,7 @@ public class PaymentRecordController {
     public ApiResponse<PaymentRecordItemVO> detail(@PathVariable Long id) {
         PaymentRecord r = paymentRecordService.getById(id);
         if (r == null) {
-            return ApiResponse.success(null);
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "支付记录不存在");
         }
         Employee employee = r.getEmployeeId() == null ? null : employeeMapper.selectById(r.getEmployeeId());
         return ApiResponse.success(PaymentRecordItemVO.from(r, employee, encryptionService));
@@ -39,7 +42,7 @@ public class PaymentRecordController {
     @PostMapping("/record/{id}/retry")
     public ApiResponse<String> retry(@PathVariable Long id) {
         try {
-            SettlementResult result = settlementService.singleTransfer(id);
+            SettlementResult result = settlementService.retryFailedRecord(id);
             if (!result.isSuccess()) {
                 throw new BusinessException("重试失败: " + result.getErrorMsg());
             }

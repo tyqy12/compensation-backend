@@ -31,7 +31,7 @@ class LocalFileServiceTest {
         FileStorageProperties.LocalStorage local = new FileStorageProperties.LocalStorage();
         tempDir = Files.createTempDirectory("file-test-");
         local.setBasePath(tempDir.toString());
-        local.setBaseUrl("http://localhost:8080/files");
+        local.setBaseUrl("/api/v1/files/download");
         properties.setLocal(local);
 
         fileService = new LocalFileService(properties);
@@ -88,6 +88,46 @@ class LocalFileServiceTest {
     }
 
     @Test
+    @DisplayName("相对 basePath 配置应正常上传并限制在存储根目录内")
+    void uploadShouldSupportRelativeBasePath() throws IOException {
+        Path relativeBasePath = Path.of("target/test-file-storage/relative-base");
+        Files.createDirectories(relativeBasePath);
+        try {
+            FileStorageProperties relativeProperties = new FileStorageProperties();
+            relativeProperties.setActive("local");
+            relativeProperties.setMaxFileSize(10 * 1024 * 1024);
+            relativeProperties.setAllowedExtensions(Arrays.asList("txt"));
+            FileStorageProperties.LocalStorage local = new FileStorageProperties.LocalStorage();
+            local.setBasePath(relativeBasePath.toString());
+            local.setBaseUrl("/api/v1/files/download");
+            relativeProperties.setLocal(local);
+            FileService relativeFileService = new LocalFileService(relativeProperties);
+            MultipartFile file = new MockMultipartFile(
+                    "relative.txt",
+                    "relative.txt",
+                    "text/plain",
+                    "relative content".getBytes()
+            );
+
+            String fileKey = relativeFileService.upload(file, "docs", "relative.txt");
+
+            assertTrue(Files.exists(relativeBasePath.resolve(fileKey)));
+            assertTrue(relativeFileService.exists(fileKey));
+        } finally {
+            if (Files.exists(relativeBasePath)) {
+                Files.walk(relativeBasePath)
+                        .sorted((a, b) -> b.compareTo(a))
+                        .forEach(path -> {
+                            try {
+                                Files.deleteIfExists(path);
+                            } catch (IOException ignored) {
+                            }
+                        });
+            }
+        }
+    }
+
+    @Test
     @DisplayName("文件删除测试")
     void testDelete() {
         MultipartFile file = new MockMultipartFile(
@@ -124,8 +164,24 @@ class LocalFileServiceTest {
         String url = fileService.getUrl(fileKey);
 
         assertNotNull(url);
-        assertTrue(url.startsWith("http://localhost:8080/files/"));
-        assertTrue(url.endsWith(fileKey));
+        assertEquals("/api/v1/files/download?fileKey=" + fileKey, url);
+    }
+
+    @Test
+    @DisplayName("获取文件 URL 应拒绝非法 fileKey")
+    void testGetUrlRejectsInvalidFileKey() {
+        assertThrows(IllegalArgumentException.class, () -> fileService.getUrl("../secret.txt"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.getUrl("/absolute.txt"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.getUrl("docs\\secret.txt"));
+    }
+
+    @Test
+    @DisplayName("文件读取类操作应拒绝非法 fileKey")
+    void testReadOperationsRejectInvalidFileKey() {
+        assertThrows(IllegalArgumentException.class, () -> fileService.delete("../secret.txt"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.exists("../secret.txt"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.getFileSize("../secret.txt"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.getInputStream("../secret.txt"));
     }
 
     @Test
@@ -249,6 +305,60 @@ class LocalFileServiceTest {
 
         assertTrue(fileKey.startsWith("a/b/c/deeply/"));
         assertTrue(fileService.exists(fileKey));
+    }
+
+    @Test
+    @DisplayName("文件上传应拒绝不规范 category")
+    void uploadShouldRejectUnsafeCategorySegments() {
+        MultipartFile file = new MockMultipartFile(
+                "safe.txt",
+                "safe.txt",
+                "text/plain",
+                "content".getBytes()
+        );
+
+        assertThrows(IllegalArgumentException.class, () -> fileService.upload(file, "a//b"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.upload(file, "./docs"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.upload(file, "docs/./payroll"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.upload(file, "docs payroll"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.upload(file, "docs\npayroll"));
+    }
+
+    @Test
+    @DisplayName("文件上传应拒绝不规范自定义文件名")
+    void uploadShouldRejectUnsafeCustomFileName() {
+        MultipartFile file = new MockMultipartFile(
+                "safe.txt",
+                "safe.txt",
+                "text/plain",
+                "content".getBytes()
+        );
+
+        assertThrows(IllegalArgumentException.class, () -> fileService.upload(file, "docs", ".hidden"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.upload(file, "docs", "bad name.txt"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.upload(file, "docs", "bad\nname.txt"));
+    }
+
+    @Test
+    @DisplayName("文件上传应拒绝自定义文件名改成非白名单扩展")
+    void uploadShouldRejectCustomFileNameWithDisallowedExtension() {
+        MultipartFile file = new MockMultipartFile(
+                "safe.txt",
+                "safe.txt",
+                "text/plain",
+                "content".getBytes()
+        );
+
+        assertThrows(IllegalArgumentException.class, () -> fileService.upload(file, "docs", "safe.exe"));
+    }
+
+    @Test
+    @DisplayName("文件访问应拒绝不规范 fileKey")
+    void fileAccessShouldRejectUnsafeFileKeySegments() {
+        assertThrows(IllegalArgumentException.class, () -> fileService.getUrl("docs//file.txt"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.getUrl("docs/./file.txt"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.getUrl("docs/bad name.txt"));
+        assertThrows(IllegalArgumentException.class, () -> fileService.getUrl("docs/bad\nname.txt"));
     }
 
     @Test

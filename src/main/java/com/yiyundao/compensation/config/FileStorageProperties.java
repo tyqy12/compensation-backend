@@ -23,7 +23,7 @@ public class FileStorageProperties {
     @Data
     public static class LocalStorage {
         private String basePath = "/data/files";
-        private String baseUrl = "http://localhost:8080/files";
+        private String baseUrl = "/api/v1/files/download";
     }
 
     @Data

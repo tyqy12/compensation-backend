@@ -46,9 +46,13 @@ public class OpenApiPayslipController {
 
     @GetMapping("/{payslipId}")
     @PreAuthorize("hasAuthority('SCOPE_payslip:read')")
-    public ApiResponse<OpenApiPayslipDto> getPayslip(@PathVariable("payslipId") Long payslipId) {
+    public ApiResponse<OpenApiPayslipDto> getPayslip(@PathVariable("payslipId") Long payslipId,
+                                                     @RequestParam("employeeRef") String employeeRef) {
         ensureScope("payslip:read");
-        OpenApiPayslipDto dto = externalPayrollQueryService.findPayslip(payslipId);
+        if (!StringUtils.hasText(employeeRef)) {
+            return ApiResponse.error(ErrorCode.PARAM_MISSING, "employeeRef 不能为空");
+        }
+        OpenApiPayslipDto dto = externalPayrollQueryService.findPayslip(payslipId, employeeRef.trim());
         if (dto == null) {
             return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "工资条不存在或不属于 PT 范围");
         }

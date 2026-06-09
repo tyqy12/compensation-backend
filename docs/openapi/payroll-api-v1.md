@@ -4,7 +4,7 @@
 
 ## 1. 安全与鉴权
 - 方案一（推荐）：OAuth2 Client Credentials
-  - token 端点：`POST /api/oauth/token`（具体实现沿用现有认证基础）
+  - token 端点：`POST /api/v1/oauth/token`
   - scope：`payroll:read`、`payslip:read`
 - 方案二：API Key + HMAC 签名（Header）
   - `X-App-Id: <clientId>`
@@ -22,7 +22,7 @@
 - 429 超出限流
 - 5xx 服务器内部错误
 
-`{ code, message, data }` 统一响应包装，成功 `code=200`。
+`{ code, message, data }` 统一响应包装；HTTP 200 表示请求成功，业务成功码为 `code=0`。
 
 ## 3. 资源定义
 ### payslip（工资条）对象
@@ -65,7 +65,7 @@ Query：
 - page=1 size=20（默认 20，最大 100）
 Response 200：
 ```
-{ "code":200, "message":"OK", "data": { "records":[
+{ "code":0, "message":"操作成功", "data": { "records":[
   {"id":101,"periodLabel":"2025-09","type":"part_time","status":"paid","currency":"CNY","lineCount":128,"paidAt":"2025-10-01T08:30:00Z"}
 ], "total":1, "current":1, "size":20 } }
 ```
@@ -74,7 +74,7 @@ Response 200：
 GET `/api/v1/payroll/batches/{id}`
 Response 200：
 ```
-{ "code":200, "message":"OK", "data":
+{ "code":0, "message":"操作成功", "data":
   {"id":101,"periodLabel":"2025-09","type":"part_time","status":"paid","currency":"CNY","lineCount":128,"paidAt":"2025-10-01T08:30:00Z"}
 }
 ```
@@ -82,11 +82,11 @@ Response 200：
 ### 4.3 批次下工资行
 GET `/api/v1/payroll/batches/{id}/lines`
 Query：
-- employeeRef（可选）= employeeId 或 `provider:subjectId`
+- employeeRef（可选）= `emp:<employeeNo>`、`provider:subjectId` 或 `provider:tenantKey:subjectId`；同一 provider/subjectId 存在多个 tenant 时必须使用三段式
 - page=1 size=50
 Response 200：
 ```
-{ "code":200, "message":"OK", "data": { "records":[
+{ "code":0, "message":"操作成功", "data": { "records":[
   {"id":1001,"batchId":101,"employeeRef":"emp:E2001","employmentType":"part_time","grossAmount":3500.00,"taxAmount":120.00,"socialAmount":0.00,"netAmount":3380.00,"currency":"CNY","departments":["外包组"]}
 ], "total":1, "current":1, "size":50 } }
 ```
@@ -98,7 +98,7 @@ Query：
 - period（必填）=YYYY-MM
 Response 200：
 ```
-{ "code":200, "message":"OK", "data":[
+{ "code":0, "message":"操作成功", "data":[
   {"id":"ps_887766","employeeRef":"emp:E2001","period":"2025-09","employmentType":"part_time",
    "items":[{"code":"hour","name":"计时收入","amount":3600.00,"type":"earning","taxable":true,"showOnPayslip":true,"order":10},
              {"code":"tax","name":"个税","amount":-120.00,"type":"deduction","taxable":false,"showOnPayslip":true,"order":90}],
@@ -109,6 +109,9 @@ Response 200：
 
 ### 4.5 工资条详情（单条）
 GET `/api/v1/payslips/{id}`
+Query：
+- employeeRef（必填）
+
 Response 200：同 4.4 单条结构
 
 ## 5. 过滤与分页约定
@@ -117,6 +120,7 @@ Response 200：同 4.4 单条结构
 
 ## 6. 脱敏策略
 - employeeRef 作为对外员工标识使用；不返回身份证号/银行卡；姓名/手机号可按脱敏规则（如姓名首字、手机号中间四位屏蔽）返回或不返回。
+- 平台身份 employeeRef 在非默认租户下返回 `provider:tenantKey:subjectId`，避免多租户场景歧义。
 - 部门信息仅作展示用途；如涉及隐私数据，可通过配置关闭。
 
 ## 7. OpenAPI 片段（示例）
@@ -173,7 +177,7 @@ components:
       type: oauth2
       flows:
         clientCredentials:
-          tokenUrl: /api/oauth/token
+          tokenUrl: /api/v1/oauth/token
           scopes:
             payroll:read: Read payroll batches and lines (PT)
             payslip:read: Read payslips (PT)
@@ -181,4 +185,3 @@ components:
 
 ## 8. 版本与兼容
 - v1 仅 PT 只读接口；后续 v1.x 可增列与响应字段（向后兼容）。如需变更语义，提升至 v2 并保留 v1。
-

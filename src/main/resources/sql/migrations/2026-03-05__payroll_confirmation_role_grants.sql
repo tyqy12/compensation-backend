@@ -12,16 +12,42 @@ SELECT
 FROM `sys_role` r
 JOIN `sys_resource` res ON res.code IN (
     'api.payroll.confirmations.pending',
-    'api.payroll.confirmations.summary',
     'api.payroll.confirmations.confirm',
     'api.payroll.confirmations.object',
-    'api.payroll.confirmations.batch-confirm',
-    'api.payroll.confirmations.assign'
+    'api.payroll.confirmations.batch-confirm'
 )
 WHERE r.code IN (
     'ADMIN', 'FINANCE', 'HR', 'MANAGER', 'EMPLOYEE',
     'role.admin.all', 'role.finance', 'role.hr', 'role.manager', 'role.employee'
 )
+ON DUPLICATE KEY UPDATE
+    `actions_json` = COALESCE(`sys_role_resource`.`actions_json`, VALUES(`actions_json`)),
+    `update_time` = @now;
+
+INSERT INTO `sys_role_resource`(`role_id`,`resource_id`,`actions_json`,`create_time`,`update_time`)
+SELECT
+    r.id,
+    res.id,
+    CASE WHEN r.code IN ('ADMIN', 'role.admin.all') THEN JSON_ARRAY('*') ELSE NULL END,
+    @now,
+    @now
+FROM `sys_role` r
+JOIN `sys_resource` res ON res.code = 'api.payroll.confirmations.summary'
+WHERE r.code IN ('ADMIN', 'FINANCE', 'HR', 'role.admin.all', 'role.finance', 'role.hr')
+ON DUPLICATE KEY UPDATE
+    `actions_json` = COALESCE(`sys_role_resource`.`actions_json`, VALUES(`actions_json`)),
+    `update_time` = @now;
+
+INSERT INTO `sys_role_resource`(`role_id`,`resource_id`,`actions_json`,`create_time`,`update_time`)
+SELECT
+    r.id,
+    res.id,
+    CASE WHEN r.code IN ('ADMIN', 'role.admin.all') THEN JSON_ARRAY('*') ELSE NULL END,
+    @now,
+    @now
+FROM `sys_role` r
+JOIN `sys_resource` res ON res.code = 'api.payroll.confirmations.assign'
+WHERE r.code IN ('ADMIN', 'FINANCE', 'role.admin.all', 'role.finance')
 ON DUPLICATE KEY UPDATE
     `actions_json` = COALESCE(`sys_role_resource`.`actions_json`, VALUES(`actions_json`)),
     `update_time` = @now;

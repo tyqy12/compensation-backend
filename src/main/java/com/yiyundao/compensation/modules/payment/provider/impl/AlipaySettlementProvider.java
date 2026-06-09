@@ -9,6 +9,7 @@ import com.yiyundao.compensation.modules.payment.provider.SettlementRequest;
 import com.yiyundao.compensation.modules.payment.provider.SettlementResult;
 import com.yiyundao.compensation.modules.payment.provider.SettlementStatus;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
+import com.yiyundao.compensation.modules.payment.support.PaymentCallbackLogSanitizer;
 import com.yiyundao.compensation.service.AlipayService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -123,7 +124,14 @@ public class AlipaySettlementProvider implements SettlementProvider {
             PaymentStatus paymentStatus = alipayService.queryTransferStatus(providerOrderNo);
             return mapPaymentStatus(paymentStatus);
         } catch (Exception e) {
-            log.error("支付宝状态查询失败: providerOrderNo={}", providerOrderNo, e);
+            if (isLocalConfigurationError(e)) {
+                log.warn("支付宝状态查询失败，检测到本地配置错误: providerOrderNo={}, msg={}",
+                        PaymentCallbackLogSanitizer.sanitizeField("provider_order_no", providerOrderNo),
+                        normalizeErrorMessage(e.getMessage()));
+                return SettlementStatus.FAILED;
+            }
+            log.error("支付宝状态查询失败: providerOrderNo={}",
+                    PaymentCallbackLogSanitizer.sanitizeField("provider_order_no", providerOrderNo), e);
             return SettlementStatus.PROCESSING;
         }
     }
@@ -140,15 +148,28 @@ public class AlipaySettlementProvider implements SettlementProvider {
                     .build();
         }
 
+        SettlementStatus settlementStatus = mapKnownAlipayTradeStatus(tradeStatus);
+        if (settlementStatus == null) {
+            log.warn("忽略未知支付宝回调状态: outBizNo={}, tradeStatus={}",
+                    PaymentCallbackLogSanitizer.sanitizeField("out_biz_no", outBizNo), tradeStatus);
+            return SettlementCallbackResult.builder()
+                    .success(false)
+                    .bizNo(outBizNo)
+                    .errorMsg("未知支付宝回调状态: " + tradeStatus)
+                    .status(SettlementStatus.PROCESSING)
+                    .build();
+        }
+
         try {
             alipayService.handleNotification(outBizNo, tradeNo, tradeStatus);
             return SettlementCallbackResult.builder()
                     .success(true)
                     .bizNo(outBizNo)
-                    .status(mapAlipayTradeStatus(tradeStatus))
+                    .status(settlementStatus)
                     .build();
         } catch (Exception e) {
-            log.error("处理支付宝回调失败: outBizNo={}", outBizNo, e);
+            log.error("处理支付宝回调失败: outBizNo={}",
+                    PaymentCallbackLogSanitizer.sanitizeField("out_biz_no", outBizNo), e);
             return SettlementCallbackResult.builder()
                     .success(false)
                     .bizNo(outBizNo)
@@ -190,7 +211,8 @@ public class AlipaySettlementProvider implements SettlementProvider {
         String message = rawMessage.trim();
         if (message.contains("RSA2签名遭遇异常")
                 || message.contains("InvalidKeyException")
-                || message.contains("privateKeySize")) {
+                || message.contains("privateKeySize")
+                || message.contains("支付宝应用私钥格式错误")) {
             return "支付宝签名失败，请检查应用私钥格式（PKCS8）";
         }
         int contentIndex = message.indexOf("content=");
@@ -198,6 +220,26 @@ public class AlipaySettlementProvider implements SettlementProvider {
             message = message.substring(0, contentIndex).trim();
         }
         return message.length() > 200 ? message.substring(0, 200) : message;
+    }
+
+    private boolean isLocalConfigurationError(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String message = current.getMessage();
+            if (StringUtils.hasText(message)
+                    && (message.contains("RSA2签名遭遇异常")
+                    || message.contains("InvalidKeyException")
+                    || message.contains("privateKeySize")
+                    || message.contains("支付宝配置不完整")
+                    || message.contains("支付宝应用私钥格式错误")
+                    || message.contains("支付宝集成未启用")
+                    || message.contains("公钥模式需要配置")
+                    || message.contains("证书模式需要配置"))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 
     private SettlementStatus mapPaymentStatus(PaymentStatus status) {
@@ -214,10 +256,15 @@ public class AlipaySettlementProvider implements SettlementProvider {
     }
 
     private SettlementStatus mapAlipayTradeStatus(String tradeStatus) {
+        SettlementStatus status = mapKnownAlipayTradeStatus(tradeStatus);
+        return status != null ? status : SettlementStatus.PROCESSING;
+    }
+
+    private SettlementStatus mapKnownAlipayTradeStatus(String tradeStatus) {
         return switch (tradeStatus) {
-            case "TRADE_SUCCESS" -> SettlementStatus.SUCCESS;
-            case "TRADE_CLOSED", "TRADE_FINISHED" -> SettlementStatus.FAILED;
-            default -> SettlementStatus.PROCESSING;
+            case "TRADE_SUCCESS", "TRADE_FINISHED" -> SettlementStatus.SUCCESS;
+            case "TRADE_CLOSED" -> SettlementStatus.FAILED;
+            default -> null;
         };
     }
 }

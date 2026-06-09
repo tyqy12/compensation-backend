@@ -4,10 +4,15 @@ import com.yiyundao.compensation.enums.NotificationType;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
 import com.yiyundao.compensation.modules.system.service.SysConfigService;
+import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.service.SysUserService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+
+import java.math.BigDecimal;
+import java.math.RoundingMode;
 
 @Slf4j
 @Service
@@ -16,28 +21,37 @@ public class NotificationService {
 
     private final NotificationRouterService notificationRouterService;
     private final SysConfigService sysConfigService;
+    private final SysUserService sysUserService;
 
     /**
      * 发送支付成功通知
      */
     @Async
     public void sendPaymentSuccessNotification(PaymentRecord record) {
-        log.info("发送支付成功通知: recordId={}, amount={}", record.getId(), record.getAmount());
-
+        if (record == null) {
+            log.warn("支付成功通知记录为空，跳过发送");
+            return;
+        }
         try {
-            // 从 PaymentRecord 获取 userId（假设已存储）
-            Long userId = record.getUserId() != null ? record.getUserId() : 1L;
+            Long userId = resolveRecipientUserId(record);
+            log.info("发送支付成功通知: recordId={}, userId={}, employeeId={}, batchNo={}",
+                    record.getId(), userId, record.getEmployeeId(), record.getBatchNo());
+            if (userId == null) {
+                log.warn("支付成功通知缺少接收用户，跳过发送: recordId={}, employeeId={}, batchNo={}",
+                        record.getId(), record.getEmployeeId(), record.getBatchNo());
+                return;
+            }
 
             String title = "💰 支付成功通知";
             String content = String.format(
                 "您的 %s 已成功到账\n" +
-                "金额：¥%.2f\n" +
+                "金额：%s\n" +
                 "批次号：%s\n" +
                 "支付时间：%s",
-                record.getPaymentDesc(),
-                record.getAmount(),
-                record.getBatchNo(),
-                record.getPaymentTime()
+                display(record.getPaymentDesc(), "款项"),
+                formatCurrency(record.getAmount()),
+                display(record.getBatchNo(), "未知"),
+                display(record.getPaymentTime(), "未知")
             );
 
             notificationRouterService.sendNotificationToUser(
@@ -59,22 +73,31 @@ public class NotificationService {
      */
     @Async
     public void sendPaymentFailedNotification(PaymentRecord record) {
-        log.info("发送支付失败通知: recordId={}, amount={}", record.getId(), record.getAmount());
-
+        if (record == null) {
+            log.warn("支付失败通知记录为空，跳过发送");
+            return;
+        }
         try {
-            Long userId = record.getUserId() != null ? record.getUserId() : 1L;
+            Long userId = resolveRecipientUserId(record);
+            log.info("发送支付失败通知: recordId={}, userId={}, employeeId={}, batchNo={}",
+                    record.getId(), userId, record.getEmployeeId(), record.getBatchNo());
+            if (userId == null) {
+                log.warn("支付失败通知缺少接收用户，跳过发送: recordId={}, employeeId={}, batchNo={}",
+                        record.getId(), record.getEmployeeId(), record.getBatchNo());
+                return;
+            }
 
             String title = "❌ 支付失败通知";
             String content = String.format(
                 "您的 %s 支付失败\n" +
-                "金额：¥%.2f\n" +
+                "金额：%s\n" +
                 "批次号：%s\n" +
                 "失败原因：%s\n" +
                 "请联系财务部门处理",
-                record.getPaymentDesc(),
-                record.getAmount(),
-                record.getBatchNo(),
-                record.getErrorMsg()
+                display(record.getPaymentDesc(), "款项"),
+                formatCurrency(record.getAmount()),
+                display(record.getBatchNo(), "未知"),
+                display(record.getErrorMsg(), "未提供")
             );
 
             notificationRouterService.sendNotificationToUser(
@@ -96,8 +119,12 @@ public class NotificationService {
      */
     @Async
     public void sendBatchCompleteNotification(PaymentBatch batch) {
-        log.info("发送批次完成通知: batchNo={}, success={}, failed={}",
-                batch.getBatchNo(), batch.getSuccessCount(), batch.getFailedCount());
+        if (batch == null) {
+            log.warn("支付批次为空，跳过完成通知");
+            return;
+        }
+        log.info("发送批次完成通知: batchNo={}, processorId={}, totalCount={}, successCount={}, failedCount={}",
+                batch.getBatchNo(), batch.getProcessorId(), batch.getTotalCount(), batch.getSuccessCount(), batch.getFailedCount());
 
         try {
             // 获取批次处理人
@@ -111,18 +138,18 @@ public class NotificationService {
             String content = String.format(
                 "批次 %s 处理完成\n" +
                 "批次名称：%s\n" +
-                "总笔数：%d\n" +
-                "成功：%d 笔\n" +
-                "失败：%d 笔\n" +
-                "总金额：¥%.2f\n" +
+                "总笔数：%s\n" +
+                "成功：%s 笔\n" +
+                "失败：%s 笔\n" +
+                "总金额：%s\n" +
                 "处理时间：%s",
-                batch.getBatchNo(),
-                batch.getBatchName(),
-                batch.getTotalCount(),
-                batch.getSuccessCount(),
-                batch.getFailedCount(),
-                batch.getTotalAmount(),
-                batch.getProcessEndTime()
+                display(batch.getBatchNo(), "未知"),
+                display(batch.getBatchName(), "未命名批次"),
+                display(batch.getTotalCount(), "未知"),
+                display(batch.getSuccessCount(), "未知"),
+                display(batch.getFailedCount(), "未知"),
+                formatCurrency(batch.getTotalAmount()),
+                display(batch.getProcessEndTime(), "未知")
             );
 
             notificationRouterService.sendNotificationToUser(
@@ -189,7 +216,8 @@ public class NotificationService {
             );
 
         } catch (Exception e) {
-            log.error("发送系统告警通知异常: title={}", alertTitle, e);
+            log.error("发送系统告警通知异常: businessKey={}, titleLength={}, messageLength={}",
+                    businessKey, length(alertTitle), length(alertMessage), e);
         }
     }
 
@@ -198,7 +226,8 @@ public class NotificationService {
      */
     @Async
     public void sendFallbackNotification(String provider, String subjectId, String message) {
-        log.warn("平台通知失败，启用回退通知: provider={}, subjectId={}, message={}", provider, subjectId, message);
+        log.warn("平台通知失败，启用回退通知: provider={}, subjectId={}, messageLength={}",
+                provider, subjectId, length(message));
 
         try {
             notificationRouterService.sendNotificationToPlatformUser(
@@ -226,5 +255,36 @@ public class NotificationService {
             case APPROVAL_REJECTED -> "❌ 审批拒绝通知";
             default -> "📋 审批通知";
         };
+    }
+
+    private int length(String value) {
+        return value == null ? 0 : value.length();
+    }
+
+    private String formatCurrency(BigDecimal amount) {
+        if (amount == null) {
+            return "未知";
+        }
+        return "¥" + amount.setScale(2, RoundingMode.HALF_UP).toPlainString();
+    }
+
+    private String display(Object value, String fallback) {
+        return value == null ? fallback : value.toString();
+    }
+
+    private Long resolveRecipientUserId(PaymentRecord record) {
+        if (record.getUserId() != null) {
+            return record.getUserId();
+        }
+        if (record.getEmployeeId() == null) {
+            return null;
+        }
+
+        SysUser user = sysUserService.findByEmployeeId(record.getEmployeeId());
+        if (user == null || user.getId() == null) {
+            return null;
+        }
+        record.setUserId(user.getId());
+        return user.getId();
     }
 }

@@ -57,9 +57,9 @@
 
 ### 4.2 工资行
 - `GET /api/v1/payroll/batches/{id}/lines`
-  - Query：`employeeRef`（支持 `emp:<employeeNo>` 或 `<provider>:<subjectId>`）、`page`、`size`
+  - Query：`employeeRef`（支持 `emp:<employeeNo>`、`<provider>:<subjectId>` 或 `<provider>:<tenantKey>:<subjectId>`；多租户同 subjectId 时使用三段式）、`page`、`size`
   - 响应：`Page<OpenApiPayrollLineDto>`，关键字段：
-    - `employeeRef`：已根据平台 ID 或员工号拼接
+    - `employeeRef`：已根据平台 ID 或员工号拼接，非默认租户会包含 `tenantKey`
     - `employeeNameMasked` / `phoneMasked`：脱敏显示
     - `departments`：按 `/` 拆分为数组
 
@@ -68,7 +68,8 @@
   - 返回 `List<OpenApiPayslipDto>`；字段：
     - `items`：携带 `showOnPayslip`、`order`，可用于前端排序和展示控制
     - 金额字段（gross/tax/social/net）为 `BigDecimal`，前端保留两位小数即可
-- **单条详情**：`GET /api/v1/payslips/{id}`
+- **单条详情**：`GET /api/v1/payslips/{id}?employeeRef=emp:E0001`
+  - `employeeRef` 必填，用于服务端确认该工资条属于调用方指定的员工标识。
 
 ### 4.4 Scope 与鉴权
 - `SCOPE_payroll:read`：访问批次与工资行
@@ -108,4 +109,3 @@
 ---
 
 如需进一步帮助（Mock 数据、Postman 集合、SDK），请在飞书「薪酬项目群」@后端值班同学。
-

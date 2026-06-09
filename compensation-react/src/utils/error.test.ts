@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import axios from 'axios';
-import { getStatusText, toMessage } from './error';
+import { getStatusText, toMessage, withActionPrefix } from './error';
 
 // Mock axios
 vi.mock('axios', () => ({
@@ -176,6 +176,42 @@ describe('Error Utilities', () => {
 
       mockAxios.isAxiosError.mockReturnValue(true);
       expect(toMessage(axiosError)).toBe('Custom message');
+    });
+  });
+
+  describe('withActionPrefix', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    it('should not duplicate existing action prefix', () => {
+      const axiosError = {
+        response: {
+          data: {
+            message: '重试失败: 缺少收款账号（结算账户/银行卡/手机号/邮箱）',
+          },
+          status: 400,
+        },
+      };
+
+      mockAxios.isAxiosError.mockReturnValue(true);
+
+      expect(withActionPrefix('重试失败', axiosError)).toBe('重试失败: 缺少收款账号（结算账户/银行卡/手机号/邮箱）');
+    });
+
+    it('should add action prefix when backend returns plain reason', () => {
+      const axiosError = {
+        response: {
+          data: {
+            message: '缺少收款账号',
+          },
+          status: 400,
+        },
+      };
+
+      mockAxios.isAxiosError.mockReturnValue(true);
+
+      expect(withActionPrefix('重试失败', axiosError)).toBe('重试失败：缺少收款账号');
     });
   });
 });

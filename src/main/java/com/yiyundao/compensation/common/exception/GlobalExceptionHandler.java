@@ -9,6 +9,7 @@ import jakarta.validation.ConstraintViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.env.Environment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
@@ -20,6 +21,8 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.servlet.NoHandlerFoundException;
 
 import java.util.HashMap;
@@ -41,12 +44,15 @@ public class GlobalExceptionHandler {
 
     private final MetricsService metricsService;
     private final TraceContext traceContext;
+    private final Environment environment;
 
     @Autowired
     public GlobalExceptionHandler(MetricsService metricsService,
-                                   @Autowired(required = false) TraceContext traceContext) {
+                                  @Autowired(required = false) TraceContext traceContext,
+                                  @Autowired(required = false) Environment environment) {
         this.metricsService = metricsService;
         this.traceContext = traceContext;
+        this.environment = environment;
     }
 
     /**
@@ -250,6 +256,30 @@ public class GlobalExceptionHandler {
     }
 
     /**
+     * 文件上传大小超限
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUploadSizeExceeded(MaxUploadSizeExceededException ex) {
+        String traceId = getTraceId();
+        log.warn("文件上传大小超限: traceId={}, maxUploadSize={}", traceId, ex.getMaxUploadSize());
+
+        return ResponseEntity.status(ErrorCode.PARAM_INVALID.getHttpStatus())
+                .body(buildErrorBody(ErrorCode.PARAM_INVALID, "文件大小超过限制", traceId, Map.of("traceId", traceId)));
+    }
+
+    /**
+     * Multipart 请求解析异常
+     */
+    @ExceptionHandler(MultipartException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMultipart(MultipartException ex) {
+        String traceId = getTraceId();
+        log.warn("Multipart请求解析失败: traceId={}, message={}", traceId, ex.getMessage());
+
+        return ResponseEntity.status(ErrorCode.PARAM_INVALID.getHttpStatus())
+                .body(buildErrorBody(ErrorCode.PARAM_INVALID, "文件上传请求格式错误", traceId, Map.of("traceId", traceId)));
+    }
+
+    /**
      * 数据库异常
      */
     @ExceptionHandler(org.springframework.dao.DataAccessException.class)
@@ -346,7 +376,30 @@ public class GlobalExceptionHandler {
      * 判断是否为生产环境
      */
     private boolean isProductionEnv() {
-        String profile = System.getProperty("spring.profiles.active", "");
-        return profile.contains("prod") || profile.contains("production");
+        if (environment != null) {
+            if (containsProdLikeProfile(environment.getActiveProfiles())) {
+                return true;
+            }
+            if (containsProdLikeProfile(environment.getDefaultProfiles())) {
+                return true;
+            }
+        }
+        return containsProdLikeProfile(System.getProperty("spring.profiles.active", ""));
+    }
+
+    private boolean containsProdLikeProfile(String... profiles) {
+        if (profiles == null) {
+            return false;
+        }
+        for (String profile : profiles) {
+            if (profile == null) {
+                continue;
+            }
+            String normalized = profile.trim().toLowerCase(java.util.Locale.ROOT);
+            if ("prod".equals(normalized) || "production".equals(normalized) || "staging".equals(normalized)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

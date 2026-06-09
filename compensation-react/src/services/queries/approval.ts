@@ -7,7 +7,13 @@ import type { PagedResponse } from '@/types/openapi';
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled';
 
 // 审批流程类型
-export type ApprovalWorkflowType = 'BATCH' | 'ADHOC' | 'OFFLINE';
+export type ApprovalWorkflowType =
+  | 'BATCH'
+  | 'PAYROLL_DISTRIBUTION'
+  | 'ADHOC'
+  | 'OFFLINE'
+  | 'PERMISSION'
+  | 'PAYROLL_DISPUTE';
 
 // 审批流程数据定义
 export interface ApprovalWorkflow {
@@ -22,7 +28,9 @@ export interface ApprovalWorkflow {
   status: ApprovalStatus;
   statusName: string;
   initiatorId: number;
+  initiatorName?: string | null;
   currentApproverId: number | null;
+  currentApproverName?: string | null;
   submitTime: string;
   completeTime: string | null;
 }
@@ -46,8 +54,6 @@ export interface ApprovalStep {
 export interface ApprovalWorkflowDetail extends ApprovalWorkflow {
   steps: ApprovalStep[];
   businessInfo: Record<string, unknown>;
-  initiatorName: string;
-  currentApproverName: string | null;
 }
 
 // 审批决策请求
@@ -245,10 +251,16 @@ export function getApprovalStatusInfo(status: ApprovalStatus) {
  * 获取流程类型显示信息
  */
 export function getWorkflowTypeInfo(type: ApprovalWorkflowType) {
-  const typeMap: Record<ApprovalWorkflowType, { text: string; color: 'blue' | 'purple' | 'orange'; icon: string }> = {
+  const typeMap: Record<
+    ApprovalWorkflowType,
+    { text: string; color: 'blue' | 'purple' | 'orange' | 'green' | 'cyan' | 'magenta'; icon: string }
+  > = {
     BATCH: { text: '批量支付', color: 'blue', icon: '📊' },
+    PAYROLL_DISTRIBUTION: { text: '薪资发放', color: 'green', icon: '💰' },
     ADHOC: { text: '临时支付', color: 'orange', icon: '💸' },
     OFFLINE: { text: '架构外员工', color: 'purple', icon: '👤' },
+    PERMISSION: { text: '权限授权', color: 'cyan', icon: '🔐' },
+    PAYROLL_DISPUTE: { text: '薪酬异议', color: 'magenta', icon: '🧾' },
   };
   return typeMap[type] || { text: type, color: 'blue', icon: '📋' };
 }

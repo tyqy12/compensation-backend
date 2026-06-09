@@ -2,7 +2,9 @@ package com.yiyundao.compensation.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 
 import jakarta.annotation.PostConstruct;
@@ -15,6 +17,7 @@ import java.security.MessageDigest;
 import java.security.Security;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Locale;
 
 /**
  * 独立的配置解密服务，专门用于解密集成配置数据
@@ -24,12 +27,13 @@ import java.util.Base64;
 @Service
 public class ConfigDecryptionService {
 
-    @Value("${encryption.aes.key:default_aes_key_32_chars_long_here}")
-    private String fallbackAesKey;
+    private final String fallbackAesKey;
+    private final Environment environment;
 
     private static final String AES_ALGORITHM = "AES/CBC/PKCS5Padding";
     private static final int IV_LENGTH = 16; // 16字节IV
-
+    private static final String DEFAULT_AES_KEY = "default_aes_key_32_chars_long_here";
+    private static final int MIN_AES_KEY_LENGTH = 16;
 
     // Cached key material
     private byte[] aesKeyBytes; // 32 bytes (AES-256)
@@ -41,11 +45,47 @@ public class ConfigDecryptionService {
         }
     }
 
+    @Autowired
+    public ConfigDecryptionService(
+            @Value("${encryption.aes.key:" + DEFAULT_AES_KEY + "}") String fallbackAesKey,
+            Environment environment) {
+        this.fallbackAesKey = fallbackAesKey;
+        this.environment = environment;
+    }
+
     @PostConstruct
     public void init() {
-        // 使用fallback密钥初始化
+        validateKeyForEnvironment();
         this.aesKeyBytes = deriveKey(fallbackAesKey, 32);
-        log.info("配置解密服务初始化完成，使用fallback AES密钥");
+        log.info("配置解密服务初始化完成");
+    }
+
+    private void validateKeyForEnvironment() {
+        if (isBlank(fallbackAesKey) || fallbackAesKey.length() < MIN_AES_KEY_LENGTH) {
+            throw new IllegalStateException("encryption.aes.key must be at least 16 characters");
+        }
+        if (isProdLikeProfile() && isDefaultAesKey(fallbackAesKey)) {
+            throw new IllegalStateException("Production deployment cannot use default encryption.aes.key");
+        }
+        if (isDefaultAesKey(fallbackAesKey)) {
+            log.warn("Using default/dev config encryption key. Do NOT use in production.");
+        }
+    }
+
+    private boolean isProdLikeProfile() {
+        return Arrays.stream(environment.getActiveProfiles())
+                .map(profile -> profile.toLowerCase(Locale.ROOT))
+                .anyMatch(profile -> profile.equals("prod")
+                        || profile.equals("production")
+                        || profile.equals("staging"));
+    }
+
+    private boolean isDefaultAesKey(String key) {
+        return DEFAULT_AES_KEY.equals(key) || key.toLowerCase(Locale.ROOT).contains("default");
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 
     /**

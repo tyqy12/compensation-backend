@@ -1,6 +1,8 @@
 package com.yiyundao.compensation.interfaces.controller.employee;
 
 import com.yiyundao.compensation.common.response.ApiResponse;
+import com.yiyundao.compensation.common.idempotent.Idempotent;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.common.response.PageResponse;
 import com.yiyundao.compensation.enums.EmployeeStatus;
 import com.yiyundao.compensation.interfaces.dto.employee.*;
@@ -60,12 +62,18 @@ public class EmployeeController {
     }
 
     @GetMapping("/{id}")
+    @SecurityAnnotations.IsFinanceOrHrOrAdmin
     @Operation(summary = "获取员工详情", description = "根据ID获取员工详细信息")
-    public ApiResponse<EmployeeVO> detail(@PathVariable Long id) {
-        return ApiResponse.success(employeeService.getEmployeeVO(id));
+    public ApiResponse<EmployeeVO> detail(@PathVariable String id) {
+        EmployeeVO employee = resolveEmployeeVO(id);
+        if (employee == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "员工不存在");
+        }
+        return ApiResponse.success(employee);
     }
 
     @GetMapping("/{id}/approvals")
+    @SecurityAnnotations.IsFinanceOrHrOrAdmin
     @Operation(summary = "员工审批记录", description = "按员工维度分页查询审批记录")
     public ApiResponse<PageResponse<EmployeeApprovalRecordVO>> approvals(
             @PathVariable Long id,
@@ -76,6 +84,7 @@ public class EmployeeController {
     }
 
     @GetMapping("/{id}/payslips")
+    @SecurityAnnotations.IsFinanceOrAdmin
     @Operation(summary = "员工发薪记录", description = "按员工维度分页查询工资条记录")
     public ApiResponse<PageResponse<EmployeePayslipRecordVO>> payslips(
             @PathVariable Long id,
@@ -86,6 +95,7 @@ public class EmployeeController {
     }
 
     @GetMapping("/{id}/payments")
+    @SecurityAnnotations.IsFinanceOrAdmin
     @Operation(summary = "员工支付记录", description = "按员工维度分页查询支付明细")
     public ApiResponse<PageResponse<PaymentRecordItemVO>> payments(
             @PathVariable Long id,
@@ -96,6 +106,7 @@ public class EmployeeController {
     }
 
     @GetMapping
+    @SecurityAnnotations.IsFinanceOrHrOrAdmin
     @Operation(summary = "分页查询员工", description = "支持多条件组合查询和分页")
     public ApiResponse<PageResponse<EmployeeListItemVO>> page(
             @RequestParam(defaultValue = "1") int page,
@@ -141,6 +152,7 @@ public class EmployeeController {
 
     @PostMapping("/{id}/bind-platform")
     @SecurityAnnotations.IsHrOrAdmin
+    @Idempotent(key = "'employee:bind-platform:' + #p0", expireSeconds = 300, message = "平台绑定正在处理中，请勿重复提交", throwOnLockFail = true, deleteOnError = true)
     @Operation(summary = "绑定平台用户", description = "绑定企业微信/钉钉/飞书平台用户。冲突时自动发起审批流程，返回审批信息便于追溯")
     public ApiResponse<BindPlatformResult> bindPlatform(@PathVariable Long id, @Valid @RequestBody BindPlatformRequest req) {
         legacyPlatformFieldPolicy.handleLegacyInput(
@@ -162,12 +174,14 @@ public class EmployeeController {
     }
 
     @GetMapping("/offline")
+    @SecurityAnnotations.IsFinanceOrHrOrAdmin
     @Operation(summary = "获取架构外员工列表", description = "获取所有架构外员工或指定管理员的架构外员工")
     public ApiResponse<List<EmployeeVO>> offlineList(@RequestParam(required = false) Long managerId) {
         return ApiResponse.success(employeeService.getOfflineEmployees(managerId));
     }
 
     @GetMapping("/resigned")
+    @SecurityAnnotations.IsFinanceOrHrOrAdmin
     @Operation(summary = "获取离职员工列表", description = "获取所有离职员工或指定管理员的离职员工")
     public ApiResponse<List<EmployeeVO>> resignedList(@RequestParam(required = false) Long managerId) {
         return ApiResponse.success(employeeService.getResignedEmployees(managerId));
@@ -214,6 +228,7 @@ public class EmployeeController {
 
     @PostMapping("/batch-import")
     @SecurityAnnotations.IsHrOrAdmin
+    @Idempotent(key = "'employee:batch-import:' + #p0.hashCode()", expireSeconds = 600, message = "员工批量导入正在处理中，请勿重复提交", throwOnLockFail = true, deleteOnError = true)
     @Operation(summary = "批量导入员工", description = "批量导入员工信息，跳过重复工号")
     public ApiResponse<Void> batchImport(@Valid @RequestBody BatchImportRequest req) {
         for (EmployeeCreateRequest item : req.getEmployees()) {
@@ -273,5 +288,41 @@ public class EmployeeController {
         e.setBankBranchName(req.getBankBranchName());
         e.setOffline(req.getOffline());
         return e;
+    }
+
+    private EmployeeVO resolveEmployeeVO(String id) {
+        if (!StringUtils.hasText(id)) {
+            return null;
+        }
+        String identifier = id.trim();
+        if (isNumericWithLeadingZero(identifier)) {
+            Employee employee = employeeService.getByEmployeeId(identifier);
+            if (employee != null) {
+                return employeeService.getEmployeeVO(employee.getId());
+            }
+        }
+        if (identifier.chars().allMatch(Character::isDigit)) {
+            EmployeeVO vo = getEmployeeVOByDatabaseId(identifier);
+            if (vo != null) {
+                return vo;
+            }
+        }
+        Employee employee = employeeService.getByEmployeeId(identifier);
+        return employee == null ? null : employeeService.getEmployeeVO(employee.getId());
+    }
+
+    private boolean isNumericWithLeadingZero(String identifier) {
+        return identifier != null
+                && identifier.length() > 1
+                && identifier.charAt(0) == '0'
+                && identifier.chars().allMatch(Character::isDigit);
+    }
+
+    private EmployeeVO getEmployeeVOByDatabaseId(String identifier) {
+        try {
+            return employeeService.getEmployeeVO(Long.valueOf(identifier));
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 }

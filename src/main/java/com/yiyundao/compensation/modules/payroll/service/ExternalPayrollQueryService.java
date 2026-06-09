@@ -23,6 +23,5 @@ public interface ExternalPayrollQueryService {
 
     List<OpenApiPayslipDto> findPayslips(String employeeRef, String period);
 
-    OpenApiPayslipDto findPayslip(Long payslipId);
+    OpenApiPayslipDto findPayslip(Long payslipId, String employeeRef);
 }
-

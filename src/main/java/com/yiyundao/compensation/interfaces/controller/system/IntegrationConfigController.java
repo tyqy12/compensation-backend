@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.interfaces.controller.system;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.common.utils.AlipayKeyFormatValidator;
 import com.yiyundao.compensation.interfaces.dto.config.*;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.modules.system.entity.IntegrationConfig;
@@ -108,6 +109,9 @@ public class IntegrationConfigController {
                                           @RequestBody SaveConfigRequest req,
                                           jakarta.servlet.http.HttpServletRequest request) {
         try {
+            if (req == null) {
+                return ApiResponse.error("配置请求不能为空");
+            }
             // 如果禁用配置，可以不传具体配置内容
             if (Boolean.FALSE.equals(req.getEnabled())) {
                 disablePlatform(platformType, true);
@@ -124,100 +128,112 @@ public class IntegrationConfigController {
                     if (req.getWechat() == null) {
                         return ApiResponse.error("启用微信时配置不能为空");
                     }
+                    WechatConfigDto wechat = mergeWechatConfig(platformType, req.getWechat());
                     // 验证必填字段
-                    if (req.getWechat().getCorpId() == null || req.getWechat().getCorpSecret() == null) {
+                    if (!StringUtils.hasText(wechat.getCorpId()) || !StringUtils.hasText(wechat.getCorpSecret())) {
                         return ApiResponse.error("微信配置缺少必填字段：corpId, corpSecret");
                     }
-                    json = objectMapper.writeValueAsString(req.getWechat());
+                    json = objectMapper.writeValueAsString(wechat);
                     break;
                 case "dingtalk":
                     if (req.getDingtalk() == null) {
                         return ApiResponse.error("启用钉钉时配置不能为空");
                     }
-                    if (req.getDingtalk().getAppKey() == null || req.getDingtalk().getAppSecret() == null) {
+                    DingTalkConfigDto dingtalk = mergeDingTalkConfig(platformType, req.getDingtalk());
+                    if (!StringUtils.hasText(dingtalk.getAppKey()) || !StringUtils.hasText(dingtalk.getAppSecret())) {
                         return ApiResponse.error("钉钉配置缺少必填字段：appKey, appSecret");
                     }
-                    json = objectMapper.writeValueAsString(req.getDingtalk());
+                    json = objectMapper.writeValueAsString(dingtalk);
                     break;
                 case "feishu":
                     if (req.getFeishu() == null) {
                         return ApiResponse.error("启用飞书时配置不能为空");
                     }
-                    if (req.getFeishu().getAppId() == null || req.getFeishu().getAppSecret() == null) {
+                    FeishuConfigDto feishu = mergeFeishuConfig(platformType, req.getFeishu());
+                    if (!StringUtils.hasText(feishu.getAppId()) || !StringUtils.hasText(feishu.getAppSecret())) {
                         return ApiResponse.error("飞书配置缺少必填字段：appId, appSecret");
                     }
-                    json = objectMapper.writeValueAsString(req.getFeishu());
+                    json = objectMapper.writeValueAsString(feishu);
                     break;
                 case "alipay":
                     if (req.getAlipay() == null) {
                         return ApiResponse.error("启用支付宝时配置不能为空");
                     }
-                    if (req.getAlipay().getAppId() == null || req.getAlipay().getPrivateKey() == null) {
+                    AlipayConfigDto alipay = mergeAlipayConfig(platformType, req.getAlipay());
+                    if (!StringUtils.hasText(alipay.getAppId()) || !StringUtils.hasText(alipay.getPrivateKey())) {
                         return ApiResponse.error("支付宝配置缺少必填字段：appId, privateKey");
+                    }
+                    try {
+                        alipay.setPrivateKey(AlipayKeyFormatValidator.normalizePkcs8PrivateKey(alipay.getPrivateKey()));
+                    } catch (IllegalStateException ex) {
+                        return ApiResponse.error(ex.getMessage());
                     }
 
                     // 根据加签模式验证必填字段
-                    boolean isCertMode = "cert".equalsIgnoreCase(req.getAlipay().getCertMode());
+                    boolean isCertMode = "cert".equalsIgnoreCase(alipay.getCertMode());
                     if (isCertMode) {
                         // 证书模式：验证三个证书路径
-                        if (!StringUtils.hasText(req.getAlipay().getAppCertPath()) ||
-                            !StringUtils.hasText(req.getAlipay().getAlipayCertPath()) ||
-                            !StringUtils.hasText(req.getAlipay().getAlipayRootCertPath())) {
+                        if (!StringUtils.hasText(alipay.getAppCertPath()) ||
+                            !StringUtils.hasText(alipay.getAlipayCertPath()) ||
+                            !StringUtils.hasText(alipay.getAlipayRootCertPath())) {
                             return ApiResponse.error("证书模式需要配置应用公钥证书、支付宝公钥证书和支付宝根证书路径");
                         }
                     } else {
                         // 公钥模式：验证支付宝公钥
-                        if (!StringUtils.hasText(req.getAlipay().getPublicKey())) {
+                        if (!StringUtils.hasText(alipay.getPublicKey())) {
                             return ApiResponse.error("公钥模式需要配置支付宝公钥");
                         }
                     }
 
-                    json = objectMapper.writeValueAsString(req.getAlipay());
+                    json = objectMapper.writeValueAsString(alipay);
                     break;
                 case "yunzhanghu":
                     if (req.getYunzhanghu() == null) {
                         return ApiResponse.error("启用云账户时配置不能为空");
                     }
-                    if (!StringUtils.hasText(req.getYunzhanghu().getDealerId()) ||
-                            !StringUtils.hasText(req.getYunzhanghu().getBrokerId()) ||
-                            !StringUtils.hasText(req.getYunzhanghu().getAppKey()) ||
-                            !StringUtils.hasText(req.getYunzhanghu().getDes3Key()) ||
-                            !StringUtils.hasText(req.getYunzhanghu().getRsaPrivateKey()) ||
-                            !StringUtils.hasText(req.getYunzhanghu().getRsaPublicKey()) ||
-                            !StringUtils.hasText(req.getYunzhanghu().getUrl()) ||
-                            !StringUtils.hasText(req.getYunzhanghu().getSignType())) {
+                    YunzhanghuConfigDto yunzhanghu = mergeYunzhanghuConfig(platformType, req.getYunzhanghu());
+                    if (!StringUtils.hasText(yunzhanghu.getDealerId()) ||
+                            !StringUtils.hasText(yunzhanghu.getBrokerId()) ||
+                            !StringUtils.hasText(yunzhanghu.getAppKey()) ||
+                            !StringUtils.hasText(yunzhanghu.getDes3Key()) ||
+                            !StringUtils.hasText(yunzhanghu.getRsaPrivateKey()) ||
+                            !StringUtils.hasText(yunzhanghu.getRsaPublicKey()) ||
+                            !StringUtils.hasText(yunzhanghu.getUrl()) ||
+                            !StringUtils.hasText(yunzhanghu.getSignType())) {
                         return ApiResponse.error("云账户配置缺少必填字段：dealerId, brokerId, appKey, 3desKey, rsaPrivateKey, rsaPublicKey, url, signType");
                     }
-                    json = objectMapper.writeValueAsString(req.getYunzhanghu());
+                    json = objectMapper.writeValueAsString(yunzhanghu);
                     break;
                 case "sms":
                     if (req.getSms() == null) {
                         return ApiResponse.error("启用短信时配置不能为空");
                     }
-                    if (req.getSms().getProvider() == null) {
+                    SmsConfigDto sms = mergeSmsConfig(platformType, req.getSms());
+                    if (!StringUtils.hasText(sms.getProvider())) {
                         return ApiResponse.error("短信配置缺少必填字段：provider");
                     }
-                    json = objectMapper.writeValueAsString(req.getSms());
+                    json = objectMapper.writeValueAsString(sms);
                     break;
                 case "email":
                     if (req.getEmail() == null) {
                         return ApiResponse.error("启用邮件时配置不能为空");
                     }
-                    if (req.getEmail().getHost() == null || req.getEmail().getUsername() == null) {
+                    EmailConfigDto email = mergeEmailConfig(platformType, req.getEmail());
+                    if (!StringUtils.hasText(email.getHost()) || !StringUtils.hasText(email.getUsername())) {
                         return ApiResponse.error("邮件配置缺少必填字段：host, username");
                     }
-                    json = objectMapper.writeValueAsString(req.getEmail());
+                    json = objectMapper.writeValueAsString(email);
                     break;
                 case "encryption":
                     if (req.getEncryption() == null) {
                         return ApiResponse.error("启用加密时配置不能为空");
                     }
+                    EncryptionConfigDto encryption = mergeEncryptionConfig(platformType, req.getEncryption());
                     // 加密配置比较特殊，至少需要一个密钥
-                    if ((req.getEncryption().getAesKey() == null || req.getEncryption().getAesKey().trim().isEmpty()) &&
-                        (req.getEncryption().getSm4Key() == null || req.getEncryption().getSm4Key().trim().isEmpty())) {
+                    if (!StringUtils.hasText(encryption.getAesKey()) && !StringUtils.hasText(encryption.getSm4Key())) {
                         return ApiResponse.error("加密配置至少需要设置 aesKey 或 sm4Key");
                     }
-                    json = objectMapper.writeValueAsString(req.getEncryption());
+                    json = objectMapper.writeValueAsString(encryption);
                     break;
                 default:
                     return ApiResponse.error("不支持的平台类型: " + platformType);
@@ -255,6 +271,34 @@ public class IntegrationConfigController {
             log.error("删除配置失败", e);
             auditSafe("INTEGRATION_CONFIG_DELETE", platformType, request, false, e.getMessage());
             return ApiResponse.error("删除配置失败: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 启用已有配置。
+     * <p>仅切换 enabled 状态，保留原密文配置，避免前端为启用操作重新提交敏感配置。</p>
+     */
+    @PostMapping("/{platformType}/enable")
+    public ApiResponse<String> enableConfig(@PathVariable String platformType, jakarta.servlet.http.HttpServletRequest request) {
+        try {
+            IntegrationConfig cfg = integrationConfigService.getRawConfig(platformType);
+            if (cfg == null || !StringUtils.hasText(cfg.getConfigJson())) {
+                auditSafe("INTEGRATION_CONFIG_ENABLE", platformType, request, false, "配置不存在");
+                return ApiResponse.error("配置不存在，请先完成配置");
+            }
+
+            cfg.setEnabled(true);
+            integrationConfigService.updateById(cfg);
+            if ("encryption".equals(platformType)) {
+                encryptionService.forceRefreshKeys();
+            }
+
+            auditSafe("INTEGRATION_CONFIG_ENABLE", platformType, request, true, null);
+            return ApiResponse.success("配置已启用");
+        } catch (Exception e) {
+            log.error("启用配置失败", e);
+            auditSafe("INTEGRATION_CONFIG_ENABLE", platformType, request, false, e.getMessage());
+            return ApiResponse.error("启用配置失败: " + e.getMessage());
         }
     }
 
@@ -310,6 +354,147 @@ public class IntegrationConfigController {
         cfg.setEnabled(false);
         integrationConfigService.updateById(cfg);
         return true;
+    }
+
+    private WechatConfigDto mergeWechatConfig(String platformType, WechatConfigDto incoming) {
+        WechatConfigDto existing = parseExistingConfig(platformType, WechatConfigDto.class);
+        WechatConfigDto c = new WechatConfigDto();
+        c.setCorpId(keepExistingWhenMaskedOrBlank(incoming.getCorpId(), existing != null ? existing.getCorpId() : null));
+        c.setCorpSecret(keepExistingWhenMaskedOrBlank(incoming.getCorpSecret(), existing != null ? existing.getCorpSecret() : null));
+        c.setAgentId(incoming.getAgentId());
+        return c;
+    }
+
+    private DingTalkConfigDto mergeDingTalkConfig(String platformType, DingTalkConfigDto incoming) {
+        DingTalkConfigDto existing = parseExistingConfig(platformType, DingTalkConfigDto.class);
+        DingTalkConfigDto c = new DingTalkConfigDto();
+        c.setAppKey(keepExistingWhenMaskedOrBlank(incoming.getAppKey(), existing != null ? existing.getAppKey() : null));
+        c.setAppSecret(keepExistingWhenMaskedOrBlank(incoming.getAppSecret(), existing != null ? existing.getAppSecret() : null));
+        c.setWebhookUrl(keepExistingWhenMaskedOrBlank(incoming.getWebhookUrl(), existing != null ? existing.getWebhookUrl() : null));
+        c.setEnabled(incoming.getEnabled());
+        return c;
+    }
+
+    private FeishuConfigDto mergeFeishuConfig(String platformType, FeishuConfigDto incoming) {
+        FeishuConfigDto existing = parseExistingConfig(platformType, FeishuConfigDto.class);
+        FeishuConfigDto c = new FeishuConfigDto();
+        c.setAppId(keepExistingWhenMaskedOrBlank(incoming.getAppId(), existing != null ? existing.getAppId() : null));
+        c.setAppSecret(keepExistingWhenMaskedOrBlank(incoming.getAppSecret(), existing != null ? existing.getAppSecret() : null));
+        c.setAppToken(keepExistingWhenMaskedOrBlank(incoming.getAppToken(), existing != null ? existing.getAppToken() : null));
+        c.setEnabled(incoming.getEnabled());
+        return c;
+    }
+
+    private AlipayConfigDto mergeAlipayConfig(String platformType, AlipayConfigDto incoming) {
+        AlipayConfigDto existing = parseExistingConfig(platformType, AlipayConfigDto.class);
+        AlipayConfigDto c = new AlipayConfigDto();
+        c.setAppId(keepExistingWhenMaskedOrBlank(incoming.getAppId(), existing != null ? existing.getAppId() : null));
+        c.setServerUrl(incoming.getServerUrl());
+        c.setPrivateKey(keepExistingWhenMaskedOrBlank(incoming.getPrivateKey(), existing != null ? existing.getPrivateKey() : null));
+        c.setPublicKey(keepExistingWhenMaskedOrBlank(incoming.getPublicKey(), existing != null ? existing.getPublicKey() : null));
+        c.setCharset(incoming.getCharset());
+        c.setSignType(incoming.getSignType());
+        c.setFormat(incoming.getFormat());
+        c.setNotifyUrl(incoming.getNotifyUrl());
+        c.setReturnUrl(incoming.getReturnUrl());
+        c.setEncryptKey(keepExistingWhenMaskedOrBlank(incoming.getEncryptKey(), existing != null ? existing.getEncryptKey() : null));
+        c.setEncryptType(incoming.getEncryptType());
+        c.setCertMode(incoming.getCertMode());
+        c.setAppCertPath(incoming.getAppCertPath());
+        c.setAlipayCertPath(incoming.getAlipayCertPath());
+        c.setAlipayRootCertPath(incoming.getAlipayRootCertPath());
+        c.setConnectTimeout(incoming.getConnectTimeout());
+        c.setReadTimeout(incoming.getReadTimeout());
+        c.setSingleLimit(incoming.getSingleLimit());
+        c.setDailyLimit(incoming.getDailyLimit());
+        c.setRealNameVerify(incoming.getRealNameVerify());
+        return c;
+    }
+
+    private YunzhanghuConfigDto mergeYunzhanghuConfig(String platformType, YunzhanghuConfigDto incoming) {
+        YunzhanghuConfigDto existing = parseExistingConfig(platformType, YunzhanghuConfigDto.class);
+        YunzhanghuConfigDto c = new YunzhanghuConfigDto();
+        c.setDealerId(keepExistingWhenMaskedOrBlank(incoming.getDealerId(), existing != null ? existing.getDealerId() : null));
+        c.setBrokerId(keepExistingWhenMaskedOrBlank(incoming.getBrokerId(), existing != null ? existing.getBrokerId() : null));
+        c.setAppKey(keepExistingWhenMaskedOrBlank(incoming.getAppKey(), existing != null ? existing.getAppKey() : null));
+        c.setDes3Key(keepExistingWhenMaskedOrBlank(incoming.getDes3Key(), existing != null ? existing.getDes3Key() : null));
+        c.setRsaPrivateKey(keepExistingWhenMaskedOrBlank(incoming.getRsaPrivateKey(), existing != null ? existing.getRsaPrivateKey() : null));
+        c.setRsaPublicKey(keepExistingWhenMaskedOrBlank(incoming.getRsaPublicKey(), existing != null ? existing.getRsaPublicKey() : null));
+        c.setSignType(incoming.getSignType());
+        c.setUrl(incoming.getUrl());
+        c.setNotifyUrl(incoming.getNotifyUrl());
+        c.setProjectId(incoming.getProjectId());
+        c.setCheckName(incoming.getCheckName());
+        c.setDealerPlatformName(incoming.getDealerPlatformName());
+        c.setIsDebug(incoming.getIsDebug());
+        return c;
+    }
+
+    private SmsConfigDto mergeSmsConfig(String platformType, SmsConfigDto incoming) {
+        SmsConfigDto existing = parseExistingConfig(platformType, SmsConfigDto.class);
+        SmsConfigDto c = new SmsConfigDto();
+        c.setProvider(incoming.getProvider());
+        c.setAccessKeyId(keepExistingWhenMaskedOrBlank(incoming.getAccessKeyId(), existing != null ? existing.getAccessKeyId() : null));
+        c.setAccessKeySecret(keepExistingWhenMaskedOrBlank(incoming.getAccessKeySecret(), existing != null ? existing.getAccessKeySecret() : null));
+        c.setSignName(incoming.getSignName());
+        c.setTemplateCode(incoming.getTemplateCode());
+        c.setSecretId(keepExistingWhenMaskedOrBlank(incoming.getSecretId(), existing != null ? existing.getSecretId() : null));
+        c.setSecretKey(keepExistingWhenMaskedOrBlank(incoming.getSecretKey(), existing != null ? existing.getSecretKey() : null));
+        c.setAppId(incoming.getAppId());
+        c.setSdkAppId(incoming.getSdkAppId());
+        c.setAppKey(keepExistingWhenMaskedOrBlank(incoming.getAppKey(), existing != null ? existing.getAppKey() : null));
+        c.setAppSecret(keepExistingWhenMaskedOrBlank(incoming.getAppSecret(), existing != null ? existing.getAppSecret() : null));
+        c.setSender(incoming.getSender());
+        c.setTemplateId(incoming.getTemplateId());
+        c.setEndpoint(incoming.getEndpoint());
+        c.setRegion(incoming.getRegion());
+        c.setDailyLimit(incoming.getDailyLimit());
+        c.setRateLimitPerMinute(incoming.getRateLimitPerMinute());
+        c.setEnabled(incoming.getEnabled());
+        return c;
+    }
+
+    private EmailConfigDto mergeEmailConfig(String platformType, EmailConfigDto incoming) {
+        EmailConfigDto existing = parseExistingConfig(platformType, EmailConfigDto.class);
+        EmailConfigDto c = new EmailConfigDto();
+        c.setHost(incoming.getHost());
+        c.setPort(incoming.getPort());
+        c.setUsername(keepExistingWhenMaskedOrBlank(incoming.getUsername(), existing != null ? existing.getUsername() : null));
+        c.setPassword(keepExistingWhenMaskedOrBlank(incoming.getPassword(), existing != null ? existing.getPassword() : null));
+        c.setFromAddress(incoming.getFromAddress());
+        c.setFromName(incoming.getFromName());
+        c.setSsl(incoming.getSsl());
+        c.setTls(incoming.getTls());
+        c.setEncoding(incoming.getEncoding());
+        c.setEnabled(incoming.getEnabled());
+        return c;
+    }
+
+    private EncryptionConfigDto mergeEncryptionConfig(String platformType, EncryptionConfigDto incoming) {
+        EncryptionConfigDto existing = parseExistingConfig(platformType, EncryptionConfigDto.class);
+        EncryptionConfigDto c = new EncryptionConfigDto();
+        c.setAesKey(keepExistingWhenMaskedOrBlank(incoming.getAesKey(), existing != null ? existing.getAesKey() : null));
+        c.setSm4Key(keepExistingWhenMaskedOrBlank(incoming.getSm4Key(), existing != null ? existing.getSm4Key() : null));
+        c.setAlgorithm(incoming.getAlgorithm());
+        c.setKeyDerivation(incoming.getKeyDerivation());
+        c.setKeyRotationDays(incoming.getKeyRotationDays());
+        c.setEnabled(incoming.getEnabled());
+        return c;
+    }
+
+    private <T> T parseExistingConfig(String platformType, Class<T> clazz) {
+        return parseConfig(integrationConfigService.getRawConfig(platformType), clazz);
+    }
+
+    private String keepExistingWhenMaskedOrBlank(String incoming, String existing) {
+        if (!StringUtils.hasText(incoming) || isMaskedPlaceholder(incoming)) {
+            return existing;
+        }
+        return incoming;
+    }
+
+    private boolean isMaskedPlaceholder(String value) {
+        return StringUtils.hasText(value) && value.trim().startsWith("***");
     }
 
     private Object buildMaskedConfig(String platformType, IntegrationConfig cfg) throws Exception {
@@ -534,6 +719,9 @@ public class IntegrationConfigController {
 
     private String testPlatformConnection(String platformType) {
         try {
+            if (!integrationConfigService.isPlatformEnabled(platformType)) {
+                return "disconnected";
+            }
             boolean connected = false;
             switch (platformType) {
                 case "wechat":
@@ -591,8 +779,12 @@ public class IntegrationConfigController {
 
             // 验证文件格式
             String originalFilename = file.getOriginalFilename();
-            if (originalFilename == null || !originalFilename.endsWith(".crt")) {
+            if (originalFilename == null || !originalFilename.toLowerCase(java.util.Locale.ROOT).endsWith(".crt")) {
                 return ApiResponse.error("证书文件必须是 .crt 格式");
+            }
+
+            if (file.isEmpty()) {
+                return ApiResponse.error("证书文件不能为空");
             }
 
             // 验证文件大小（最大 1MB）
@@ -600,11 +792,18 @@ public class IntegrationConfigController {
                 return ApiResponse.error("证书文件大小不能超过 1MB");
             }
 
+            byte[] certContent = file.getBytes();
+            if (!isValidX509Certificate(certContent)) {
+                return ApiResponse.error("证书文件内容不是有效的 X.509 证书");
+            }
+
             // 生成固定格式的文件名
             String fileName = certType + ".crt";
 
             // 直接存储到固定目录 certs/alipay/ 下，不按日期分目录
-            java.nio.file.Path rootPath = java.nio.file.Paths.get(fileStorageProperties.getLocal().getBasePath());
+            java.nio.file.Path rootPath = java.nio.file.Paths.get(fileStorageProperties.getLocal().getBasePath())
+                    .toAbsolutePath()
+                    .normalize();
             String relativePath = "certs/alipay/" + fileName;
             java.nio.file.Path destinationFile = rootPath.resolve(relativePath).normalize();
 
@@ -617,8 +816,10 @@ public class IntegrationConfigController {
             java.nio.file.Files.createDirectories(destinationFile.getParent());
 
             // 保存文件
-            java.nio.file.Files.copy(file.getInputStream(), destinationFile,
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            java.nio.file.Files.write(destinationFile, certContent,
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING,
+                    java.nio.file.StandardOpenOption.WRITE);
 
             // 返回绝对路径
             String absolutePath = destinationFile.toAbsolutePath().toString();
@@ -632,6 +833,23 @@ public class IntegrationConfigController {
             log.error("证书上传失败: certType={}", certType, e);
             auditSafe("ALIPAY_CERT_UPLOAD", certType, request, false, e.getMessage());
             return ApiResponse.error("证书上传失败: " + e.getMessage());
+        }
+    }
+
+    private boolean isValidX509Certificate(byte[] certContent) {
+        if (certContent == null || certContent.length == 0) {
+            return false;
+        }
+        try (java.io.ByteArrayInputStream inputStream = new java.io.ByteArrayInputStream(certContent)) {
+            java.security.cert.CertificateFactory certificateFactory =
+                    java.security.cert.CertificateFactory.getInstance("X.509");
+            java.util.Collection<? extends java.security.cert.Certificate> certificates =
+                    certificateFactory.generateCertificates(inputStream);
+            return certificates != null && !certificates.isEmpty();
+        } catch (java.security.cert.CertificateException e) {
+            return false;
+        } catch (java.io.IOException e) {
+            return false;
         }
     }
 }

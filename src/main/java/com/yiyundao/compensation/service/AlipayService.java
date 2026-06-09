@@ -12,15 +12,20 @@ import com.alipay.api.response.AlipayFundTransCommonQueryResponse;
 import com.alipay.api.internal.util.AlipaySignature;
 import com.alipay.api.internal.util.AlipayEncrypt;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.yiyundao.compensation.common.utils.AlipayKeyFormatValidator;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
 import com.yiyundao.compensation.enums.PaymentStatus;
 import com.yiyundao.compensation.enums.BatchStatus;
+import com.yiyundao.compensation.enums.PaymentBatchProcessStatus;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
+import com.yiyundao.compensation.enums.PayrollBatchStatus;
+import com.yiyundao.compensation.modules.payment.support.PaymentCallbackLogSanitizer;
+import com.yiyundao.compensation.modules.payment.support.PaymentRecordStatusTransitions;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.aop.framework.AopContext;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -31,7 +36,9 @@ import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -55,6 +62,10 @@ public class AlipayService {
     private static final int ERROR_MSG_MAX_LENGTH = 500;
     private static final int NORMALIZED_ERROR_MSG_MAX_LENGTH = 200;
 
+    private String maskOrderNo(String orderNo) {
+        return PaymentCallbackLogSanitizer.sanitizeField("out_biz_no", orderNo);
+    }
+
     /**
      * 动态创建AlipayClient
      * <p>
@@ -70,15 +81,16 @@ public class AlipayService {
      */
     private AlipayClient createAlipayClient() throws IllegalStateException, AlipayApiException {
         com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto config = integrationConfigService.getAlipayConfig();
-        if (config == null || config.getAppId() == null || config.getPrivateKey() == null) {
+        if (config == null || !StringUtils.hasText(config.getAppId()) || !StringUtils.hasText(config.getPrivateKey())) {
             throw new IllegalStateException("支付宝配置不完整：缺少必要的appId或privateKey");
         }
+        String privateKey = AlipayKeyFormatValidator.normalizePkcs8PrivateKey(config.getPrivateKey());
 
         // 构建AlipayConfig配置对象（统一支持公钥/证书模式 + AES加密）
         AlipayConfig alipayConfig = new AlipayConfig();
         alipayConfig.setServerUrl(config.getServerUrl() != null ? config.getServerUrl() : "https://openapi.alipay.com/gateway.do");
-        alipayConfig.setAppId(config.getAppId());
-        alipayConfig.setPrivateKey(config.getPrivateKey());
+        alipayConfig.setAppId(config.getAppId().trim());
+        alipayConfig.setPrivateKey(privateKey);
         alipayConfig.setFormat(config.getFormat() != null ? config.getFormat() : "json");
         alipayConfig.setCharset(config.getCharset() != null ? config.getCharset() : "UTF-8");
         alipayConfig.setSignType(config.getSignType() != null ? config.getSignType() : "RSA2");
@@ -159,7 +171,7 @@ public class AlipayService {
         String failureMsg = null;
 
         log.info("发起支付宝单笔转账: recordId={}, outBizNo={}, amount={}",
-                paymentRecordId, outBizNo, record.getAmount());
+                paymentRecordId, maskOrderNo(outBizNo), record.getAmount());
 
         try {
             // 检查支付宝配置是否存在且启用
@@ -179,7 +191,10 @@ public class AlipayService {
             redisTemplate.opsForValue().set(dedupKey, "processing", DEDUP_EXPIRE_HOURS, TimeUnit.HOURS);
 
             // 更新支付记录状态为处理中
-            updatePaymentStatus(paymentRecordId, PaymentStatus.PROCESSING, outBizNo, null, null, null);
+            if (!updatePaymentStatus(paymentRecordId, PaymentStatus.PROCESSING, outBizNo, null, null, null)) {
+                redisTemplate.delete(dedupKey);
+                throw new IllegalStateException("支付记录状态已变更，禁止重复发起转账");
+            }
 
             // 创建支付宝客户端
             AlipayClient alipayClient = createAlipayClient();
@@ -228,10 +243,10 @@ public class AlipayService {
                                   tradeNo, null, null);
 
                 log.info("支付宝转账成功: recordId={}, outBizNo={}, tradeNo={}",
-                        paymentRecordId, outBizNo, tradeNo);
+                        paymentRecordId, maskOrderNo(outBizNo),
+                        PaymentCallbackLogSanitizer.sanitizeField("trade_no", tradeNo));
 
-                // 异步发送成功通知
-                notificationService.sendPaymentSuccessNotification(record);
+                safeNotifyPaymentSuccess(record);
 
                 return tradeNo;
             } else {
@@ -240,7 +255,7 @@ public class AlipayService {
                 failureMsg = response.getMsg() + " - " + response.getSubMsg();
 
                 log.error("支付宝转账失败: recordId={}, outBizNo={}, code={}, msg={}",
-                        paymentRecordId, outBizNo, failureCode, failureMsg);
+                        paymentRecordId, maskOrderNo(outBizNo), failureCode, failureMsg);
 
                 throw new AlipayApiException(failureCode, failureMsg);
             }
@@ -257,10 +272,11 @@ public class AlipayService {
                 updatePaymentStatus(paymentRecordId, PaymentStatus.FAILED, outBizNo, null,
                         normalizedFailureCode, normalizedFailureMsg);
             } catch (Exception persistEx) {
-                log.error("持久化支付失败状态异常: recordId={}, outBizNo={}", paymentRecordId, outBizNo, persistEx);
+                log.error("持久化支付失败状态异常: recordId={}, outBizNo={}",
+                        paymentRecordId, maskOrderNo(outBizNo), persistEx);
             }
 
-            log.error("支付宝转账异常: recordId={}, outBizNo={}", paymentRecordId, outBizNo, e);
+            log.error("支付宝转账异常: recordId={}, outBizNo={}", paymentRecordId, maskOrderNo(outBizNo), e);
             throw new AlipayApiException(normalizedFailureCode, normalizedFailureMsg);
         }
     }
@@ -269,7 +285,6 @@ public class AlipayService {
      * 批量转账处理
      */
     @Async
-    @Transactional(rollbackFor = Exception.class)
     public void batchTransfer(String batchNo) {
         log.info("开始批量转账处理: batchNo={}", batchNo);
 
@@ -281,18 +296,24 @@ public class AlipayService {
 
         try {
             // 更新批次状态为处理中
-            paymentBatchService.updateStatus(batch.getId(), BatchStatus.PROCESSING);
-            batch.setProcessStartTime(LocalDateTime.now());
-            paymentBatchService.updateById(batch);
-            // 使用代理调用以确保事务生效
-            ((AlipayService) AopContext.currentProxy()).syncPayrollBatchStatus(batch);
+            LocalDateTime processStartTime = LocalDateTime.now();
+            if (!claimBatchForTransfer(batch, processStartTime)) {
+                log.info("支付宝批量转账批次已被其他任务领取或状态已变更，跳过: batchNo={}, status={}",
+                        batchNo, batch.getStatus());
+                return;
+            }
+            batch.setStatus(BatchStatus.PROCESSING);
+            batch.setPaymentStatus(PaymentBatchProcessStatus.PROCESSING);
+            batch.setProcessStartTime(processStartTime);
+            batch.setProcessEndTime(null);
 
             // 查询批次下的所有待处理支付记录
             List<PaymentRecord> records = paymentRecordService.getByBatchNo(batchNo, PaymentStatus.PENDING);
 
             if (records.isEmpty()) {
                 log.warn("批次无待处理记录: {}", batchNo);
-                paymentBatchService.updateStatus(batch.getId(), BatchStatus.COMPLETED);
+                applyTerminalBatchResult(batch, paymentRecordService.getByBatchNo(batchNo, null));
+                paymentBatchService.updateTerminalState(batch);
                 return;
             }
 
@@ -323,52 +344,38 @@ public class AlipayService {
                 }
             }
 
-            // 更新批次统计信息
-            batch.setSuccessCount(successCount);
-            batch.setFailedCount(failedCount);
-            batch.setProcessEndTime(LocalDateTime.now());
-
-            if (failedCount == 0) {
-                batch.setStatus(BatchStatus.COMPLETED);
-            } else if (successCount == 0) {
-                batch.setStatus(BatchStatus.FAILED);
-                // 如果全部失败，设置事务回滚
-                if (TransactionSynchronizationManager.isActualTransactionActive()) {
-                    TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-                }
-            } else {
-                batch.setStatus(BatchStatus.COMPLETED); // 部分成功也认为完成
-            }
-
-            paymentBatchService.updateById(batch);
-            syncPayrollBatchStatus(batch);
+            applyTerminalBatchResult(batch, successCount, failedCount);
+            paymentBatchService.updateTerminalState(batch);
 
             log.info("批量转账完成: batchNo={}, 成功{}笔, 失败{}笔",
                     batchNo, successCount, failedCount);
 
             // 发送批次完成通知
             notificationService.sendBatchCompleteNotification(batch);
-
-            // 如果有失败且错误严重，重新抛出异常
             if (successCount == 0 && lastException != null) {
-                throw new RuntimeException("批量转账全部失败", lastException);
+                log.warn("批量转账全部失败，已持久化失败状态: batchNo={}, lastError={}",
+                        batchNo, lastException.getMessage());
             }
 
         } catch (Exception e) {
             log.error("批量转账异常: batchNo={}", batchNo, e);
             batch.setStatus(BatchStatus.FAILED);
-            paymentBatchService.updateStatus(batch.getId(), BatchStatus.FAILED);
-            // 使用代理调用以确保事务生效
-            ((AlipayService) AopContext.currentProxy()).syncPayrollBatchStatus(batch);
-
-            // 确保事务回滚
-            if (TransactionSynchronizationManager.isActualTransactionActive()) {
-                TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
-            }
-
-            // 重新抛出异常以触发完整回滚
-            throw new RuntimeException("批量转账处理异常", e);
+            batch.setPaymentStatus(PaymentBatchProcessStatus.FAILED);
+            paymentBatchService.updateTerminalState(batch);
         }
+    }
+
+    private boolean claimBatchForTransfer(PaymentBatch batch, LocalDateTime processStartTime) {
+        if (batch == null || batch.getId() == null) {
+            return false;
+        }
+        return paymentBatchService.update(new UpdateWrapper<PaymentBatch>()
+                .eq("id", batch.getId())
+                .in("status", BatchStatus.SUBMITTED.getCode(), BatchStatus.APPROVED.getCode())
+                .set("status", BatchStatus.PROCESSING.getCode())
+                .set("payment_status", PaymentBatchProcessStatus.PROCESSING.getCode())
+                .set("process_start_time", processStartTime)
+                .set("process_end_time", null));
     }
 
     /**
@@ -386,12 +393,17 @@ public class AlipayService {
             return;
         }
         try {
-            LambdaUpdateWrapper<PayrollBatch> wrapper = new LambdaUpdateWrapper<PayrollBatch>()
-                    .eq(PayrollBatch::getPaymentBatchNo, paymentBatch.getBatchNo());
+            boolean partialSuccess = paymentBatch.getPaymentStatus() == PaymentBatchProcessStatus.PARTIAL_SUCCESS
+                    || (paymentBatch.getSuccessCount() != null && paymentBatch.getSuccessCount() > 0
+                    && paymentBatch.getFailedCount() != null && paymentBatch.getFailedCount() > 0);
+            UpdateWrapper<PayrollBatch> wrapper = new UpdateWrapper<PayrollBatch>()
+                    .eq("payment_batch_no", paymentBatch.getBatchNo())
+                    .in("status", PayrollBatchStatus.PAY_PROCESSING.getCode(), PayrollBatchStatus.PAY_FAILED.getCode());
             if (paymentBatch.getStatus() == BatchStatus.COMPLETED) {
-                wrapper.set(PayrollBatch::getStatus, "paid");
+                wrapper.set("status",
+                        partialSuccess ? PayrollBatchStatus.PAY_FAILED.getCode() : PayrollBatchStatus.PAID.getCode());
             } else if (paymentBatch.getStatus() == BatchStatus.FAILED) {
-                wrapper.set(PayrollBatch::getStatus, "pay_failed");
+                wrapper.set("status", PayrollBatchStatus.PAY_FAILED.getCode());
             } else {
                 return;
             }
@@ -406,11 +418,47 @@ public class AlipayService {
         }
     }
 
+    private void applyTerminalBatchResult(PaymentBatch batch, List<PaymentRecord> allRecords) {
+        if (allRecords == null || allRecords.isEmpty()) {
+            applyTerminalBatchResult(batch, 0, 0);
+            batch.setStatus(BatchStatus.FAILED);
+            batch.setPaymentStatus(PaymentBatchProcessStatus.FAILED);
+            return;
+        }
+        int successCount = 0;
+        int failedCount = 0;
+        for (PaymentRecord record : allRecords) {
+            PaymentStatus status = record.getStatus();
+            if (status == PaymentStatus.SUCCESS) {
+                successCount++;
+            } else if (status == PaymentStatus.FAILED || status == PaymentStatus.CANCELLED) {
+                failedCount++;
+            }
+        }
+        applyTerminalBatchResult(batch, successCount, failedCount);
+    }
+
+    private void applyTerminalBatchResult(PaymentBatch batch, int successCount, int failedCount) {
+        batch.setSuccessCount(successCount);
+        batch.setFailedCount(failedCount);
+        batch.setProcessEndTime(LocalDateTime.now());
+        if (failedCount == 0 && successCount > 0) {
+            batch.setStatus(BatchStatus.COMPLETED);
+            batch.setPaymentStatus(PaymentBatchProcessStatus.SUCCESS);
+        } else if (successCount == 0) {
+            batch.setStatus(BatchStatus.FAILED);
+            batch.setPaymentStatus(PaymentBatchProcessStatus.FAILED);
+        } else {
+            batch.setStatus(BatchStatus.COMPLETED);
+            batch.setPaymentStatus(PaymentBatchProcessStatus.PARTIAL_SUCCESS);
+        }
+    }
+
     /**
      * 查询转账状态
      */
     public PaymentStatus queryTransferStatus(String outBizNo) throws Exception {
-        log.info("查询转账状态: outBizNo={}", outBizNo);
+        log.info("查询转账状态: outBizNo={}", maskOrderNo(outBizNo));
 
         try {
             // 创建支付宝客户端
@@ -429,7 +477,7 @@ public class AlipayService {
             // 如果配置了接口内容加密，开启请求加密
             if (isEncryptEnabled()) {
                 request.setNeedEncrypt(true);
-                log.debug("查询转账状态请求已开启AES内容加密: outBizNo={}", outBizNo);
+                log.debug("查询转账状态请求已开启AES内容加密: outBizNo={}", maskOrderNo(outBizNo));
             }
 
             // 调用支付宝查询API
@@ -437,7 +485,7 @@ public class AlipayService {
 
             if (response.isSuccess()) {
                 String status = response.getStatus();
-                log.info("查询转账状态成功: outBizNo={}, status={}", outBizNo, status);
+                log.info("查询转账状态成功: outBizNo={}, status={}", maskOrderNo(outBizNo), status);
 
                 // 映射支付宝状态到系统状态
                 switch (status) {
@@ -456,12 +504,17 @@ public class AlipayService {
                 }
             } else {
                 log.error("查询转账状态失败: outBizNo={}, code={}, msg={}",
-                        outBizNo, response.getCode(), response.getMsg());
+                        maskOrderNo(outBizNo), response.getCode(), response.getMsg());
                 throw new AlipayApiException(response.getCode(), response.getMsg());
             }
 
         } catch (Exception e) {
-            log.error("查询转账状态异常: outBizNo={}", outBizNo, e);
+            if (isLocalAlipayConfigurationError(e)) {
+                log.warn("查询转账状态失败: outBizNo={}, msg={}",
+                        maskOrderNo(outBizNo), normalizeFailureMessage(e.getMessage()));
+            } else {
+                log.error("查询转账状态异常: outBizNo={}", maskOrderNo(outBizNo), e);
+            }
             throw e;
         }
     }
@@ -472,24 +525,27 @@ public class AlipayService {
     @Transactional(rollbackFor = Exception.class)
     public void handleNotification(String outTradeNo, String tradeNo, String tradeStatus) {
         log.info("处理支付宝通知: outTradeNo={}, tradeNo={}, status={}",
-                outTradeNo, tradeNo, tradeStatus);
+                PaymentCallbackLogSanitizer.sanitizeField("out_trade_no", outTradeNo),
+                PaymentCallbackLogSanitizer.sanitizeField("trade_no", tradeNo),
+                tradeStatus);
 
         PaymentRecord record = paymentRecordService.getByProviderOrderNo("alipay", outTradeNo);
         if (record == null) {
             record = paymentRecordService.getByAlipayOrderNo(outTradeNo);
         }
         if (record == null) {
-            log.warn("未找到对应支付记录: outTradeNo={}", outTradeNo);
-            return;
+            log.warn("未找到对应支付记录: outTradeNo={}",
+                    PaymentCallbackLogSanitizer.sanitizeField("out_trade_no", outTradeNo));
+            throw new IllegalStateException("支付宝回调未匹配到支付记录");
         }
 
         PaymentStatus newStatus;
         switch (tradeStatus) {
             case "TRADE_SUCCESS":
+            case "TRADE_FINISHED":
                 newStatus = PaymentStatus.SUCCESS;
                 break;
             case "TRADE_CLOSED":
-            case "TRADE_FINISHED":
                 newStatus = PaymentStatus.FAILED;
                 break;
             default:
@@ -498,22 +554,55 @@ public class AlipayService {
         }
 
         try {
+            PaymentStatus previousStatus = record.getStatus();
             // 更新支付记录
-            LambdaUpdateWrapper<PaymentRecord> updateWrapper = new LambdaUpdateWrapper<>();
-            updateWrapper.eq(PaymentRecord::getId, record.getId())
-                        .set(PaymentRecord::getStatus, newStatus)
-                        .set(PaymentRecord::getProviderCode, "alipay")
-                        .set(PaymentRecord::getProviderOrderNo, outTradeNo)
-                        .set(PaymentRecord::getProviderTradeNo, tradeNo)
-                        .set(PaymentRecord::getAlipayTradeNo, tradeNo)
-                        .set(PaymentRecord::getNotificationTime, LocalDateTime.now());
+            UpdateWrapper<PaymentRecord> updateWrapper = new UpdateWrapper<PaymentRecord>()
+                    .eq("id", record.getId())
+                    .set("status", newStatus.getCode())
+                    .set("provider_code", "alipay")
+                    .set("provider_order_no", outTradeNo)
+                    .set("provider_trade_no", tradeNo)
+                    .set("alipay_trade_no", tradeNo);
+            if (newStatus == PaymentStatus.SUCCESS) {
+                updateWrapper.set("payment_time", LocalDateTime.now())
+                        .set("error_code", null)
+                        .set("error_msg", null);
+            } else if (newStatus == PaymentStatus.FAILED) {
+                updateWrapper.set("error_code", "ALIPAY_TRADE_CLOSED")
+                        .set("error_msg", "支付宝回调确认支付失败");
+            }
+            PaymentRecordStatusTransitions.applyAllowedStatusGuard(updateWrapper, newStatus);
 
-            paymentRecordService.update(updateWrapper);
+            boolean updated = paymentRecordService.update(updateWrapper);
+            if (!updated) {
+                log.warn("支付宝通知未更新支付记录，可能为迟到回调或状态已终态: recordId={}, currentStatus={}, targetStatus={}",
+                        record.getId(), record.getStatus(), newStatus);
+                return;
+            }
 
+            if (newStatus == PaymentStatus.SUCCESS && previousStatus != PaymentStatus.SUCCESS) {
+                record.setStatus(PaymentStatus.SUCCESS);
+                record.setPaymentTime(LocalDateTime.now());
+                record.setProviderOrderNo(outTradeNo);
+                record.setProviderTradeNo(tradeNo);
+                safeNotifyPaymentSuccess(record);
+            } else if (newStatus == PaymentStatus.FAILED
+                    && previousStatus != PaymentStatus.FAILED
+                    && previousStatus != PaymentStatus.CANCELLED) {
+                record.setStatus(PaymentStatus.FAILED);
+                record.setProviderOrderNo(outTradeNo);
+                record.setProviderTradeNo(tradeNo);
+                record.setErrorMsg("支付宝回调确认支付失败");
+                safeNotifyPaymentFailed(record);
+            }
+
+            refreshBatchStatusAfterNotification(record);
             log.info("支付状态更新完成: recordId={}, status={}", record.getId(), newStatus);
 
         } catch (Exception e) {
-            log.error("支付通知处理异常: outTradeNo={}, tradeNo={}", outTradeNo, tradeNo, e);
+            log.error("支付通知处理异常: outTradeNo={}, tradeNo={}",
+                    PaymentCallbackLogSanitizer.sanitizeField("out_trade_no", outTradeNo),
+                    PaymentCallbackLogSanitizer.sanitizeField("trade_no", tradeNo), e);
 
             // 确保事务回滚
             if (TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -522,6 +611,81 @@ public class AlipayService {
 
             throw new RuntimeException("支付通知处理失败", e);
         }
+    }
+
+    private void refreshBatchStatusAfterNotification(PaymentRecord record) {
+        if (record == null || !StringUtils.hasText(record.getBatchNo())) {
+            return;
+        }
+        PaymentBatch batch = paymentBatchService.getByBatchNo(record.getBatchNo());
+        if (batch == null) {
+            return;
+        }
+        BatchStatus previousStatus = batch.getStatus();
+
+        List<PaymentRecord> allRecords = paymentRecordService.getByBatchNo(record.getBatchNo(), null);
+        int successCount = 0;
+        int failedCount = 0;
+        int processingCount = 0;
+        for (PaymentRecord batchRecord : allRecords) {
+            PaymentStatus status = batchRecord.getStatus();
+            if (status == PaymentStatus.SUCCESS) {
+                successCount++;
+            } else if (status == PaymentStatus.FAILED || status == PaymentStatus.CANCELLED) {
+                failedCount++;
+            } else {
+                processingCount++;
+            }
+        }
+
+        BatchStatus targetStatus;
+        PaymentBatchProcessStatus targetPaymentStatus;
+        LocalDateTime targetProcessEndTime;
+        if (processingCount > 0) {
+            targetStatus = BatchStatus.PROCESSING;
+            targetPaymentStatus = PaymentBatchProcessStatus.PROCESSING;
+            targetProcessEndTime = null;
+        } else if (failedCount == 0 && successCount > 0) {
+            targetStatus = BatchStatus.COMPLETED;
+            targetPaymentStatus = PaymentBatchProcessStatus.SUCCESS;
+            targetProcessEndTime = LocalDateTime.now();
+        } else if (successCount == 0) {
+            targetStatus = BatchStatus.FAILED;
+            targetPaymentStatus = PaymentBatchProcessStatus.FAILED;
+            targetProcessEndTime = LocalDateTime.now();
+        } else {
+            targetStatus = BatchStatus.COMPLETED;
+            targetPaymentStatus = PaymentBatchProcessStatus.PARTIAL_SUCCESS;
+            targetProcessEndTime = LocalDateTime.now();
+        }
+
+        if (isTerminalBatchStatus(previousStatus) && !isTerminalBatchStatus(targetStatus)) {
+            log.warn("忽略支付宝回调导致的支付批次终态回退: batchNo={}, previousStatus={}, targetStatus={}",
+                    batch.getBatchNo(), previousStatus, targetStatus);
+            return;
+        }
+
+        batch.setSuccessCount(successCount);
+        batch.setFailedCount(failedCount);
+        batch.setStatus(targetStatus);
+        batch.setPaymentStatus(targetPaymentStatus);
+        batch.setProcessEndTime(targetProcessEndTime);
+
+        paymentBatchService.updateTerminalState(batch);
+        if (batch.getStatus() == BatchStatus.COMPLETED || batch.getStatus() == BatchStatus.FAILED) {
+            if (previousStatus != batch.getStatus()) {
+                try {
+                    notificationService.sendBatchCompleteNotification(batch);
+                } catch (Exception ex) {
+                    log.warn("支付宝回调后的批次完成通知发送失败: batchNo={}, msg={}",
+                            batch.getBatchNo(), ex.getMessage());
+                }
+            }
+        }
+    }
+
+    private boolean isTerminalBatchStatus(BatchStatus status) {
+        return status == BatchStatus.COMPLETED || status == BatchStatus.FAILED;
     }
 
     /**
@@ -561,36 +725,80 @@ public class AlipayService {
     /**
      * 更新支付记录状态
      */
-    private void updatePaymentStatus(Long recordId, PaymentStatus status, String outBizNo,
-                                   String tradeNo, String errorCode, String errorMsg) {
-        LambdaUpdateWrapper<PaymentRecord> updateWrapper = new LambdaUpdateWrapper<>();
-        updateWrapper.eq(PaymentRecord::getId, recordId)
-                    .set(PaymentRecord::getStatus, status)
-                    .set(PaymentRecord::getProviderCode, "alipay")
-                    .set(PaymentRecord::getProviderOrderNo, outBizNo)
-                    .set(PaymentRecord::getAlipayOrderNo, outBizNo);
+    private boolean updatePaymentStatus(Long recordId, PaymentStatus status, String outBizNo,
+                                        String tradeNo, String errorCode, String errorMsg) {
+        UpdateWrapper<PaymentRecord> updateWrapper = new UpdateWrapper<PaymentRecord>()
+                .eq("id", recordId)
+                .set("status", status.getCode())
+                .set("provider_code", "alipay")
+                .set("provider_order_no", outBizNo)
+                .set("alipay_order_no", outBizNo);
 
         if (tradeNo != null) {
-            updateWrapper.set(PaymentRecord::getProviderTradeNo, tradeNo);
-            updateWrapper.set(PaymentRecord::getAlipayTradeNo, tradeNo);
+            updateWrapper.set("provider_trade_no", tradeNo);
+            updateWrapper.set("alipay_trade_no", tradeNo);
         }
         String safeErrorCode = trimToLength(errorCode, ERROR_CODE_MAX_LENGTH);
         String safeErrorMsg = trimToLength(errorMsg, ERROR_MSG_MAX_LENGTH);
         if (safeErrorCode != null) {
-            updateWrapper.set(PaymentRecord::getErrorCode, safeErrorCode);
+            updateWrapper.set("error_code", safeErrorCode);
         } else if (status != PaymentStatus.FAILED) {
-            updateWrapper.set(PaymentRecord::getErrorCode, null);
+            updateWrapper.set("error_code", null);
         }
         if (safeErrorMsg != null) {
-            updateWrapper.set(PaymentRecord::getErrorMsg, safeErrorMsg);
+            updateWrapper.set("error_msg", safeErrorMsg);
         } else if (status != PaymentStatus.FAILED) {
-            updateWrapper.set(PaymentRecord::getErrorMsg, null);
+            updateWrapper.set("error_msg", null);
         }
         if (status == PaymentStatus.SUCCESS) {
-            updateWrapper.set(PaymentRecord::getPaymentTime, LocalDateTime.now());
+            updateWrapper.set("payment_time", LocalDateTime.now());
         }
 
-        paymentRecordService.update(updateWrapper);
+        PaymentRecordStatusTransitions.applyAllowedStatusGuard(updateWrapper, status);
+        return paymentRecordService.update(updateWrapper);
+    }
+
+    private void safeNotifyPaymentSuccess(PaymentRecord record) {
+        if (record == null || record.getId() == null) {
+            return;
+        }
+        boolean claimed = paymentRecordService.update(new UpdateWrapper<PaymentRecord>()
+                .eq("id", record.getId())
+                .eq("status", PaymentStatus.SUCCESS.getCode())
+                .isNull("notification_time")
+                .set("notification_time", LocalDateTime.now()));
+        if (!claimed) {
+            return;
+        }
+        try {
+            record.setStatus(PaymentStatus.SUCCESS);
+            if (record.getPaymentTime() == null) {
+                record.setPaymentTime(LocalDateTime.now());
+            }
+            notificationService.sendPaymentSuccessNotification(record);
+        } catch (Exception notifyEx) {
+            log.warn("支付宝转账成功通知发送失败: recordId={}, msg={}", record.getId(), notifyEx.getMessage());
+        }
+    }
+
+    private void safeNotifyPaymentFailed(PaymentRecord record) {
+        if (record == null || record.getId() == null) {
+            return;
+        }
+        boolean claimed = paymentRecordService.update(new UpdateWrapper<PaymentRecord>()
+                .eq("id", record.getId())
+                .eq("status", PaymentStatus.FAILED.getCode())
+                .isNull("notification_time")
+                .set("notification_time", LocalDateTime.now()));
+        if (!claimed) {
+            return;
+        }
+        try {
+            record.setStatus(PaymentStatus.FAILED);
+            notificationService.sendPaymentFailedNotification(record);
+        } catch (Exception notifyEx) {
+            log.warn("支付宝转账失败通知发送失败: recordId={}, msg={}", record.getId(), notifyEx.getMessage());
+        }
     }
 
     private String trimToLength(String value, int maxLength) {
@@ -618,7 +826,8 @@ public class AlipayService {
         String message = rawMessage.trim();
         if (message.contains("RSA2签名遭遇异常")
                 || message.contains("InvalidKeyException")
-                || message.contains("privateKeySize")) {
+                || message.contains("privateKeySize")
+                || message.contains("支付宝应用私钥格式错误")) {
             return "支付宝签名失败，请检查应用私钥格式（PKCS8）";
         }
         if (message.contains("支付宝配置不完整")) {
@@ -655,6 +864,9 @@ public class AlipayService {
      */
     public boolean verifyNotification(java.util.Map<String, String> params) {
         try {
+            if (params == null || params.isEmpty()) {
+                return false;
+            }
             // 获取支付宝配置
             com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto config = integrationConfigService.getAlipayConfig();
             if (config == null) {
@@ -663,40 +875,43 @@ public class AlipayService {
             }
 
             boolean useCertMode = "cert".equalsIgnoreCase(config.getCertMode());
-            String publicKey;
+            String charset = resolveAlipayCallbackCharset(params, config);
+            String signType = resolveAlipayCallbackSignType(params, config);
+            Map<String, String> paramsForVerify = new LinkedHashMap<>(params);
 
+            boolean verified;
             if (useCertMode) {
-                // 证书模式：读取支付宝公钥证书内容
                 if (!StringUtils.hasText(config.getAlipayCertPath())) {
                     log.error("证书模式需要配置支付宝公钥证书路径");
                     return false;
                 }
-                try {
-                    publicKey = readCertContent(config.getAlipayCertPath());
-                    log.debug("使用证书模式验签: certPath={}", config.getAlipayCertPath());
-                } catch (java.io.IOException e) {
-                    log.error("读取支付宝公钥证书失败: {}", config.getAlipayCertPath(), e);
-                    return false;
-                }
+                verified = AlipaySignature.rsaCertCheckV1(
+                        paramsForVerify,
+                        config.getAlipayCertPath(),
+                        charset,
+                        signType
+                );
+                log.debug("使用证书模式验签: certPath={}", config.getAlipayCertPath());
             } else {
                 // 公钥模式：使用配置的公钥
                 if (!StringUtils.hasText(config.getPublicKey())) {
                     log.error("公钥模式需要配置支付宝公钥");
                     return false;
                 }
-                publicKey = config.getPublicKey();
+                verified = AlipaySignature.rsaCheckV1(
+                    paramsForVerify,
+                    config.getPublicKey(),
+                    charset,
+                    signType
+                );
                 log.debug("使用公钥模式验签");
             }
 
-            // 使用支付宝SDK验证签名
-            boolean verified = AlipaySignature.rsaCheckV1(
-                params,
-                publicKey,
-                "UTF-8",
-                "RSA2"
-            );
-
             if (verified) {
+                if (!matchesCallbackAppId(params, config)) {
+                    log.warn("支付宝通知应用ID不匹配，拒绝处理");
+                    return false;
+                }
                 log.debug("支付宝通知签名验证成功");
             } else {
                 log.warn("支付宝通知签名验证失败");
@@ -708,6 +923,44 @@ public class AlipayService {
             log.error("支付宝签名验证异常", e);
             return false;
         }
+    }
+
+    private boolean matchesCallbackAppId(java.util.Map<String, String> params,
+                                         com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto config) {
+        String callbackAppId = params != null ? params.get("app_id") : null;
+        if (!StringUtils.hasText(callbackAppId)) {
+            return true;
+        }
+        if (config == null || !StringUtils.hasText(config.getAppId())) {
+            log.warn("支付宝通知包含app_id但系统未配置应用ID，拒绝处理: callbackAppId={}",
+                    PaymentCallbackLogSanitizer.sanitizeField("app_id", callbackAppId));
+            return false;
+        }
+        boolean matched = config.getAppId().trim().equals(callbackAppId.trim());
+        if (!matched) {
+            log.warn("支付宝通知app_id与系统配置不匹配: callbackAppId={}, configuredAppId={}",
+                    PaymentCallbackLogSanitizer.sanitizeField("app_id", callbackAppId),
+                    PaymentCallbackLogSanitizer.sanitizeField("app_id", config.getAppId()));
+        }
+        return matched;
+    }
+
+    private String resolveAlipayCallbackCharset(java.util.Map<String, String> params,
+                                                com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto config) {
+        String charset = params != null ? params.get("charset") : null;
+        if (!StringUtils.hasText(charset) && config != null) {
+            charset = config.getCharset();
+        }
+        return StringUtils.hasText(charset) ? charset.trim() : "UTF-8";
+    }
+
+    private String resolveAlipayCallbackSignType(java.util.Map<String, String> params,
+                                                 com.yiyundao.compensation.interfaces.dto.config.AlipayConfigDto config) {
+        String signType = params != null ? params.get("sign_type") : null;
+        if (!StringUtils.hasText(signType) && config != null) {
+            signType = config.getSignType();
+        }
+        return StringUtils.hasText(signType) ? signType.trim() : "RSA2";
     }
 
     /**
@@ -757,21 +1010,6 @@ public class AlipayService {
             log.error("解密支付宝通知内容异常", e);
             return null;
         }
-    }
-
-    /**
-     * 读取证书文件内容
-     *
-     * @param certPath 证书文件路径
-     * @return 证书内容字符串
-     * @throws java.io.IOException 读取失败时抛出
-     */
-    private String readCertContent(String certPath) throws java.io.IOException {
-        java.nio.file.Path path = java.nio.file.Paths.get(certPath);
-        if (!java.nio.file.Files.exists(path)) {
-            throw new java.io.IOException("证书文件不存在: " + certPath);
-        }
-        return new String(java.nio.file.Files.readAllBytes(path), java.nio.charset.StandardCharsets.UTF_8);
     }
 
     /**
@@ -856,19 +1094,31 @@ public class AlipayService {
             }
 
             // 检查必需配置项
-            if (config.getAppId() == null || config.getAppId().trim().isEmpty()) {
+            if (!StringUtils.hasText(config.getAppId())) {
                 log.warn("支付宝应用ID未配置");
                 return false;
             }
 
-            if (config.getPrivateKey() == null || config.getPrivateKey().trim().isEmpty()) {
-                log.warn("支付宝应用私钥未配置");
+            try {
+                AlipayKeyFormatValidator.normalizePkcs8PrivateKey(config.getPrivateKey());
+            } catch (IllegalStateException ex) {
+                log.warn(ex.getMessage());
                 return false;
             }
 
-            if (config.getPublicKey() == null || config.getPublicKey().trim().isEmpty()) {
-                log.warn("支付宝平台公钥未配置");
-                return false;
+            boolean useCertMode = "cert".equalsIgnoreCase(config.getCertMode());
+            if (useCertMode) {
+                if (!StringUtils.hasText(config.getAppCertPath())
+                        || !StringUtils.hasText(config.getAlipayCertPath())
+                        || !StringUtils.hasText(config.getAlipayRootCertPath())) {
+                    log.warn("支付宝证书模式证书路径未配置完整");
+                    return false;
+                }
+            } else {
+                if (!StringUtils.hasText(config.getPublicKey())) {
+                    log.warn("支付宝平台公钥未配置");
+                    return false;
+                }
             }
 
             // 调用支付宝API验证连接（使用查询接口测试）
@@ -911,5 +1161,25 @@ public class AlipayService {
             log.error("支付宝连接检查异常", e);
             return false;
         }
+    }
+
+    private boolean isLocalAlipayConfigurationError(Throwable throwable) {
+        Throwable current = throwable;
+        while (current != null) {
+            String message = current.getMessage();
+            if (StringUtils.hasText(message)
+                    && (message.contains("RSA2签名遭遇异常")
+                    || message.contains("InvalidKeyException")
+                    || message.contains("privateKeySize")
+                    || message.contains("支付宝配置不完整")
+                    || message.contains("支付宝应用私钥格式错误")
+                    || message.contains("支付宝集成未启用")
+                    || message.contains("公钥模式需要配置")
+                    || message.contains("证书模式需要配置"))) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

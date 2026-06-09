@@ -1,6 +1,9 @@
 package com.yiyundao.compensation.security;
 
+import com.yiyundao.compensation.enums.UserStatus;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
+import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.modules.user.service.SysUserService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -37,6 +40,22 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtTokenProvider tokenProvider;
     private final com.yiyundao.compensation.service.AuthTokenService authTokenService;
     private final UserRoleService userRoleService;
+    private final SysUserService sysUserService;
+
+    @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        String uri = getApplicationPath(request);
+        return isPathOrChild(uri, "/openapi")
+                || isPathOrChild(uri, "/v1/payroll")
+                || isPathOrChild(uri, "/v1/payslips")
+                || uri.equals("/v1/ping")
+                || uri.equals("/v1/oauth/token")
+                || uri.equals("/api/v1/oauth/token");
+    }
+
+    private boolean isPathOrChild(String uri, String path) {
+        return uri.equals(path) || uri.startsWith(path + "/");
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -47,10 +66,19 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         log.trace("JwtAuthenticationFilter: uri={}", request.getRequestURI());
 
-        if (StringUtils.hasText(jwt) && tokenProvider.validateToken(jwt) && !authTokenService.isBlacklisted(jwt)) {
+        if (StringUtils.hasText(jwt)
+                && isValid(jwt)
+                && !tokenProvider.isRefreshToken(jwt)
+                && !authTokenService.isBlacklisted(jwt)) {
             String username = tokenProvider.getUsernameFromToken(jwt);
 
             if (username != null) {
+                SysUser user = sysUserService.findByUsername(username);
+                if (user == null || !UserStatus.ACTIVE.equals(user.getStatus())) {
+                    log.debug("JwtAuthenticationFilter: skip inactive or missing user={}", username);
+                    filterChain.doFilter(request, response);
+                    return;
+                }
                 // 从数据库动态获取最新角色权限（通过 UserRoleService，支持 Redis 缓存）
                 Set<String> roleCodes = userRoleService.getUserRoleCodesByUsername(username);
                 List<SimpleGrantedAuthority> grantedAuthorities;
@@ -83,6 +111,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         filterChain.doFilter(request, response);
     }
 
+    private boolean isValid(String jwt) {
+        try {
+            return tokenProvider.validateToken(jwt);
+        } catch (Exception e) {
+            log.debug("JWT validation failed: {}", e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
     /**
      * 从请求头提取 JWT Token
      */
@@ -92,5 +129,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             return bearerToken.substring(7);
         }
         return null;
+    }
+
+    private String getApplicationPath(HttpServletRequest request) {
+        String uri = request.getRequestURI();
+        String contextPath = request.getContextPath();
+        if (StringUtils.hasText(contextPath) && uri.startsWith(contextPath + "/")) {
+            return uri.substring(contextPath.length());
+        }
+        return uri;
     }
 }

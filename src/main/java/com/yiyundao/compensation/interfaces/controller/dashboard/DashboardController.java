@@ -3,6 +3,7 @@ package com.yiyundao.compensation.interfaces.controller.dashboard;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.dto.dashboard.*;
 import com.yiyundao.compensation.modules.dashboard.service.DashboardService;
+import com.yiyundao.compensation.security.SecurityAnnotations;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -13,6 +14,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/dashboard")
 @RequiredArgsConstructor
+@SecurityAnnotations.IsFinanceOrHrOrAdmin
 public class DashboardController {
 
     private final DashboardService dashboardService;

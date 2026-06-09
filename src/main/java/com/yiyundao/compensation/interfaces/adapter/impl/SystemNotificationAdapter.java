@@ -22,8 +22,14 @@ public class SystemNotificationAdapter implements NotificationAdapter {
 
     @Override
     public NotificationSendResult sendNotification(NotificationRecord record) {
+        if (record == null) {
+            log.warn("系统通知记录为空，跳过创建");
+            return NotificationSendResult.failure("通知记录不能为空");
+        }
+
         try {
-            log.info("创建系统通知: recordId={}, userId={}", record.getId(), record.getRecipientId());
+            log.info("创建系统通知: recordId={}, userId={}, titleLength={}, contentLength={}",
+                    record.getId(), record.getRecipientId(), length(record.getTitle()), length(record.getContent()));
 
             // 系统通知不需要外部API调用，直接存储到数据库
             // 通知记录本身就是系统通知的存储
@@ -35,7 +41,7 @@ public class SystemNotificationAdapter implements NotificationAdapter {
             return NotificationSendResult.success("SYSTEM", "系统通知创建成功");
 
         } catch (Exception e) {
-            log.error("系统通知创建异常: recordId={}", record.getId(), e);
+            log.error("系统通知创建异常: recordId={}, userId={}", record.getId(), record.getRecipientId(), e);
             return NotificationSendResult.failure("创建异常: " + e.getMessage());
         }
     }
@@ -55,13 +61,17 @@ public class SystemNotificationAdapter implements NotificationAdapter {
         // 2. 更新用户的未读消息计数
         // 3. 触发前端消息提醒
 
-        log.info("系统通知已创建: userId={}, title={}, content={}",
-            record.getRecipientId(), record.getTitle(), record.getContent());
+        log.info("系统通知已创建: recordId={}, userId={}, titleLength={}, contentLength={}",
+                record.getId(), record.getRecipientId(), length(record.getTitle()), length(record.getContent()));
 
         // 如果有WebSocket服务，可以实时推送
         // webSocketService.sendMessageToUser(record.getRecipientId(), record);
 
         // 更新用户未读消息计数
         // userMessageCountService.incrementUnreadCount(record.getRecipientId());
+    }
+
+    private int length(String value) {
+        return value == null ? 0 : value.length();
     }
 }

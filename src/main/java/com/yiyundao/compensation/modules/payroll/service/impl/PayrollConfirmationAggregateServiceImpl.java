@@ -3,7 +3,6 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
-import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.enums.PayrollConfirmationRecordStatus;
 import com.yiyundao.compensation.enums.PayrollConfirmationSheetStatus;
 import com.yiyundao.compensation.enums.PayrollConfirmationStatus;
@@ -238,7 +237,7 @@ public class PayrollConfirmationAggregateServiceImpl
         PayrollConfirmationStatus legacyStatus = PayrollConfirmationStatus.fromCode(line.getConfirmationStatus());
         return switch (legacyStatus) {
             case CONFIRMED, OBJECTED_APPROVED -> PayrollConfirmationRecordStatus.CONFIRMED;
-            case OBJECTED, OBJECTED_REJECTED -> PayrollConfirmationRecordStatus.REJECTED;
+            case OBJECTED -> PayrollConfirmationRecordStatus.REJECTED;
             default -> PayrollConfirmationRecordStatus.PENDING;
         };
     }
@@ -251,12 +250,6 @@ public class PayrollConfirmationAggregateServiceImpl
                                                               List<PayrollLine> lines) {
         if (!requireConfirmation) {
             return PayrollConfirmationSheetStatus.SKIPPED;
-        }
-        if (batch != null && batch.getStatus() == PayrollBatchStatus.CONFIRMED) {
-            return PayrollConfirmationSheetStatus.CONFIRMED;
-        }
-        if (batch != null && batch.getStatus() == PayrollBatchStatus.DISPUTE_PROCESSING) {
-            return PayrollConfirmationSheetStatus.REJECTED;
         }
         if (totalEmployees <= 0) {
             return PayrollConfirmationSheetStatus.PENDING;

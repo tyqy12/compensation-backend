@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.modules.audit.service.impl;
 
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.yiyundao.compensation.common.utils.SecretLogSanitizer;
 import com.yiyundao.compensation.modules.audit.entity.AuditLog;
 import com.yiyundao.compensation.modules.audit.event.AuditLogSavedEvent;
 import com.yiyundao.compensation.infrastructure.dao.AuditLogMapper;
@@ -30,9 +31,9 @@ public class AuditLogServiceImpl extends ServiceImpl<AuditLogMapper, AuditLog> i
         auditLog.setBusinessType(businessType);
         auditLog.setBusinessKey(businessKey);
         auditLog.setUsername(username);
-        auditLog.setRequestParams(requestParams);
-        auditLog.setResponseResult(responseResult);
-        auditLog.setErrorMsg(errorMsg);
+        auditLog.setRequestParams(SecretLogSanitizer.sanitize(requestParams));
+        auditLog.setResponseResult(SecretLogSanitizer.sanitize(responseResult));
+        auditLog.setErrorMsg(SecretLogSanitizer.sanitize(errorMsg));
         auditLog.setExecutionTime(executionTimeMs);
 
         // 保存审计日志

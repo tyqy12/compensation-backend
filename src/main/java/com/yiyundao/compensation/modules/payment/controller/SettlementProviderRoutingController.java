@@ -3,8 +3,10 @@ package com.yiyundao.compensation.modules.payment.controller;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.enums.EmploymentType;
 import com.yiyundao.compensation.modules.payment.dto.EmployeeTypeMappingDto;
+import com.yiyundao.compensation.modules.payment.dto.EmployeeTypeProviderMappingResponse;
 import com.yiyundao.compensation.modules.payment.entity.EmployeeTypeProviderMapping;
 import com.yiyundao.compensation.modules.payment.service.SettlementProviderRoutingService;
+import com.yiyundao.compensation.security.SecurityAnnotations;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +20,7 @@ import java.util.List;
 @Slf4j
 @RestController
 @RequestMapping("/settlement/routing")
+@SecurityAnnotations.IsFinanceOrAdmin
 @RequiredArgsConstructor
 public class SettlementProviderRoutingController {
 
@@ -27,20 +30,20 @@ public class SettlementProviderRoutingController {
      * 创建员工类型映射
      */
     @PostMapping("/mapping")
-    public ApiResponse<EmployeeTypeProviderMapping> createMapping(@Valid @RequestBody EmployeeTypeMappingDto dto) {
+    public ApiResponse<EmployeeTypeProviderMappingResponse> createMapping(@Valid @RequestBody EmployeeTypeMappingDto dto) {
         EmployeeTypeProviderMapping mapping = routingService.createMapping(
             dto.getEmploymentType(),
             dto.getProviderCode(),
             dto.getPriority()
         );
-        return ApiResponse.success(mapping);
+        return ApiResponse.success(EmployeeTypeProviderMappingResponse.from(mapping));
     }
 
     /**
      * 更新员工类型映射
      */
     @PutMapping("/mapping/{id}")
-    public ApiResponse<EmployeeTypeProviderMapping> updateMapping(
+    public ApiResponse<EmployeeTypeProviderMappingResponse> updateMapping(
             @PathVariable Long id,
             @Valid @RequestBody EmployeeTypeMappingDto dto) {
         EmployeeTypeProviderMapping mapping = routingService.updateMapping(
@@ -48,7 +51,7 @@ public class SettlementProviderRoutingController {
             dto.getProviderCode(),
             dto.getPriority()
         );
-        return ApiResponse.success(mapping);
+        return ApiResponse.success(EmployeeTypeProviderMappingResponse.from(mapping));
     }
 
     /**
@@ -64,19 +67,19 @@ public class SettlementProviderRoutingController {
      * 获取指定员工类型的所有映射
      */
     @GetMapping("/mapping/type/{employmentType}")
-    public ApiResponse<List<EmployeeTypeProviderMapping>> getMappingsByType(
+    public ApiResponse<List<EmployeeTypeProviderMappingResponse>> getMappingsByType(
             @PathVariable EmploymentType employmentType) {
         List<EmployeeTypeProviderMapping> mappings = routingService.getMappingsByEmploymentType(employmentType);
-        return ApiResponse.success(mappings);
+        return ApiResponse.success(toResponseList(mappings));
     }
 
     /**
      * 获取所有映射
      */
     @GetMapping("/mapping")
-    public ApiResponse<List<EmployeeTypeProviderMapping>> getAllMappings() {
+    public ApiResponse<List<EmployeeTypeProviderMappingResponse>> getAllMappings() {
         List<EmployeeTypeProviderMapping> mappings = routingService.getAllMappings();
-        return ApiResponse.success(mappings);
+        return ApiResponse.success(toResponseList(mappings));
     }
 
     /**
@@ -88,5 +91,12 @@ public class SettlementProviderRoutingController {
             @RequestParam Boolean enabled) {
         routingService.toggleMappingStatus(id, enabled);
         return ApiResponse.success(null);
+    }
+
+    private List<EmployeeTypeProviderMappingResponse> toResponseList(List<EmployeeTypeProviderMapping> mappings) {
+        if (mappings == null || mappings.isEmpty()) {
+            return List.of();
+        }
+        return mappings.stream().map(EmployeeTypeProviderMappingResponse::from).toList();
     }
 }

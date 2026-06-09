@@ -1,8 +1,12 @@
 package com.yiyundao.compensation.modules.user.service;
 
+import com.yiyundao.compensation.modules.user.dto.UserPlatformBindingResult;
+
 public interface UserBindingService {
 
-    void bindPlatform(Long userId, String provider, String subjectId);
+    UserPlatformBindingResult bindPlatform(Long userId, String provider, String subjectId);
+
+    void executeApprovedPlatformLink(Long workflowId, Long userId, Long employeeId, String provider, String subjectId);
 
     void bindEmployee(Long userId, Long employeeId);
 

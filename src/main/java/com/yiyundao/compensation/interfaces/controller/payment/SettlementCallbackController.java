@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.modules.payment.provider.SettlementCallbackResult;
 import com.yiyundao.compensation.modules.payment.service.SettlementService;
+import com.yiyundao.compensation.modules.payment.support.PaymentCallbackLogSanitizer;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -35,16 +36,17 @@ public class SettlementCallbackController {
                                                  @RequestBody(required = false) String body) {
         Map<String, String> allParams = new HashMap<>(params);
         allParams.putAll(parseBody(body));
-        log.info("收到渠道回调: provider={}, params={}", providerCode, allParams);
+        log.info("收到渠道回调: provider={}, params={}", providerCode, PaymentCallbackLogSanitizer.sanitize(allParams));
 
         try {
             SettlementCallbackResult result = settlementService.handleCallback(providerCode, allParams);
             if (result.isSuccess()) {
                 return ResponseEntity.ok("SUCCESS");
             }
-            return ResponseEntity.internalServerError().body("FAIL: " + result.getErrorMsg());
+            log.warn("渠道回调处理失败: provider={}", providerCode);
+            return ResponseEntity.internalServerError().body("FAIL");
         } catch (Exception e) {
-            log.error("回调处理异常: provider={}", providerCode, e);
+            log.error("回调处理异常: provider={}, errorType={}", providerCode, e.getClass().getSimpleName());
             return ResponseEntity.internalServerError().body("ERROR");
         }
     }
@@ -80,4 +82,3 @@ public class SettlementCallbackController {
         }
     }
 }
-

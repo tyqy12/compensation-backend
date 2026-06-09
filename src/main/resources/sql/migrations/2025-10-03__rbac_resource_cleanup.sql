@@ -154,7 +154,19 @@ VALUES
 ('API','api.employee.offline-list','员工管理-离线列表','/api/employee/offline',NULL,NULL,@menu_employees,160,JSON_OBJECT('method','GET'),'enabled',@now,@now),
 ('API','api.employee.batch-import','员工管理-批量导入','/api/employee/batch-import',NULL,NULL,@menu_employees,170,JSON_OBJECT('method','POST'),'enabled',@now,@now),
 ('API','api.employee.decrypt-id-card','员工管理-身份证解密','/api/employee/{id}/id-card',NULL,NULL,@menu_employees,180,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now),
-('API','api.employee.decrypt-bank','员工管理-银行卡解密','/api/employee/{id}/bank-account',NULL,NULL,@menu_employees,190,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now)
+('API','api.employee.decrypt-bank','员工管理-银行卡解密','/api/employee/{id}/bank-account',NULL,NULL,@menu_employees,190,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now),
+('API','api.employees.list','员工管理-列表查询(复数路径)','/api/employees',NULL,NULL,@menu_employees,200,JSON_OBJECT('method','GET'),'enabled',@now,@now),
+('API','api.employees.detail','员工管理-详情(复数路径)','/api/employees/{id}',NULL,NULL,@menu_employees,201,JSON_OBJECT('method','GET'),'enabled',@now,@now),
+('API','api.employees.create','员工管理-创建(复数路径)','/api/employees',NULL,NULL,@menu_employees,202,JSON_OBJECT('method','POST'),'enabled',@now,@now),
+('API','api.employees.update','员工管理-更新(复数路径)','/api/employees/{id}',NULL,NULL,@menu_employees,203,JSON_OBJECT('method','PUT'),'enabled',@now,@now),
+('API','api.employees.status','员工管理-状态更新(复数路径)','/api/employees/{id}/status',NULL,NULL,@menu_employees,204,JSON_OBJECT('method','PATCH'),'enabled',@now,@now),
+('API','api.employees.bind-platform','员工管理-绑定平台(复数路径)','/api/employees/{id}/bind-platform',NULL,NULL,@menu_employees,205,JSON_OBJECT('method','POST'),'enabled',@now,@now),
+('API','api.employee.unbind-platform','员工管理-解绑平台','/api/employee/{id}/unbind-platform',NULL,NULL,@menu_employees,206,JSON_OBJECT('method','DELETE','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now),
+('API','api.employees.unbind-platform','员工管理-解绑平台(复数路径)','/api/employees/{id}/unbind-platform',NULL,NULL,@menu_employees,207,JSON_OBJECT('method','DELETE','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now),
+('API','api.employees.offline-list','员工管理-离线列表(复数路径)','/api/employees/offline',NULL,NULL,@menu_employees,208,JSON_OBJECT('method','GET'),'enabled',@now,@now),
+('API','api.employees.batch-import','员工管理-批量导入(复数路径)','/api/employees/batch-import',NULL,NULL,@menu_employees,210,JSON_OBJECT('method','POST'),'enabled',@now,@now),
+('API','api.employees.decrypt-id-card','员工管理-身份证解密(复数路径)','/api/employees/{id}/id-card',NULL,NULL,@menu_employees,214,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now),
+('API','api.employees.decrypt-bank','员工管理-银行卡解密(复数路径)','/api/employees/{id}/bank-account',NULL,NULL,@menu_employees,215,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN')),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
 -- Payment domain APIs
@@ -192,7 +204,8 @@ ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`parent_id`=
 INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
 VALUES
 ('API','api.approval.workflow.approve','审批-通过','/api/approval/workflows/{id}/approve',NULL,NULL,@menu_payroll,90,JSON_OBJECT('method','POST','roles',JSON_ARRAY('ADMIN','FINANCE','MANAGER')),'enabled',@now,@now),
-('API','api.approval.workflow.reject','审批-驳回','/api/approval/workflows/{id}/reject',NULL,NULL,@menu_payroll,91,JSON_OBJECT('method','POST','roles',JSON_ARRAY('ADMIN','FINANCE','MANAGER')),'enabled',@now,@now)
+('API','api.approval.workflow.reject','审批-驳回','/api/approval/workflows/{id}/reject',NULL,NULL,@menu_payroll,91,JSON_OBJECT('method','POST','roles',JSON_ARRAY('ADMIN','FINANCE','MANAGER')),'enabled',@now,@now),
+('API','api.approval.workflow.cancel','审批-撤销','/api/approval/workflows/{id}/cancel',NULL,NULL,@menu_payroll,92,JSON_OBJECT('method','POST','roles',JSON_ARRAY('ADMIN','FINANCE','MANAGER')),'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `name`=VALUES(`name`),`path`=VALUES(`path`),`parent_id`=VALUES(`parent_id`),`order_num`=VALUES(`order_num`),`props_json`=VALUES(`props_json`),`status`='enabled',`update_time`=@now;
 
 -- Confirmation

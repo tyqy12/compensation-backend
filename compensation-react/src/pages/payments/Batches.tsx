@@ -42,6 +42,7 @@ import {
 } from '@ant-design/icons';
 import {
   checkBatchTransfer,
+  fetchPaymentBatches,
   type TransferValidationIssue,
   usePaymentBatchesQuery,
   usePaymentBatchQuery,
@@ -49,6 +50,7 @@ import {
   useStartBatchTransferMutation,
   useRetryFailedRecordsMutation,
   type PaymentBatch,
+  type PaymentBatchListResponse,
   type PaymentBatchQueryParams,
   type PaymentRecord,
   getBatchStatusInfo,
@@ -57,9 +59,11 @@ import {
   formatAmount,
   calculateBatchProgress,
   calculateBatchSuccessRate,
+  isStartablePaymentBatch,
 } from '@services/queries/paymentBatch';
 import dayjs from 'dayjs';
 import { useHasAction } from '@services/queries/rbac';
+import { withActionPrefix } from '@utils/error';
 
 const { Text } = Typography;
 
@@ -109,6 +113,7 @@ const PaymentBatches: React.FC = () => {
     sortBy: searchParams.get('sortBy') || 'submitTime',
     order: (searchParams.get('order') as 'asc' | 'desc') || 'desc',
   }));
+  const [tableResult, setTableResult] = useState<PaymentBatchListResponse | null>(null);
 
   // 选中状态
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -153,16 +158,16 @@ const PaymentBatches: React.FC = () => {
 
   // ==================== 统计数据 ====================
   const summary = useMemo(() => {
-    const list = batchesQuery.data?.list || [];
-    const total = batchesQuery.data?.total || 0;
+    const list = tableResult?.list ?? batchesQuery.data?.list ?? [];
+    const total = tableResult?.total ?? batchesQuery.data?.total ?? list.length;
     const processing = list.filter((b: PaymentBatch) => b.status === 'processing').length;
     const completed = list.filter((b: PaymentBatch) => b.status === 'completed').length;
     const failed = list.filter((b: PaymentBatch) => b.status === 'failed').length;
-    const approved = list.filter((b: PaymentBatch) => b.status === 'approved').length;
+    const readyToStart = list.filter(isStartablePaymentBatch).length;
     const totalAmount = list.reduce((acc: number, b: PaymentBatch) => acc + (b.totalAmount || 0), 0);
     const totalCount = list.reduce((acc: number, b: PaymentBatch) => acc + (b.totalCount || 0), 0);
-    return { total, processing, completed, failed, approved, totalAmount, totalCount };
-  }, [batchesQuery.data]);
+    return { total, processing, completed, failed, readyToStart, totalAmount, totalCount };
+  }, [batchesQuery.data, tableResult]);
 
   const summaryCards = useMemo(
     () => [
@@ -175,7 +180,7 @@ const PaymentBatches: React.FC = () => {
       {
         key: 'approved',
         title: '待启动批次',
-        value: summary.approved,
+        value: summary.readyToStart,
         prefix: <PlayCircleOutlined />,
         valueStyle: { color: '#1677ff' },
       },
@@ -249,8 +254,8 @@ const PaymentBatches: React.FC = () => {
   }, [modal]);
 
   const handleStartTransfer = useCallback(async (batch: PaymentBatch) => {
-    if (batch.status !== 'approved') {
-      message.warning('只能启动已审批的批次');
+    if (!isStartablePaymentBatch(batch)) {
+      message.warning('只能启动已提交或已审批的批次');
       return;
     }
 
@@ -279,19 +284,20 @@ const PaymentBatches: React.FC = () => {
           message.success('批次转账已启动，正在后台处理');
           actionRef.current?.reload();
         } catch (error: any) {
-          message.error(`启动失败：${error.message || '网络错误'}`);
+          message.error(withActionPrefix('启动失败', error));
         }
       },
     });
   }, [startTransferMutation, message, modal, showBlockedValidationModal]);
 
   const handleBatchStart = useCallback(async () => {
-    const selectedBatches = batchesQuery.data?.list?.filter(
-      (b: PaymentBatch) => selectedRowKeys.includes(b.batchNo) && b.status === 'approved',
-    ) || [];
+    const sourceBatches = tableResult?.list ?? batchesQuery.data?.list ?? [];
+    const selectedBatches = sourceBatches.filter(
+      (b: PaymentBatch) => selectedRowKeys.includes(b.batchNo) && isStartablePaymentBatch(b),
+    );
 
     if (selectedBatches.length === 0) {
-      message.warning('请选择已审批的批次');
+      message.warning('请选择已提交或已审批的批次');
       return;
     }
 
@@ -340,11 +346,11 @@ const PaymentBatches: React.FC = () => {
           setSelectedRowKeys([]);
           actionRef.current?.reload();
         } catch (error: any) {
-          message.error(`批量启动失败：${error.message || '网络错误'}`);
+          message.error(withActionPrefix('批量启动失败', error));
         }
       },
     });
-  }, [selectedRowKeys, batchesQuery.data, startTransferMutation, message, modal, showBlockedValidationModal]);
+  }, [selectedRowKeys, tableResult, batchesQuery.data, startTransferMutation, message, modal, showBlockedValidationModal]);
 
   const handleViewDetail = useCallback((batch: PaymentBatch) => {
     setDrawerBatchNo(batch.batchNo);
@@ -372,7 +378,7 @@ const PaymentBatches: React.FC = () => {
           batchDetailQuery.refetch();
           recordsQuery.refetch();
         } catch (error: any) {
-          message.error(`重试失败：${error.message || '网络错误'}`);
+          message.error(withActionPrefix('重试失败', error));
         }
       },
     });
@@ -542,7 +548,7 @@ const PaymentBatches: React.FC = () => {
           },
         ];
 
-        if (record.status === 'approved' && canStart) {
+        if (isStartablePaymentBatch(record) && canStart) {
           items.push({
             key: 'start',
             label: '启动转账',
@@ -749,11 +755,12 @@ const PaymentBatches: React.FC = () => {
           updateUrlParams(newParams);
 
           try {
-            const result = await batchesQuery.refetch();
+            const result = await fetchPaymentBatches(newParams);
+            setTableResult(result);
             return {
-              data: result.data?.list || [],
+              data: result.list,
               success: true,
-              total: result.data?.total || 0,
+              total: result.total || 0,
             };
           } catch {
             return { data: [], success: false, total: 0 };
@@ -780,7 +787,7 @@ const PaymentBatches: React.FC = () => {
                 selectedRowKeys,
                 onChange: setSelectedRowKeys,
                 getCheckboxProps: (record: PaymentBatch) => ({
-                  disabled: record.status !== 'approved' || isLoading,
+                  disabled: !isStartablePaymentBatch(record) || isLoading,
                 }),
               }
             : undefined

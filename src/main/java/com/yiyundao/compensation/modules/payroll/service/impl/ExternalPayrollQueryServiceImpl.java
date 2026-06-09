@@ -5,6 +5,9 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.enums.BatchStatus;
+import com.yiyundao.compensation.enums.PaymentBatchProcessStatus;
+import com.yiyundao.compensation.enums.EmployeeStatus;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.interfaces.dto.openapi.OpenApiPayrollBatchDto;
 import com.yiyundao.compensation.interfaces.dto.openapi.OpenApiPayrollLineDto;
@@ -107,7 +110,7 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
             return null;
         }
         PayrollBatch batch = payrollBatchService.getById(batchId);
-        if (batch == null || !PT_TYPE.equalsIgnoreCase(batch.getType())) {
+        if (!isExternallyVisibleBatch(batch)) {
             return null;
         }
         Map<Long, Long> lineCountMap = loadLineCounts(List.of(batch.getId()));
@@ -121,11 +124,15 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
             return emptyPage(page, size);
         }
         PayrollBatch batch = payrollBatchService.getById(batchId);
-        if (batch == null || !PT_TYPE.equalsIgnoreCase(batch.getType())) {
+        if (!isExternallyVisibleBatch(batch)) {
             return emptyPage(page, size);
         }
 
+        boolean filterByEmployee = StringUtils.hasText(employeeRef);
         Long employeeInternalId = resolveEmployeeId(employeeRef);
+        if (filterByEmployee && employeeInternalId == null) {
+            return emptyPage(page, size);
+        }
         long current = Math.max(page, 1);
         long pageSize = Math.min(Math.max(size, 1), 100);
 
@@ -187,21 +194,33 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
     }
 
     @Override
-    public OpenApiPayslipDto findPayslip(Long payslipId) {
-        if (payslipId == null) {
+    public OpenApiPayslipDto findPayslip(Long payslipId, String employeeRef) {
+        if (payslipId == null || !StringUtils.hasText(employeeRef)) {
+            return null;
+        }
+        Long employeeId = resolveEmployeeId(employeeRef);
+        if (employeeId == null) {
             return null;
         }
         PayrollLine line = payrollLineService.getById(payslipId);
-        if (line == null || !PT_TYPE.equalsIgnoreCase(line.getEmploymentType())) {
+        if (line == null
+                || !employeeId.equals(line.getEmployeeId())
+                || !PT_TYPE.equalsIgnoreCase(line.getEmploymentType())) {
             return null;
         }
         PayrollBatch batch = payrollBatchService.getById(line.getBatchId());
-        if (batch == null || !PT_TYPE.equalsIgnoreCase(batch.getType())) {
+        if (!isExternallyVisibleBatch(batch)) {
             return null;
         }
         Employee employee = employeeService.getById(line.getEmployeeId());
         Map<String, SalaryItem> salaryItemMap = loadSalaryItems(List.of(line));
         return toPayslipDto(line, batch, employee, salaryItemMap);
+    }
+
+    private boolean isExternallyVisibleBatch(PayrollBatch batch) {
+        return batch != null
+                && PT_TYPE.equalsIgnoreCase(batch.getType())
+                && ALLOWED_BATCH_STATUSES.contains(batch.getStatus());
     }
 
     private Page<OpenApiPayrollLineDto> emptyPage(long page, long size) {
@@ -339,13 +358,14 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
         if (paymentBatch == null) {
             return null;
         }
-        if (paymentBatch.getProcessEndTime() != null) {
-            return paymentBatch.getProcessEndTime();
+        boolean paid = paymentBatch.getStatus() == BatchStatus.COMPLETED
+                && paymentBatch.getPaymentStatus() == PaymentBatchProcessStatus.SUCCESS;
+        if (!paid) {
+            return null;
         }
-        if (paymentBatch.getApproveTime() != null) {
-            return paymentBatch.getApproveTime();
-        }
-        return paymentBatch.getUpdateTime();
+        return paymentBatch.getProcessEndTime() != null
+                ? paymentBatch.getProcessEndTime()
+                : paymentBatch.getUpdateTime();
     }
 
     private OpenApiPayrollLineDto toLineDto(PayrollLine line, Employee employee) {
@@ -412,18 +432,138 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
             return null;
         }
         String ref = employeeRef.trim();
-        if (ref.contains(":")) {
-            String[] parts = ref.split(":", 2);
-            String provider = parts[0];
-            String subjectId = parts.length > 1 ? parts[1] : null;
-            if (StringUtils.hasText(provider) && subjectId != null && StringUtils.hasText(subjectId)) {
-                Employee employee = employeeService.getByProviderAndSubjectId(provider.trim(), subjectId.trim());
-                return employee != null ? employee.getId() : null;
+        if (ref.regionMatches(true, 0, "emp:", 0, 4)) {
+            String employeeNo = ref.substring(4).trim();
+            if (!StringUtils.hasText(employeeNo)) {
+                return null;
             }
+            Employee employee = employeeService.getByEmployeeId(employeeNo);
+            return resolveActiveEmployeeId(employee);
         }
-        String normalized = ref.startsWith("emp:") ? ref.substring(4) : ref;
-        Employee employee = employeeService.getByEmployeeId(normalized.trim());
-        return employee != null ? employee.getId() : null;
+        if (ref.contains(":")) {
+            PlatformEmployeeRef platformRef = parsePlatformEmployeeRef(ref);
+            return platformRef != null ? resolvePlatformEmployeeId(platformRef) : null;
+        }
+        Employee employee = employeeService.getByEmployeeId(ref);
+        return resolveActiveEmployeeId(employee);
+    }
+
+    private PlatformEmployeeRef parsePlatformEmployeeRef(String ref) {
+        String[] parts = ref.split(":", 3);
+        if (parts.length < 2) {
+            return null;
+        }
+        String provider = trimToNull(parts[0]);
+        if (parts.length == 2) {
+            String subjectId = trimToNull(parts[1]);
+            if (!StringUtils.hasText(provider) || !StringUtils.hasText(subjectId)) {
+                return null;
+            }
+            return new PlatformEmployeeRef(provider, null, subjectId, false);
+        }
+
+        String tenantKey = trimToNull(parts[1]);
+        String subjectId = trimToNull(parts[2]);
+        if (!StringUtils.hasText(provider)
+                || !StringUtils.hasText(tenantKey)
+                || !StringUtils.hasText(subjectId)) {
+            return null;
+        }
+        return new PlatformEmployeeRef(provider, tenantKey, subjectId, true);
+    }
+
+    private Long resolvePlatformEmployeeId(PlatformEmployeeRef ref) {
+        List<ExternalIdentity> identities = loadActivePlatformIdentities(
+                ref.provider(),
+                ref.tenantKey(),
+                ref.subjectId(),
+                ref.explicitTenant() ? 1 : 2
+        );
+        if (CollectionUtils.isEmpty(identities)) {
+            return null;
+        }
+        if (!ref.explicitTenant() && identities.size() > 1) {
+            List<String> tenants = identities.stream()
+                    .map(ExternalIdentity::getTenantKey)
+                    .filter(StringUtils::hasText)
+                    .distinct()
+                    .toList();
+            log.warn("OpenAPI employeeRef 命中多个租户身份，已拒绝解析: provider={}, tenants={}",
+                    normalizeProvider(ref.provider()), tenants);
+            return null;
+        }
+        return resolveActiveEmployeeId(identities.get(0));
+    }
+
+    private List<ExternalIdentity> loadActivePlatformIdentities(String provider,
+                                                               String tenantKey,
+                                                               String subjectId,
+                                                               int limit) {
+        String normalizedProvider = normalizeProvider(provider);
+        String normalizedTenant = trimToNull(tenantKey);
+        String normalizedSubjectId = trimToNull(subjectId);
+        if (!StringUtils.hasText(normalizedProvider) || !StringUtils.hasText(normalizedSubjectId)) {
+            return Collections.emptyList();
+        }
+
+        int safeLimit = Math.max(1, Math.min(limit, 2));
+        LambdaQueryWrapper<ExternalIdentity> wrapper = new LambdaQueryWrapper<ExternalIdentity>()
+                .select(
+                        ExternalIdentity::getId,
+                        ExternalIdentity::getProvider,
+                        ExternalIdentity::getTenantKey,
+                        ExternalIdentity::getSubjectType,
+                        ExternalIdentity::getSubjectId,
+                        ExternalIdentity::getEmployeeId,
+                        ExternalIdentity::getPrimaryFlag,
+                        ExternalIdentity::getStatus,
+                        ExternalIdentity::getLastSeenAt
+                )
+                .eq(ExternalIdentity::getProvider, normalizedProvider)
+                .eq(StringUtils.hasText(normalizedTenant), ExternalIdentity::getTenantKey, normalizedTenant)
+                .eq(ExternalIdentity::getSubjectType, ExternalIdentityService.DEFAULT_SUBJECT_TYPE)
+                .eq(ExternalIdentity::getSubjectId, normalizedSubjectId)
+                .eq(ExternalIdentity::getStatus, ExternalIdentityService.STATUS_ACTIVE)
+                .orderByDesc(ExternalIdentity::getPrimaryFlag)
+                .orderByDesc(ExternalIdentity::getLastSeenAt)
+                .orderByDesc(ExternalIdentity::getId)
+                .last("limit " + safeLimit);
+        return externalIdentityService.list(wrapper);
+    }
+
+    private Long resolveActiveEmployeeId(ExternalIdentity identity) {
+        if (identity == null || identity.getEmployeeId() == null) {
+            return null;
+        }
+        Employee employee = employeeService.getById(identity.getEmployeeId());
+        return resolveActiveEmployeeId(employee);
+    }
+
+    private Long resolveActiveEmployeeId(Employee employee) {
+        if (employee == null || !EmployeeStatus.ACTIVE.getCode().equals(employee.getStatus())) {
+            return null;
+        }
+        return employee.getId();
+    }
+
+    private String normalizeProvider(String provider) {
+        if (!StringUtils.hasText(provider)) {
+            return null;
+        }
+        String p = provider.trim().toLowerCase(Locale.ROOT);
+        return switch (p) {
+            case "wechat", "wecom", "qywx", "wx" -> "wechat";
+            case "dingtalk", "dingding", "dd" -> "dingtalk";
+            case "feishu", "lark" -> "feishu";
+            default -> p;
+        };
+    }
+
+    private String trimToNull(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        return value.trim();
     }
 
     private String buildEmployeeRef(Employee employee) {
@@ -432,7 +572,14 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
         }
         ExternalIdentity identity = externalIdentityService.findPrimaryByEmployeeId(employee.getId());
         if (identity != null && StringUtils.hasText(identity.getProvider()) && StringUtils.hasText(identity.getSubjectId())) {
-            return identity.getProvider().trim() + ":" + identity.getSubjectId().trim();
+            String provider = identity.getProvider().trim();
+            String subjectId = identity.getSubjectId().trim();
+            String tenantKey = trimToNull(identity.getTenantKey());
+            if (StringUtils.hasText(tenantKey)
+                    && !ExternalIdentityService.DEFAULT_TENANT_KEY.equalsIgnoreCase(tenantKey)) {
+                return provider + ":" + tenantKey + ":" + subjectId;
+            }
+            return provider + ":" + subjectId;
         }
         if (StringUtils.hasText(employee.getEmployeeId())) {
             return "emp:" + employee.getEmployeeId().trim();
@@ -486,5 +633,8 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
             log.warn("parse items snapshot failed: {}", e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private record PlatformEmployeeRef(String provider, String tenantKey, String subjectId, boolean explicitTenant) {
     }
 }

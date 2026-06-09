@@ -1,7 +1,9 @@
 package com.yiyundao.compensation.interfaces.adapter.impl;
 
+import com.yiyundao.compensation.common.utils.SecretLogSanitizer;
 import com.yiyundao.compensation.interfaces.adapter.OrganizationAdapter;
 import com.yiyundao.compensation.dto.OrganizationSyncResult;
+import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
@@ -100,22 +102,28 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
                                     if (candidate.getEmployeeId() != null) {
                                         Employee byEmpId = employeeServiceProvider.getObject().getByEmployeeId(candidate.getEmployeeId());
                                         if (byEmpId != null) {
-                                            employeeServiceProvider.getObject().updateEmployee(byEmpId.getId(), candidate);
+                                            EmployeeVO updatedVo = employeeServiceProvider.getObject().updateEmployee(byEmpId.getId(), candidate);
+                                            Employee persisted = resolvePersistedEmployee(byEmpId, updatedVo != null ? updatedVo.getId() : null);
+                                            userBindingServiceProvider.getObject().ensureUserForEmployee(persisted);
                                             updated++;
                                             continue;
                                         }
                                     }
-                                    employeeServiceProvider.getObject().createEmployee(candidate);
-                                    userBindingServiceProvider.getObject().ensureUserForEmployee(candidate);
+                                    EmployeeVO createdVo = employeeServiceProvider.getObject().createEmployee(candidate);
+                                    Employee persisted = resolvePersistedEmployee(candidate, createdVo != null ? createdVo.getId() : null);
+                                    userBindingServiceProvider.getObject().ensureUserForEmployee(persisted);
                                     created++;
                                 } else {
-                                    employeeServiceProvider.getObject().updateEmployee(existing.getId(), candidate);
-                                    userBindingServiceProvider.getObject().ensureUserForEmployee(candidate);
+                                    EmployeeVO updatedVo = employeeServiceProvider.getObject().updateEmployee(existing.getId(), candidate);
+                                    Employee persisted = resolvePersistedEmployee(
+                                            existing,
+                                            updatedVo != null ? updatedVo.getId() : existing.getId());
+                                    userBindingServiceProvider.getObject().ensureUserForEmployee(persisted);
                                     updated++;
                                 }
                             } catch (Exception ex) {
-                                errors.add("同步用户失败: " + user.getName() + ", err=" + ex.getMessage());
-                                log.error("同步钉钉员工失败: {}", user.getName(), ex);
+                                errors.add("同步用户失败: " + user.getName() + ", err=" + SecretLogSanitizer.sanitize(ex));
+                                log.error("同步钉钉员工失败: {}, error={}", user.getName(), SecretLogSanitizer.sanitize(ex));
                             }
                         }
                     }
@@ -128,8 +136,8 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
             if (!errors.isEmpty()) result.setErrors(errors);
             return result;
         } catch (Exception e) {
-            log.error("钉钉组织架构同步异常", e);
-            return OrganizationSyncResult.failure(PLATFORM_TYPE, "同步异常: " + e.getMessage(), null);
+            log.error("钉钉组织架构同步异常: {}", SecretLogSanitizer.sanitize(e));
+            return OrganizationSyncResult.failure(PLATFORM_TYPE, "同步异常: " + SecretLogSanitizer.sanitize(e), null);
         }
     }
 
@@ -178,7 +186,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
                 }
             }
         } catch (Exception e) {
-            log.error("钉钉fetchAllEmployees异常", e);
+            log.error("钉钉fetchAllEmployees异常: {}", SecretLogSanitizer.sanitize(e));
         }
         return new java.util.ArrayList<>(seen.values());
     }
@@ -231,7 +239,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
                 }
             }
         } catch (Exception e) {
-            log.error("获取钉钉部门树异常", e);
+            log.error("获取钉钉部门树异常: {}", SecretLogSanitizer.sanitize(e));
         }
         return roots;
     }
@@ -254,7 +262,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
                 return convertToEmployee(user, null);
             }
         } catch (Exception e) {
-            log.error("获取钉钉用户信息失败: {}", platformUserId, e);
+            log.error("获取钉钉用户信息失败: {}, error={}", platformUserId, SecretLogSanitizer.sanitize(e));
         }
         return null;
     }
@@ -303,7 +311,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
             return false;
 
         } catch (Exception e) {
-            log.error("判断钉钉管理员失败: userId={}", platformUserId, e);
+            log.error("判断钉钉管理员失败: userId={}, error={}", platformUserId, SecretLogSanitizer.sanitize(e));
             return false;
         }
     }
@@ -327,7 +335,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
                 offset += size;
             }
         } catch (Exception e) {
-            log.error("获取钉钉部门员工失败: {}", departmentId, e);
+            log.error("获取钉钉部门员工失败: {}, error={}", departmentId, SecretLogSanitizer.sanitize(e));
         }
         return list;
     }
@@ -352,7 +360,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
             log.info("[DingTalk] 通知发送完成: userId={}, message={}", platformUserId, message);
 
         } catch (Exception e) {
-            log.error("发送钉钉通知失败", e);
+            log.error("发送钉钉通知失败: {}", SecretLogSanitizer.sanitize(e));
         }
     }
 
@@ -395,7 +403,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
             return false;
 
         } catch (Exception e) {
-            log.error("[DingTalk] 工作通知发送异常", e);
+            log.error("[DingTalk] 工作通知发送异常: {}", SecretLogSanitizer.sanitize(e));
             return false;
         }
     }
@@ -440,7 +448,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
             }
 
         } catch (Exception e) {
-            log.error("[DingTalk] 机器人消息发送异常", e);
+            log.error("[DingTalk] 机器人消息发送异常: {}", SecretLogSanitizer.sanitize(e));
         }
     }
 
@@ -449,7 +457,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
         try {
             return getAccessToken() != null;
         } catch (Exception e) {
-            log.error("检查钉钉连接失败", e);
+            log.error("检查钉钉连接失败: {}", SecretLogSanitizer.sanitize(e));
             return false;
         }
     }
@@ -476,10 +484,10 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
                 platformTokenCacheService.setToken(PLATFORM_TYPE, token, ttl);
                 return token;
             }
-            log.error("获取钉钉访问令牌失败: {}", resp != null ? resp.getErrmsg() : "null response");
+            log.error("获取钉钉访问令牌失败: {}", resp != null ? SecretLogSanitizer.sanitize(resp.getErrmsg()) : "null response");
             return null;
         } catch (Exception e) {
-            log.error("获取钉钉访问令牌异常", e);
+            log.error("获取钉钉访问令牌异常: {}", SecretLogSanitizer.sanitize(e));
             return null;
         }
     }
@@ -491,7 +499,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
             if (resp != null && resp.getErrcode() == 0 && resp.getDepartment() != null) return resp.getDepartment();
             log.warn("获取钉钉部门失败: {}", resp != null ? resp.getErrmsg() : "null response");
         } catch (Exception e) {
-            log.error("获取钉钉部门异常", e);
+            log.error("获取钉钉部门异常: {}", SecretLogSanitizer.sanitize(e));
         }
         return new ArrayList<>();
     }
@@ -502,7 +510,7 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
                     "&department_id=" + departmentId + "&offset=" + offset + "&size=" + size;
             return webClient.get().uri(url).retrieve().bodyToMono(DingUserListResponse.class).block();
         } catch (Exception e) {
-            log.error("分页获取钉钉用户失败: deptId={}, offset={} size={}", departmentId, offset, size, e);
+            log.error("分页获取钉钉用户失败: deptId={}, offset={}, size={}, error={}", departmentId, offset, size, SecretLogSanitizer.sanitize(e));
             return null;
         }
     }
@@ -524,6 +532,17 @@ public class DingTalkOrganizationAdapter implements OrganizationAdapter {
         e.setStatus(Boolean.TRUE.equals(user.getActive()) ? "active" : "inactive");
         e.setOffline(false);
         return e;
+    }
+
+    private Employee resolvePersistedEmployee(Employee fallback, Long id) {
+        Long employeeId = id != null ? id : (fallback != null ? fallback.getId() : null);
+        if (employeeId != null) {
+            Employee persisted = employeeServiceProvider.getObject().getById(employeeId);
+            if (persisted != null) {
+                return persisted;
+            }
+        }
+        return fallback;
     }
 
     @SuppressWarnings("unused")

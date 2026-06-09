@@ -21,7 +21,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/payroll/distributions")
 @RequiredArgsConstructor
-@SecurityAnnotations.IsFinanceOrHrOrManagerOrAdmin
+@SecurityAnnotations.IsFinanceOrAdmin
 public class PayrollDistributionController {
 
     private final PayrollFlowQueryService payrollFlowQueryService;

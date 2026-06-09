@@ -9,12 +9,15 @@ import {
   usePaymentRecordsQuery,
   useStartBatchTransferMutation,
   useRetryPaymentRecordMutation,
+  checkBatchTransfer,
+  fetchPaymentBatches,
   getBatchStatusInfo,
   getPaymentTypeInfo,
   getPaymentRecordStatusInfo,
   formatAmount,
   calculateBatchProgress,
   calculateBatchSuccessRate,
+  isStartablePaymentBatch,
   type PaymentBatch,
   type PaymentRecord,
 } from './paymentBatch';
@@ -85,6 +88,44 @@ describe('PaymentBatch Queries', () => {
   });
 
   describe('usePaymentBatchesQuery', () => {
+    it('should fetch batches directly with supplied table parameters', async () => {
+      const mockResponse = {
+        data: {
+          records: [mockBatch],
+          total: 1,
+          current: 2,
+          size: 20,
+        },
+      };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      const result = await fetchPaymentBatches({
+        current: 2,
+        pageSize: 20,
+        status: 'submitted',
+        paymentType: 'salary',
+        keyword: '补发',
+        sortBy: 'totalAmount',
+        order: 'asc',
+      });
+
+      expect(mockApi.get).toHaveBeenCalledWith('/payment/batch', {
+        params: {
+          page: 2,
+          size: 20,
+          status: 'submitted',
+          paymentType: 'salary',
+          keyword: '补发',
+          sortBy: 'totalAmount',
+          order: 'asc',
+        },
+      });
+      expect(result).toEqual({
+        ...mockResponse.data,
+        list: mockResponse.data.records,
+      });
+    });
+
     it('should fetch batches with correct parameters', async () => {
       const mockResponse = {
         data: {
@@ -127,7 +168,10 @@ describe('PaymentBatch Queries', () => {
         },
       });
 
-      expect(result.current.data).toEqual(mockResponse.data);
+      expect(result.current.data).toEqual({
+        ...mockResponse.data,
+        list: mockResponse.data.records,
+      });
     });
 
     it('should filter out empty parameters', async () => {
@@ -211,7 +255,7 @@ describe('PaymentBatch Mutations', () => {
 
   describe('useStartBatchTransferMutation', () => {
     it('should start batch transfer', async () => {
-      const mockResponse = { data: { success: true, message: '转账已启动' } };
+      const mockResponse = { data: '批量转账已启动' };
       mockApi.post.mockResolvedValue(mockResponse);
 
       const { result } = renderHook(() => useStartBatchTransferMutation(), {
@@ -221,7 +265,7 @@ describe('PaymentBatch Mutations', () => {
       const mutateResult = await result.current.mutateAsync('BATCH_20240115001');
 
       expect(mockApi.post).toHaveBeenCalledWith('/payment/batch/BATCH_20240115001/start');
-      expect(mutateResult).toEqual({ success: true, message: '转账已启动' });
+      expect(mutateResult).toBe('批量转账已启动');
     });
   });
 
@@ -243,6 +287,62 @@ describe('PaymentBatch Mutations', () => {
 });
 
 describe('Helper Functions', () => {
+  describe('checkBatchTransfer', () => {
+    it('should not persist failures by default', async () => {
+      const mockResponse = {
+        data: {
+          batchNo: 'BATCH_20240115001',
+          pendingCount: 1,
+          passCount: 1,
+          blockedCount: 0,
+          pass: true,
+          warnings: [],
+          blockedRecords: [],
+        },
+      };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      const result = await checkBatchTransfer('BATCH_20240115001');
+
+      expect(mockApi.get).toHaveBeenCalledWith('/payment/batch/BATCH_20240115001/precheck', {
+        params: { persistFailure: false },
+      });
+      expect(result).toEqual(mockResponse.data);
+    });
+
+    it('should persist failures only when explicitly requested', async () => {
+      const mockResponse = {
+        data: {
+          batchNo: 'BATCH_20240115001',
+          pendingCount: 1,
+          passCount: 0,
+          blockedCount: 1,
+          pass: false,
+          warnings: ['存在 1 条高风险记录，已拦截发放，请先修复收款信息'],
+          blockedRecords: [],
+        },
+      };
+      mockApi.get.mockResolvedValue(mockResponse);
+
+      await checkBatchTransfer('BATCH_20240115001', true);
+
+      expect(mockApi.get).toHaveBeenCalledWith('/payment/batch/BATCH_20240115001/precheck', {
+        params: { persistFailure: true },
+      });
+    });
+  });
+
+  describe('isStartablePaymentBatch', () => {
+    it('should match backend start-transfer status contract', () => {
+      expect(isStartablePaymentBatch({ status: 'submitted' })).toBe(true);
+      expect(isStartablePaymentBatch({ status: 'approved' })).toBe(true);
+      expect(isStartablePaymentBatch({ status: 'draft' })).toBe(false);
+      expect(isStartablePaymentBatch({ status: 'processing' })).toBe(false);
+      expect(isStartablePaymentBatch({ status: 'completed' })).toBe(false);
+      expect(isStartablePaymentBatch({ status: 'failed' })).toBe(false);
+    });
+  });
+
   describe('getBatchStatusInfo', () => {
     it('should return correct info for all batch statuses', () => {
       expect(getBatchStatusInfo('draft')).toEqual({

@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.modules.payroll.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.yiyundao.compensation.infrastructure.dao.PayrollApprovalProjectionMapper;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollApprovalProjection;
@@ -54,6 +55,8 @@ public class PayrollApprovalProjectionServiceImpl
     public PayrollApprovalProjection getByDistributionId(Long distributionId) {
         return getOne(new LambdaQueryWrapper<PayrollApprovalProjection>()
                 .eq(PayrollApprovalProjection::getDistributionId, distributionId)
+                .orderByDesc(PayrollApprovalProjection::getUpdateTime)
+                .orderByDesc(PayrollApprovalProjection::getId)
                 .last("limit 1"));
     }
 
@@ -83,14 +86,15 @@ public class PayrollApprovalProjectionServiceImpl
     }
 
     private void markFinal(Long workflowId, Long currentApproverId, String businessStatus, String result) {
-        PayrollApprovalProjection projection = getByWorkflowId(workflowId);
-        if (projection == null) {
+        if (workflowId == null) {
             return;
         }
-        projection.setBusinessStatus(businessStatus);
-        projection.setCurrentApproverId(currentApproverId);
-        projection.setCompletedAt(LocalDateTime.now());
-        projection.setResult(result);
-        updateById(projection);
+        update(new UpdateWrapper<PayrollApprovalProjection>()
+                .eq("workflow_id", workflowId)
+                .eq("business_status", "IN_PROGRESS")
+                .set("business_status", businessStatus)
+                .set("current_approver_id", currentApproverId)
+                .set("completed_at", LocalDateTime.now())
+                .set("result", result));
     }
 }

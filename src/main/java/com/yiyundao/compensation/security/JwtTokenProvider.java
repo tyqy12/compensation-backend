@@ -9,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
+import java.util.UUID;
 
 @Slf4j
 @Component
@@ -21,7 +22,9 @@ public class JwtTokenProvider {
     public JwtTokenProvider(
             @Value("${jwt.secret}") String secret,
             @Value("${jwt.expiration}") long jwtExpirationInMs,
-            @Value("${jwt.refresh-expiration}") long refreshExpirationInMs) {
+            @Value("${jwt.refresh-expiration}") long refreshExpirationInMs,
+            SecretKeyPolicy secretKeyPolicy) {
+        secretKeyPolicy.validateSigningSecret("jwt.secret", secret);
         this.secretKey = Keys.hmacShaKeyFor(secret.getBytes());
         this.jwtExpirationInMs = jwtExpirationInMs;
         this.refreshExpirationInMs = refreshExpirationInMs;
@@ -41,6 +44,7 @@ public class JwtTokenProvider {
         Date expiryDate = new Date(now.getTime() + jwtExpirationInMs);
 
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(username)
                 .issuedAt(now)
                 .expiration(expiryDate)
@@ -62,6 +66,7 @@ public class JwtTokenProvider {
         Date expiryDate = new Date(System.currentTimeMillis() + refreshExpirationInMs);
 
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(username)
                 .claim("type", "refresh")
                 .issuedAt(new Date())

@@ -3,6 +3,7 @@ package com.yiyundao.compensation.modules.app.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.infrastructure.dao.AppRegistryMapper;
 import com.yiyundao.compensation.modules.app.entity.AppRegistry;
@@ -20,6 +21,7 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -32,6 +34,11 @@ public class AppRegistryServiceImpl extends ServiceImpl<AppRegistryMapper, AppRe
     private final PasswordEncoder passwordEncoder;
     private final ObjectMapper objectMapper;
     private final SecureRandom secureRandom = new SecureRandom();
+    private static final Map<String, String> SCOPE_ALIASES = Map.of(
+            "payroll.read", "payroll:read",
+            "payslip.read", "payslip:read"
+    );
+    private static final Set<String> SUPPORTED_SCOPES = Set.of("payroll:read", "payslip:read");
 
     @Override
     public RegisteredClient register(AppRegistryCreateCommand cmd) {
@@ -124,7 +131,10 @@ public class AppRegistryServiceImpl extends ServiceImpl<AppRegistryMapper, AppRe
         if (app == null) {
             return false;
         }
-        List<String> whitelist = parseWhitelist(app.getIpWhitelist());
+        List<String> whitelist = parseWhitelistStrict(app.getIpWhitelist());
+        if (whitelist == null) {
+            return false;
+        }
         if (CollectionUtils.isEmpty(whitelist)) {
             return true;
         }
@@ -143,7 +153,10 @@ public class AppRegistryServiceImpl extends ServiceImpl<AppRegistryMapper, AppRe
         Set<String> unique = new HashSet<>();
         for (String p : parts) {
             if (StringUtils.hasText(p)) {
-                unique.add(p.trim());
+                String normalized = normalizeScope(p.trim());
+                if (normalized != null && SUPPORTED_SCOPES.contains(normalized)) {
+                    unique.add(normalized);
+                }
             }
         }
         return unique.stream().sorted().collect(Collectors.toList());
@@ -162,7 +175,10 @@ public class AppRegistryServiceImpl extends ServiceImpl<AppRegistryMapper, AppRe
             return "enabled";
         }
         String lower = status.trim().toLowerCase();
-        return ("enabled".equals(lower) || "disabled".equals(lower)) ? lower : "enabled";
+        if ("enabled".equals(lower) || "disabled".equals(lower)) {
+            return lower;
+        }
+        throw new IllegalArgumentException("应用状态仅支持 enabled/disabled");
     }
 
     private String generateClientId() {
@@ -179,10 +195,29 @@ public class AppRegistryServiceImpl extends ServiceImpl<AppRegistryMapper, AppRe
         if (CollectionUtils.isEmpty(scopes)) {
             throw new IllegalArgumentException("至少需要配置一个 scope");
         }
-        return scopes.stream()
-                .filter(StringUtils::hasText)
-                .map(String::trim)
-                .collect(Collectors.joining(","));
+        Set<String> normalizedScopes = new HashSet<>();
+        for (String scope : scopes) {
+            String normalized = normalizeScope(scope);
+            if (!StringUtils.hasText(normalized)) {
+                continue;
+            }
+            if (!SUPPORTED_SCOPES.contains(normalized)) {
+                throw new IllegalArgumentException("不支持的 scope: " + scope);
+            }
+            normalizedScopes.add(normalized);
+        }
+        if (normalizedScopes.isEmpty()) {
+            throw new IllegalArgumentException("至少需要配置一个有效 scope");
+        }
+        return normalizedScopes.stream().sorted().collect(Collectors.joining(","));
+    }
+
+    private String normalizeScope(String scope) {
+        if (!StringUtils.hasText(scope)) {
+            return null;
+        }
+        String trimmed = scope.trim();
+        return SCOPE_ALIASES.getOrDefault(trimmed, trimmed);
     }
 
     private String writeIpWhitelist(List<String> ipList) {
@@ -209,18 +244,33 @@ public class AppRegistryServiceImpl extends ServiceImpl<AppRegistryMapper, AppRe
             return Collections.emptyList();
         }
         try {
-            List<String> list = objectMapper.readValue(json, new TypeReference<List<String>>() {});
-            if (CollectionUtils.isEmpty(list)) {
-                return Collections.emptyList();
-            }
-            return list.stream()
-                    .filter(StringUtils::hasText)
-                    .map(String::trim)
-                    .filter(s -> !s.isEmpty())
-                    .collect(Collectors.toList());
+            return normalizeWhitelist(objectMapper.readValue(json, new TypeReference<List<String>>() {}));
         } catch (Exception e) {
             log.warn("解析 IP 白名单失败: {}", e.getMessage());
             return Collections.emptyList();
         }
+    }
+
+    private List<String> parseWhitelistStrict(String json) {
+        if (!StringUtils.hasText(json)) {
+            return Collections.emptyList();
+        }
+        try {
+            return normalizeWhitelist(objectMapper.readValue(json, new TypeReference<List<String>>() {}));
+        } catch (JsonProcessingException e) {
+            log.warn("解析 IP 白名单失败，拒绝外部应用访问: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private List<String> normalizeWhitelist(List<String> list) {
+        if (CollectionUtils.isEmpty(list)) {
+            return Collections.emptyList();
+        }
+        return list.stream()
+                .filter(StringUtils::hasText)
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .collect(Collectors.toList());
     }
 }

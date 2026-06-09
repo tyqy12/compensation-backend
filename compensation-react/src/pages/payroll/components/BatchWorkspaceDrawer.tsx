@@ -73,19 +73,12 @@ import {
   getPayrollFlowCurrentStep,
   getPayrollFlowSteps,
   getPayrollNextAction,
+  isPayrollBatchComputable,
 } from './payrollFlow';
 
 const { Text, Title } = Typography;
 
 const MUTABLE_IMPORT_STATUSES = ['draft', 'locked'];
-const COMPUTABLE_STATUSES = [
-  'locked',
-  'confirming',
-  'dispute_processing',
-  'confirmed',
-  'approved',
-  'rejected',
-];
 const PREVIEWABLE_STATUSES = [
   'draft',
   'locked',
@@ -357,7 +350,7 @@ export function BatchWorkspaceDrawer({
     return '未找到匹配员工，可继续直接输入工号。';
   }, [debouncedEmployeeSearchKeyword, employeeOptions.length, employeeQuery.isFetching]);
   const canLock = canManageBatch && status === 'draft' && hasImportData;
-  const canCompute = canManageBatch && COMPUTABLE_STATUSES.includes(status);
+  const canCompute = canManageBatch && isPayrollBatchComputable(status);
   const previewIssues = previewQuery.data?.issues ?? [];
   const structuredBlockers = useMemo(
     () => collectIssueMessages(previewIssues, 'blocking'),
@@ -1115,7 +1108,7 @@ export function BatchWorkspaceDrawer({
                             })
                           }
                         >
-                          {status === 'approved' || status === 'rejected' ? '重新计算' : '计算薪酬'}
+                          {status === 'rejected' ? '重新计算' : '计算薪酬'}
                         </Button>
                         <Button
                           icon={<CheckCircleOutlined />}

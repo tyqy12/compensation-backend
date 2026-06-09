@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
+import org.springframework.web.util.UriComponentsBuilder;
 import org.springframework.web.multipart.MultipartFile;
 
 import jakarta.annotation.PostConstruct;
@@ -49,14 +50,15 @@ public class LocalFileService implements FileService {
     @Override
     public String upload(MultipartFile file, String category, String fileName) {
         FileUploadValidator.validate(file, properties);
-        validateCategory(category);
-        validateCustomFileName(fileName);
+        FilePathValidator.validateCategory(category);
+        FilePathValidator.validateCustomFileName(fileName);
 
         if (fileName == null || fileName.isEmpty()) {
             String originalFilename = file.getOriginalFilename();
             String extension = getFileExtension(originalFilename);
             fileName = generateFileName(extension);
         }
+        FileUploadValidator.validateStoredFileName(fileName, properties);
 
         try {
             ensureInitialized();
@@ -81,7 +83,7 @@ public class LocalFileService implements FileService {
     @Override
     public void delete(String fileKey) {
         ensureInitialized();
-        validateFileKey(fileKey);
+        FilePathValidator.validateFileKey(fileKey);
         Path file = rootLocation.resolve(fileKey).normalize();
         if (!file.startsWith(rootLocation)) {
             throw new IllegalArgumentException("非法文件路径");
@@ -96,13 +98,18 @@ public class LocalFileService implements FileService {
 
     @Override
     public String getUrl(String fileKey) {
-        return properties.getLocal().getBaseUrl() + "/" + fileKey;
+        FilePathValidator.validateFileKey(fileKey);
+        return UriComponentsBuilder.fromUriString(properties.getLocal().getBaseUrl())
+                .queryParam("fileKey", fileKey)
+                .build()
+                .encode()
+                .toUriString();
     }
 
     @Override
     public InputStream getInputStream(String fileKey) {
         ensureInitialized();
-        validateFileKey(fileKey);
+        FilePathValidator.validateFileKey(fileKey);
         try {
             Path file = rootLocation.resolve(fileKey).normalize();
             if (!file.startsWith(rootLocation)) {
@@ -117,7 +124,7 @@ public class LocalFileService implements FileService {
     @Override
     public boolean exists(String fileKey) {
         ensureInitialized();
-        validateFileKey(fileKey);
+        FilePathValidator.validateFileKey(fileKey);
         Path file = rootLocation.resolve(fileKey).normalize();
         if (!file.startsWith(rootLocation)) {
             return false;
@@ -128,7 +135,7 @@ public class LocalFileService implements FileService {
     @Override
     public long getFileSize(String fileKey) {
         ensureInitialized();
-        validateFileKey(fileKey);
+        FilePathValidator.validateFileKey(fileKey);
         try {
             Path file = rootLocation.resolve(fileKey).normalize();
             if (!file.startsWith(rootLocation)) {
@@ -143,33 +150,6 @@ public class LocalFileService implements FileService {
     private void ensureInitialized() {
         if (rootLocation == null) {
             init();
-        }
-    }
-
-    private void validateCategory(String category) {
-        if (category == null || category.isBlank()) {
-            throw new IllegalArgumentException("category 不能为空");
-        }
-        if (category.startsWith("/") || category.contains("\\") || category.contains("..")) {
-            throw new IllegalArgumentException("非法 category");
-        }
-    }
-
-    private void validateCustomFileName(String fileName) {
-        if (fileName == null || fileName.isEmpty()) {
-            return;
-        }
-        if (fileName.contains("/") || fileName.contains("\\") || fileName.contains("..")) {
-            throw new IllegalArgumentException("非法 fileName");
-        }
-    }
-
-    private void validateFileKey(String fileKey) {
-        if (fileKey == null || fileKey.isBlank()) {
-            throw new IllegalArgumentException("fileKey 不能为空");
-        }
-        if (fileKey.startsWith("/") || fileKey.contains("\\") || fileKey.contains("..")) {
-            throw new IllegalArgumentException("非法 fileKey");
         }
     }
 

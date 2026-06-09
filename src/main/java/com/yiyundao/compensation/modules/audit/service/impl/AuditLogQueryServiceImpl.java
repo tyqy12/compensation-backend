@@ -24,6 +24,9 @@ import java.util.*;
 @RequiredArgsConstructor
 public class AuditLogQueryServiceImpl extends ServiceImpl<AuditLogMapper, AuditLog> implements AuditLogQueryService {
 
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int MAX_PAGE_SIZE = 200;
+
     @Override
     public Map<String, Object> queryByPage(AuditLogQueryRequest request) {
         // 构建查询条件
@@ -62,18 +65,31 @@ public class AuditLogQueryServiceImpl extends ServiceImpl<AuditLogMapper, AuditL
         }
 
         // 分页查询
-        Page<AuditLog> page = new Page<>(request.getPage(), request.getSize());
+        int safePage = safePage(request.getPage());
+        int safeSize = safeSize(request.getSize());
+        Page<AuditLog> page = new Page<>(safePage, safeSize);
         Page<AuditLog> resultPage = this.page(page, wrapper);
 
         // 构建返回结果
         Map<String, Object> result = new HashMap<>();
         result.put("records", resultPage.getRecords());
         result.put("total", resultPage.getTotal());
-        result.put("page", request.getPage());
-        result.put("size", request.getSize());
+        result.put("page", safePage);
+        result.put("size", safeSize);
         result.put("pages", resultPage.getPages());
 
         return result;
+    }
+
+    private int safePage(int page) {
+        return page < 1 ? 1 : page;
+    }
+
+    private int safeSize(int size) {
+        if (size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
     }
 
     @Override

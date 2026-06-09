@@ -3,17 +3,26 @@ package com.yiyundao.compensation.interfaces.controller.admin;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.enums.ApprovalStatus;
+import com.yiyundao.compensation.infrastructure.dao.ApprovalWorkflowMapper;
 import com.yiyundao.compensation.infrastructure.dao.SysRoleResourceMapper;
 import com.yiyundao.compensation.infrastructure.dao.SysUserResourceMapper;
 import com.yiyundao.compensation.infrastructure.dao.SysUserRoleMapper;
+import com.yiyundao.compensation.interfaces.dto.admin.UserResourceResponseDto;
+import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.service.ApprovalEngine;
 import com.yiyundao.compensation.modules.rbac.entity.SysRoleResource;
 import com.yiyundao.compensation.modules.rbac.entity.SysUserResource;
 import com.yiyundao.compensation.modules.rbac.entity.SysUserRole;
+import com.yiyundao.compensation.modules.rbac.service.UserResourceService;
+import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
+import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.security.SecurityAnnotations;
+import com.yiyundao.compensation.security.SecurityConstants;
 import jakarta.validation.Valid;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
-import com.yiyundao.compensation.security.SecurityAnnotations;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
@@ -22,22 +31,29 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/admin")
 @RequiredArgsConstructor
-@SecurityAnnotations.IsAdmin
 public class AdminUserAuthorizationController {
+
+    private static final String BUSINESS_TYPE_USER_RESOURCE_GRANT = "USER_RESOURCE_GRANT";
 
     private final SysUserResourceMapper userResourceMapper;
     private final SysUserRoleMapper userRoleMapper;
     private final SysRoleResourceMapper roleResourceMapper;
+    private final ApprovalWorkflowMapper approvalWorkflowMapper;
     private final ApprovalEngine approvalEngine;
     private final com.yiyundao.compensation.modules.user.service.SysUserService sysUserService;
-    private final com.yiyundao.compensation.modules.rbac.service.ResourceCacheService resourceCacheService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final UserRoleService userRoleService;
+    private final UserResourceService userResourceService;
 
     // 用户已授权资源（个性化权限）
     @GetMapping("/users/{id}/resources")
-    public ApiResponse<List<SysUserResource>> userResources(@PathVariable Long id) {
+    @SecurityAnnotations.IsAdmin
+    public ApiResponse<List<UserResourceResponseDto>> userResources(@PathVariable Long id) {
         List<SysUserResource> list = userResourceMapper.selectList(new LambdaQueryWrapper<SysUserResource>()
                 .eq(SysUserResource::getUserId, id));
-        return ApiResponse.success(list);
+        return ApiResponse.success(list.stream()
+                .map(resource -> UserResourceResponseDto.from(resource, objectMapper))
+                .toList());
     }
 
     /**
@@ -47,6 +63,7 @@ public class AdminUserAuthorizationController {
      * 个性化权限可以覆盖角色权限中的 actions 配置
      */
     @GetMapping("/users/{id}/aggregate-resources")
+    @SecurityAnnotations.IsAdmin
     public ApiResponse<List<AggregateResourceItem>> userAggregateResources(@PathVariable Long id) {
         // 1. 查询用户的所有角色
         List<SysUserRole> userRoles = userRoleMapper.selectList(
@@ -154,111 +171,61 @@ public class AdminUserAuthorizationController {
 
     // 用户授权：不直接生效，提交审批
     @PutMapping("/users/{id}/resources")
+    @SecurityAnnotations.IsManagerOrAdmin
     public ApiResponse<Map<String, Object>> updateUserResources(@PathVariable Long id, @Valid @RequestBody UserGrantRequest req) {
         try {
+            if (req == null) {
+                return ApiResponse.error(ErrorCode.PARAM_MISSING, "用户授权请求不能为空");
+            }
+
+            List<Long> requestedResourceIds = normalizeResourceIds(req.getResourceIds());
+
             // 系统管理员直接应用，无需审批
-            try {
-                String uname = org.springframework.security.core.context.SecurityContextHolder.getContext() != null &&
-                        org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication() != null
-                        ? org.springframework.security.core.context.SecurityContextHolder.getContext().getAuthentication().getName() : null;
-                if (uname != null) {
-                    com.yiyundao.compensation.modules.user.entity.SysUser op = sysUserService.findByUsername(uname);
-                    if (op != null && op.getRoles() != null && op.getRoles().contains("ROLE_ADMIN")) {
-                        userResourceMapper.delete(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.yiyundao.compensation.modules.rbac.entity.SysUserResource>()
-                                .eq(com.yiyundao.compensation.modules.rbac.entity.SysUserResource::getUserId, id));
-                        if (req.getResourceIds() != null) {
-                            for (Long rid : req.getResourceIds()) {
-                                com.yiyundao.compensation.modules.rbac.entity.SysUserResource ur = new com.yiyundao.compensation.modules.rbac.entity.SysUserResource();
-                                ur.setUserId(id);
-                                ur.setResourceId(rid);
-                                if (req.getActions() != null) {
-                                    java.util.List<String> act = req.getActions().get(rid);
-                                    if (act != null && !act.isEmpty()) ur.setActionsJson(act.toString());
-                                }
-                                userResourceMapper.insert(ur);
-                            }
-                        }
-                        // bump user permission version + evict cache
-                        com.yiyundao.compensation.modules.user.entity.SysUser target = sysUserService.getById(id);
-                        if (target != null) {
-                            Integer v = (target.getPermissionVersion() == null) ? 0 : target.getPermissionVersion();
-                            com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<com.yiyundao.compensation.modules.user.entity.SysUser> uw = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
-                            uw.eq(com.yiyundao.compensation.modules.user.entity.SysUser::getId, id)
-                              .set(com.yiyundao.compensation.modules.user.entity.SysUser::getPermissionVersion, v + 1);
-                            sysUserService.update(uw);
-                            try { resourceCacheService.evictByUserId(id); } catch (Exception ignored) {}
-                        }
-                        java.util.Map<String,Object> resp = new java.util.HashMap<>();
-                        resp.put("workflowId", null);
-                        return ApiResponse.<java.util.Map<String, Object>>success("已直接生效(管理员)", resp);
-                    }
+            String uname = currentUsername();
+            if (uname != null) {
+                SysUser op = sysUserService.findByUsername(uname);
+                if (op != null && op.getId() != null && userRoleService.hasRole(op.getId(), SecurityConstants.ROLE_ADMIN)) {
+                    userResourceService.assignResources(id, requestedResourceIds, req.getActions(), op.getId());
+                    Map<String, Object> resp = new HashMap<>();
+                    resp.put("workflowId", null);
+                    return ApiResponse.<Map<String, Object>>success("已直接生效(管理员)", resp);
                 }
-            } catch (Exception ignored) {}
+            }
 
             // 检查是增加权限还是减少权限
             List<SysUserResource> prev = userResourceMapper.selectList(new LambdaQueryWrapper<SysUserResource>()
                     .eq(SysUserResource::getUserId, id));
 
-            // 获取之前的资源ID集合
-            Set<Long> prevResourceIds = prev.stream()
-                    .map(SysUserResource::getResourceId)
-                    .collect(Collectors.toSet());
-
             // 获取当前的资源ID集合
-            Set<Long> currResourceIds = req.getResourceIds() != null
-                    ? new HashSet<>(req.getResourceIds())
-                    : new HashSet<>();
+            Set<Long> currResourceIds = new HashSet<>(requestedResourceIds);
 
-            // 判断是否是纯减少权限（当前集合是之前集合的子集）
-            boolean isOnlyReducing = prevResourceIds.containsAll(currResourceIds);
+            // 判断是否是纯减少权限：资源不能新增，同一资源的 action 也不能扩权。
+            boolean isOnlyReducing = isOnlyReducingUserResources(prev, currResourceIds, req.getActions());
 
             // 如果是纯减少权限，直接生效无需审批
             if (isOnlyReducing) {
-                userResourceMapper.delete(new LambdaQueryWrapper<SysUserResource>()
-                        .eq(SysUserResource::getUserId, id));
-                for (Long rid : currResourceIds) {
-                    SysUserResource ur = new SysUserResource();
-                    ur.setUserId(id);
-                    ur.setResourceId(rid);
-                    if (req.getActions() != null && req.getActions().get(rid) != null) {
-                        List<String> act = req.getActions().get(rid);
-                        if (!act.isEmpty()) {
-                            try {
-                                ur.setActionsJson(new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(act));
-                            } catch (Exception e) {
-                                ur.setActionsJson(act.toString());
-                            }
-                        }
-                    }
-                    userResourceMapper.insert(ur);
-                }
-                // 清除缓存
-                com.yiyundao.compensation.modules.user.entity.SysUser target = sysUserService.getById(id);
-                if (target != null) {
-                    Integer v = (target.getPermissionVersion() == null) ? 0 : target.getPermissionVersion();
-                    com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<com.yiyundao.compensation.modules.user.entity.SysUser> uw = new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<>();
-                    uw.eq(com.yiyundao.compensation.modules.user.entity.SysUser::getId, id)
-                      .set(com.yiyundao.compensation.modules.user.entity.SysUser::getPermissionVersion, v + 1);
-                    sysUserService.update(uw);
-                    try { resourceCacheService.evictByUserId(id); } catch (Exception ignored) {}
-                }
+                userResourceService.assignResources(id, requestedResourceIds, req.getActions(), requireCurrentUserId());
                 Map<String, Object> resp = new HashMap<>();
                 resp.put("workflowId", null);
                 return ApiResponse.<Map<String, Object>>success("权限已取消", resp);
             }
 
             // 增加权限需要审批
+            if (hasPendingUserResourceGrant(id)) {
+                return ApiResponse.error(ErrorCode.REQUEST_CONFLICT, "已有待审批的用户资源授权申请，请等待处理完成后再提交");
+            }
+
             Map<String, Object> data = new HashMap<>();
             data.put("mode", "USER");
             data.put("userId", id);
-            data.put("resourceIds", req.getResourceIds());
+            data.put("resourceIds", requestedResourceIds);
             data.put("actions", req.getActions());
             data.put("snapshotPrev", prev);
             Long wfId = approvalEngine.startWorkflow(
                     com.yiyundao.compensation.enums.WorkflowType.PERMISSION,
-                    "USER-" + id,
-                    "USER_RESOURCE_GRANT",
-                    1L,
+                    buildUserResourceGrantBusinessKey(id),
+                    BUSINESS_TYPE_USER_RESOURCE_GRANT,
+                    requireCurrentUserId(),
                     data
             );
             Map<String, Object> resp = new HashMap<>();
@@ -273,5 +240,101 @@ public class AdminUserAuthorizationController {
     public static class UserGrantRequest {
         private List<Long> resourceIds;
         private Map<Long, List<String>> actions; // resourceId -> [actionCode]
+    }
+
+    private List<Long> normalizeResourceIds(List<Long> resourceIds) {
+        if (resourceIds == null || resourceIds.isEmpty()) {
+            return List.of();
+        }
+        return resourceIds.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.collectingAndThen(
+                        Collectors.toCollection(LinkedHashSet::new),
+                        ArrayList::new
+                ));
+    }
+
+    private boolean isOnlyReducingUserResources(List<SysUserResource> previous,
+                                                Set<Long> currentResourceIds,
+                                                Map<Long, List<String>> requestedActions) {
+        Map<Long, Set<String>> previousActions = previous.stream()
+                .collect(Collectors.toMap(
+                        SysUserResource::getResourceId,
+                        resource -> parseActions(resource.getActionsJson()),
+                        (left, right) -> {
+                            Set<String> merged = new HashSet<>(left);
+                            merged.addAll(right);
+                            return merged;
+                        }
+                ));
+
+        if (!previousActions.keySet().containsAll(currentResourceIds)) {
+            return false;
+        }
+
+        for (Long resourceId : currentResourceIds) {
+            Set<String> prevActions = previousActions.getOrDefault(resourceId, Set.of());
+            Set<String> currActions = requestedActions == null
+                    ? Set.of()
+                    : new HashSet<>(requestedActions.getOrDefault(resourceId, List.of()));
+            if (!actionSubset(prevActions, currActions)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean actionSubset(Set<String> previousActions, Set<String> currentActions) {
+        if (previousActions == null || previousActions.isEmpty()) {
+            return true;
+        }
+        if (previousActions.contains("*")) {
+            return true;
+        }
+        if (currentActions == null || currentActions.isEmpty()) {
+            return false;
+        }
+        return previousActions.containsAll(currentActions);
+    }
+
+    private boolean hasPendingUserResourceGrant(Long userId) {
+        String baseBusinessKey = baseUserResourceGrantBusinessKey(userId);
+        Long count = approvalWorkflowMapper.selectCount(new LambdaQueryWrapper<ApprovalWorkflow>()
+                .eq(ApprovalWorkflow::getBusinessType, BUSINESS_TYPE_USER_RESOURCE_GRANT)
+                .and(w -> w
+                        .eq(ApprovalWorkflow::getBusinessKey, baseBusinessKey)
+                        .or()
+                        .likeRight(ApprovalWorkflow::getBusinessKey, baseBusinessKey + "-"))
+                .eq(ApprovalWorkflow::getStatus, ApprovalStatus.PENDING));
+        return count != null && count > 0;
+    }
+
+    private String buildUserResourceGrantBusinessKey(Long userId) {
+        return baseUserResourceGrantBusinessKey(userId) + "-" + System.currentTimeMillis();
+    }
+
+    private String baseUserResourceGrantBusinessKey(Long userId) {
+        return "USER-" + userId;
+    }
+
+    private Long requireCurrentUserId() {
+        try {
+            String username = currentUsername();
+            if (username != null) {
+                SysUser user = sysUserService.findByUsername(username);
+                if (user != null && user.getId() != null) {
+                    return user.getId();
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        throw new IllegalStateException("未识别到当前登录用户");
+    }
+
+    private String currentUsername() {
+        return SecurityContextHolder.getContext() != null
+                && SecurityContextHolder.getContext().getAuthentication() != null
+                ? SecurityContextHolder.getContext().getAuthentication().getName()
+                : null;
     }
 }

@@ -5,6 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import { setSession, clearSession } from '@services/stores/authSlice';
 import { App as AntdApp } from 'antd';
+import { consumePostLoginRedirect } from '@services/authRedirect';
 
 export function useLoginMutation() {
   const dispatch = useDispatch();
@@ -15,7 +16,7 @@ export function useLoginMutation() {
     mutationFn: async (payload: LoginRequest) => ({ data: await loginApi(payload) }),
     onSuccess: ({ data }) => {
       dispatch(setSession({ user: data.user, accessToken: data.accessToken, refreshToken: data.refreshToken } as any));
-      const to = location.state?.from?.pathname || '/';
+      const to = consumePostLoginRedirect(location.state);
       navigate(to, { replace: true });
     },
     onError: (err: any) => {

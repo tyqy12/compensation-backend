@@ -10,6 +10,7 @@ public interface SysUserService extends IService<SysUser> {
     SysUser findByPlatform(String provider, String subjectId);
     SysUser findByEmployeeId(Long employeeId);
     SysUser findFirstByRole(String roleCode);
+    SysUser findFirstByRoleExcluding(String roleCode, Long excludedUserId);
 
     /**
      * 递增用户权限版本号

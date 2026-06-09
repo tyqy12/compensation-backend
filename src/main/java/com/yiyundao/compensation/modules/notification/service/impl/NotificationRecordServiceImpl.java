@@ -21,6 +21,9 @@ import java.util.List;
 public class NotificationRecordServiceImpl extends ServiceImpl<NotificationRecordMapper, NotificationRecord>
         implements NotificationRecordService {
 
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 200;
+
     @Override
     public Page<NotificationRecord> pageNotificationRecords(int pageNum, int pageSize,
                                                            NotificationType type,
@@ -30,7 +33,7 @@ public class NotificationRecordServiceImpl extends ServiceImpl<NotificationRecor
                                                            String recipientName,
                                                            LocalDateTime startTime,
                                                            LocalDateTime endTime) {
-        Page<NotificationRecord> page = new Page<>(pageNum, pageSize);
+        Page<NotificationRecord> page = new Page<>(safePage(pageNum), safeSize(pageSize));
         LambdaQueryWrapper<NotificationRecord> queryWrapper = new LambdaQueryWrapper<>();
 
         // 条件查询
@@ -87,9 +90,20 @@ public class NotificationRecordServiceImpl extends ServiceImpl<NotificationRecor
         LambdaQueryWrapper<NotificationRecord> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(NotificationRecord::getRecipientId, recipientId)
                 .orderByDesc(NotificationRecord::getCreateTime)
-                .last("limit " + limit);
+                .last("limit " + safeSize(limit));
 
         return list(queryWrapper);
+    }
+
+    private int safePage(int pageNum) {
+        return pageNum < 1 ? 1 : pageNum;
+    }
+
+    private int safeSize(int pageSize) {
+        if (pageSize < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(pageSize, MAX_PAGE_SIZE);
     }
 
     @Override
@@ -124,25 +138,40 @@ public class NotificationRecordServiceImpl extends ServiceImpl<NotificationRecor
             return;
         }
 
-        // 重置状态为待发送
+        // 进入重试队列，由 NotificationRetryService 统一领取并发送。
         LambdaUpdateWrapper<NotificationRecord> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(NotificationRecord::getId, recordId)
-                .set(NotificationRecord::getStatus, NotificationStatus.PENDING)
+                .in(NotificationRecord::getStatus,
+                        NotificationStatus.FAILED,
+                        NotificationStatus.CANCELLED,
+                        NotificationStatus.RETRY)
+                .set(NotificationRecord::getStatus, NotificationStatus.RETRY)
                 .set(NotificationRecord::getRetryCount, 0)
-                .set(NotificationRecord::getNextRetryTime, null)
+                .set(NotificationRecord::getNextRetryTime, LocalDateTime.now())
                 .set(NotificationRecord::getErrorMessage, null);
 
-        update(updateWrapper);
-        log.info("通知记录已重置为待发送状态: {}", recordId);
+        if (update(updateWrapper)) {
+            log.info("通知记录已加入重试队列: {}", recordId);
+        } else {
+            log.info("通知记录状态已变更，跳过重发重置: recordId={}, status={}", recordId, record.getStatus());
+        }
     }
 
     @Override
     public void cancelNotification(Long recordId) {
         LambdaUpdateWrapper<NotificationRecord> updateWrapper = new LambdaUpdateWrapper<>();
         updateWrapper.eq(NotificationRecord::getId, recordId)
-                .set(NotificationRecord::getStatus, NotificationStatus.CANCELLED);
+                .in(NotificationRecord::getStatus,
+                        NotificationStatus.PENDING,
+                        NotificationStatus.SENDING,
+                        NotificationStatus.RETRY)
+                .set(NotificationRecord::getStatus, NotificationStatus.CANCELLED)
+                .set(NotificationRecord::getNextRetryTime, null);
 
-        update(updateWrapper);
-        log.info("通知记录已取消: {}", recordId);
+        if (update(updateWrapper)) {
+            log.info("通知记录已取消: {}", recordId);
+        } else {
+            log.info("通知记录状态已变更，跳过取消: {}", recordId);
+        }
     }
 }

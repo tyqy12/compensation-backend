@@ -2,6 +2,7 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ErrorCode;
@@ -12,7 +13,6 @@ import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollApprovalProjection;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollDistribution;
-import com.yiyundao.compensation.interfaces.dto.payroll.PayrollValidationIssueDto;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.payroll.service.PayrollApprovalProjectionService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
@@ -21,6 +21,7 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollDistributionServ
 import com.yiyundao.compensation.modules.payroll.service.PayrollProcessManager;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentService;
+import com.yiyundao.compensation.modules.payroll.support.PayrollPaymentEligibilitySupport;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
@@ -62,107 +63,150 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
         int batchRevision = b.getBatchRevision() == null || b.getBatchRevision() < 1 ? 1 : b.getBatchRevision();
         return update(new LambdaUpdateWrapper<PayrollBatch>()
                 .eq(PayrollBatch::getId, batchId)
+                .eq(PayrollBatch::getStatus, PayrollBatchStatus.DRAFT)
                 .set(PayrollBatch::getStatus, PayrollBatchStatus.LOCKED)
                 .set(PayrollBatch::getCalculationStatus, PayrollCalculationStatus.LOCKED)
                 .set(PayrollBatch::getBatchRevision, batchRevision));
     }
 
     @Override
-@Transactional
-public boolean submitForApproval(Long batchId) {
-    log.info("Submit payroll batch for approval: {}", batchId);
-    PayrollBatch b = getById(batchId);
-    if (b == null) {
-        throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
-    }
+    @Transactional
+    public boolean submitForApproval(Long batchId) {
+        log.info("Submit payroll batch for approval: {}", batchId);
+        PayrollBatch b = getById(batchId);
+        if (b == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
+        }
 
-    int batchRevision = b.getBatchRevision() == null || b.getBatchRevision() < 1 ? 1 : b.getBatchRevision();
-    if (b.getBatchRevision() == null || b.getBatchRevision() < 1) {
-        b.setBatchRevision(batchRevision);
-        updateById(b);
-    }
+        int batchRevision = b.getBatchRevision() == null || b.getBatchRevision() < 1 ? 1 : b.getBatchRevision();
+        if (b.getBatchRevision() == null || b.getBatchRevision() < 1) {
+            b.setBatchRevision(batchRevision);
+        }
 
-    if (!isReadyForApproval(b)) {
-        throw new BusinessException(ErrorCode.INVALID_STATUS, buildSubmitBlockedStatusMessage(b));
-    }
+        if (!isReadyForApproval(b)) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, buildSubmitBlockedStatusMessage(b));
+        }
 
-    confirmationAggregateService.syncFromLegacyBatch(batchId, batchRevision);
-    if (!confirmationAggregateService.isCompletedForApproval(batchId, batchRevision)) {
-        log.warn("批次确认聚合未完成，禁止提交审批: batchId={}, batchRevision={}", batchId, batchRevision);
-        throw new BusinessException(ErrorCode.INVALID_STATUS, "还有员工待确认或异议未处理，暂不可提交审批");
-    }
+        confirmationAggregateService.syncFromLegacyBatch(batchId, batchRevision);
+        if (!confirmationAggregateService.isCompletedForApproval(batchId, batchRevision)) {
+            log.warn("批次确认聚合未完成，禁止提交审批: batchId={}, batchRevision={}", batchId, batchRevision);
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "还有员工待确认或异议未处理，暂不可提交审批");
+        }
 
-    java.util.List<String> blockingMessages = collectBlockingIssueMessages(batchId);
-    if (!blockingMessages.isEmpty()) {
-        throw new BusinessException(
-                ErrorCode.VALIDATION_FAILED,
-                "存在阻塞问题，暂不可提交审批：" + String.join("；", blockingMessages)
-        );
-    }
+        java.util.List<String> blockingMessages = collectBlockingIssueMessages(batchId);
+        if (!blockingMessages.isEmpty()) {
+            throw new BusinessException(
+                    ErrorCode.VALIDATION_FAILED,
+                    "存在阻塞问题，暂不可提交审批：" + String.join("；", blockingMessages)
+            );
+        }
 
-    PayrollDistribution distribution = distributionService.createOrReuseForBatch(b);
-    if (distribution == null) {
-        throw new BusinessException(ErrorCode.BUSINESS_ERROR, "发放单创建失败");
-    }
+        PayrollDistribution distribution = distributionService.createOrReuseForBatch(b);
+        if (distribution == null) {
+            throw new BusinessException(ErrorCode.BUSINESS_ERROR, "发放单创建失败");
+        }
 
-    PayrollApprovalProjection existingProjection = approvalProjectionService.getByDistributionId(distribution.getId());
-    if (distribution.getApprovalWorkflowId() != null && existingProjection != null) {
-        String businessStatus = existingProjection.getBusinessStatus();
-        if ("IN_PROGRESS".equalsIgnoreCase(businessStatus) || "APPROVED".equalsIgnoreCase(businessStatus)) {
+        PayrollApprovalProjection existingProjection = approvalProjectionService.getByDistributionId(distribution.getId());
+        if (distribution.getApprovalWorkflowId() != null && existingProjection != null) {
+            String businessStatus = existingProjection.getBusinessStatus();
+            if ("IN_PROGRESS".equalsIgnoreCase(businessStatus) || "APPROVED".equalsIgnoreCase(businessStatus)) {
+                syncBatchStatusFromExistingProjection(batchId, distribution.getApprovalWorkflowId(), businessStatus);
+                return true;
+            }
+        }
+
+        SysUser currentUser = requireCurrentUser();
+        Long initiatorId = currentUser.getId();
+
+        if (hasAdminRole(currentUser)) {
+            log.info("Admin user bypass approval, batch={}, username={}", batchId,
+                    currentUser != null ? currentUser.getUsername() : "unknown");
+            recordAdminBypassAudit(currentUser, b, "APPROVAL_BYPASS");
+
+            Long pseudoWorkflowId = -distribution.getId();
+            distributionService.bindApprovalWorkflow(distribution.getId(), pseudoWorkflowId);
+            approvalProjectionService.createOrUpdatePending(b, distribution, pseudoWorkflowId, initiatorId);
+            approvalProjectionService.markApproved(pseudoWorkflowId, initiatorId);
+
+            boolean updated = update(new LambdaUpdateWrapper<PayrollBatch>()
+                    .eq(PayrollBatch::getId, batchId)
+                    .eq(PayrollBatch::getStatus, b.getStatus())
+                    .eq(b.getApprovalWorkflowId() != null, PayrollBatch::getApprovalWorkflowId, b.getApprovalWorkflowId())
+                    .isNull(b.getApprovalWorkflowId() == null, PayrollBatch::getApprovalWorkflowId)
+                    .set(PayrollBatch::getStatus, PayrollBatchStatus.APPROVED)
+                    .set(PayrollBatch::getApprovalWorkflowId, null)
+                    .set(PayrollBatch::getBatchRevision, batchRevision)
+                    .set(PayrollBatch::getUpdateBy, currentUser != null ? currentUser.getUsername() : "system"));
+            if (!updated) {
+                throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "批次状态已变更，请刷新后重试");
+            }
+            payrollProcessManager.onApprovalApproved(distribution.getId(), pseudoWorkflowId, initiatorId);
             return true;
         }
-    }
 
-    SysUser currentUser = resolveCurrentUser();
-    Long initiatorId = currentUser != null ? currentUser.getId() : 1L;
-
-    if (hasAdminRole(currentUser)) {
-        log.info("Admin user bypass approval, batch={}, username={}", batchId,
-                currentUser != null ? currentUser.getUsername() : "unknown");
-        recordAdminBypassAudit(currentUser, b, "APPROVAL_BYPASS");
-
-        Long pseudoWorkflowId = -distribution.getId();
-        distributionService.bindApprovalWorkflow(distribution.getId(), pseudoWorkflowId);
-        approvalProjectionService.createOrUpdatePending(b, distribution, pseudoWorkflowId, initiatorId);
-        approvalProjectionService.markApproved(pseudoWorkflowId, initiatorId);
-
-        boolean updated = update(new LambdaUpdateWrapper<PayrollBatch>()
-                .eq(PayrollBatch::getId, batchId)
-                .set(PayrollBatch::getStatus, PayrollBatchStatus.APPROVED)
-                .set(PayrollBatch::getApprovalWorkflowId, null)
-                .set(PayrollBatch::getUpdateBy, currentUser != null ? currentUser.getUsername() : "system"));
-        if (updated) {
-            payrollProcessManager.onApprovalApproved(distribution.getId(), pseudoWorkflowId, initiatorId);
+        Long wfId;
+        try {
+            String businessKey = buildDistributionApprovalBusinessKey(distribution, existingProjection);
+            wfId = approvalEngine.startWorkflow(
+                    WorkflowType.PAYROLL_DISTRIBUTION,
+                    businessKey,
+                    "payroll_distribution",
+                    initiatorId,
+                    java.util.Map.of(
+                            "batchId", batchId,
+                            "batchRevision", batchRevision,
+                            "distributionId", distribution.getId()
+                    )
+            );
+            distributionService.bindApprovalWorkflow(distribution.getId(), wfId);
+            approvalProjectionService.createOrUpdatePending(b, distribution, wfId, initiatorId);
+            boolean updated = update(new LambdaUpdateWrapper<PayrollBatch>()
+                    .eq(PayrollBatch::getId, batchId)
+                    .eq(PayrollBatch::getStatus, b.getStatus())
+                    .eq(b.getApprovalWorkflowId() != null, PayrollBatch::getApprovalWorkflowId, b.getApprovalWorkflowId())
+                    .isNull(b.getApprovalWorkflowId() == null, PayrollBatch::getApprovalWorkflowId)
+                    .set(PayrollBatch::getStatus, PayrollBatchStatus.SUBMITTED)
+                    .set(PayrollBatch::getApprovalWorkflowId, wfId)
+                    .set(PayrollBatch::getBatchRevision, batchRevision));
+            if (!updated) {
+                throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "批次状态已变更，请刷新后重试");
+            }
+            return true;
+        } catch (BusinessException e) {
+            throw e;
+        } catch (Exception e) {
+            log.warn("submitForApproval failed to start workflow, batchId={}, error={}",
+                    batchId, e.getMessage());
+            recordWorkflowStartFailureAudit(currentUser, b, e.getMessage());
+            throw new RuntimeException("启动审批流程失败: " + e.getMessage(), e);
         }
-        return updated;
     }
 
-    Long wfId;
-    try {
-        wfId = approvalEngine.startWorkflow(
-                WorkflowType.PAYROLL_DISTRIBUTION,
-                "payroll_distribution:" + distribution.getId(),
-                "payroll_distribution",
-                initiatorId,
-                java.util.Map.of(
-                        "batchId", batchId,
-                        "batchRevision", batchRevision,
-                        "distributionId", distribution.getId()
-                )
-        );
-        distributionService.bindApprovalWorkflow(distribution.getId(), wfId);
-        approvalProjectionService.createOrUpdatePending(b, distribution, wfId, initiatorId);
-        return update(new LambdaUpdateWrapper<PayrollBatch>()
-                .eq(PayrollBatch::getId, batchId)
-                .set(PayrollBatch::getStatus, PayrollBatchStatus.SUBMITTED)
-                .set(PayrollBatch::getApprovalWorkflowId, wfId));
-    } catch (Exception e) {
-        log.warn("submitForApproval failed to start workflow, batchId={}, error={}",
-                batchId, e.getMessage());
-        recordWorkflowStartFailureAudit(currentUser, b, e.getMessage());
-        throw new RuntimeException("启动审批流程失败: " + e.getMessage(), e);
+    private String buildDistributionApprovalBusinessKey(PayrollDistribution distribution,
+                                                        PayrollApprovalProjection existingProjection) {
+        String baseKey = "payroll_distribution:" + distribution.getId();
+        if (existingProjection == null && distribution.getApprovalWorkflowId() == null) {
+            return baseKey;
+        }
+        Long previousWorkflowId = existingProjection != null
+                ? existingProjection.getWorkflowId()
+                : distribution.getApprovalWorkflowId();
+        if (previousWorkflowId != null) {
+            return baseKey + ":retry:" + previousWorkflowId;
+        }
+        return baseKey + ":retry:" + java.util.UUID.randomUUID();
     }
-}
+
+    private void syncBatchStatusFromExistingProjection(Long batchId, Long workflowId, String businessStatus) {
+        PayrollBatchStatus targetStatus = "APPROVED".equalsIgnoreCase(businessStatus)
+                ? PayrollBatchStatus.APPROVED
+                : PayrollBatchStatus.SUBMITTED;
+        update(new UpdateWrapper<PayrollBatch>()
+                .eq("id", batchId)
+                .in("status", PayrollBatchStatus.CONFIRMED.getCode(), PayrollBatchStatus.SUBMITTED.getCode())
+                .set("status", targetStatus.getCode())
+                .set("approval_workflow_id", workflowId));
+    }
 
     @Override
     @Transactional
@@ -176,12 +220,20 @@ public boolean submitForApproval(Long batchId) {
         try {
             String username = SecurityUtilsInternal.currentUsername();
             if (!StringUtils.hasText(username)) {
-                return sysUserService.findByUsername("admin");
+                return null;
             }
             return sysUserService.findByUsername(username);
         } catch (Exception e) {
-            return sysUserService.findByUsername("admin");
+            return null;
         }
+    }
+
+    private SysUser requireCurrentUser() {
+        SysUser currentUser = resolveCurrentUser();
+        if (currentUser == null || currentUser.getId() == null) {
+            throw new BusinessException(ErrorCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        return currentUser;
     }
 
     private boolean hasAdminRole(SysUser user) {
@@ -236,19 +288,10 @@ public boolean submitForApproval(Long batchId) {
     private java.util.List<String> collectBlockingIssueMessages(Long batchId) {
         java.util.List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, batchId));
-        if (lines == null || lines.isEmpty()) {
-            return java.util.List.of("未生成工资结果，请先执行计算薪酬");
-        }
-        java.util.Set<String> messages = new java.util.LinkedHashSet<>();
-        for (PayrollLine line : lines) {
-            java.util.List<PayrollValidationIssueDto> issues = validationIssueSupport.deserialize(line.getWarning());
-            for (PayrollValidationIssueDto issue : issues) {
-                if (issue != null && Boolean.TRUE.equals(issue.getBlocking()) && StringUtils.hasText(issue.getMessage())) {
-                    messages.add(issue.getMessage().trim());
-                }
-            }
-        }
-        return new java.util.ArrayList<>(messages);
+        return PayrollPaymentEligibilitySupport.collectBlockingIssueMessages(
+                lines,
+                validationIssueSupport::deserialize
+        );
     }
 
     /**
@@ -327,7 +370,13 @@ public boolean submitForApproval(Long batchId) {
     @Override
     @Transactional
     public boolean retryCreatePaymentBatch(Long batchId) {
-        log.info("重试创建支付批次: batchId={}", batchId);
+        return retryCreatePaymentBatch(batchId, true);
+    }
+
+    @Override
+    @Transactional
+    public boolean retryCreatePaymentBatch(Long batchId, boolean triggerTransfer) {
+        log.info("重试创建支付批次: batchId={}, triggerTransfer={}", batchId, triggerTransfer);
 
         PayrollBatch batch = getById(batchId);
         if (batch == null) {
@@ -350,17 +399,11 @@ public boolean submitForApproval(Long batchId) {
         }
 
         // 获取当前用户
-        SysUser currentUser = resolveCurrentUser();
-        if (currentUser == null) {
-            log.warn("无法获取当前用户，使用系统用户");
-            currentUser = new SysUser();
-            currentUser.setId(0L);
-            currentUser.setUsername("SYSTEM");
-        }
+        SysUser currentUser = requireCurrentUser();
 
         try {
             // 调用支付服务创建支付批次
-            var paymentBatch = payrollPaymentService.createPaymentBatch(batch, currentUser, true);
+            var paymentBatch = payrollPaymentService.createPaymentBatch(batch, currentUser, triggerTransfer);
             if (paymentBatch != null) {
                 log.info("重试创建支付批次成功: batchId={}, paymentBatchNo={}",
                         batchId, paymentBatch.getBatchNo());

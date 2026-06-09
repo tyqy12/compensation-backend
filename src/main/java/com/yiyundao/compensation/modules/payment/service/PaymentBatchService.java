@@ -8,6 +8,7 @@ import com.yiyundao.compensation.enums.BatchStatus;
 public interface PaymentBatchService extends IService<PaymentBatch> {
     PaymentBatch getByBatchNo(String batchNo);
     void updateStatus(Long batchId, BatchStatus status);
+    void updateTerminalState(PaymentBatch batch);
     Page<PaymentBatch> pagePaymentBatches(int pageNum,
                                           int pageSize,
                                           String keyword,

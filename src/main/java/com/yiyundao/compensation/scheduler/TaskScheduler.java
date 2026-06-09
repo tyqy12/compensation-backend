@@ -41,14 +41,29 @@ public class TaskScheduler {
 
     public void scheduleTask(ScheduledTask task) {
         try {
+            if (task == null || task.getId() == null) {
+                return;
+            }
+            pauseTask(task.getId());
             ScheduledFuture<?> future = taskScheduler.schedule(
                     () -> executeTask(task),
                     triggerContext -> {
-                        LocalDateTime nextTime = taskService.calculateNextExecutionTime(task.getCronExpression());
-                        if (nextTime != null) {
-                            return nextTime.atZone(java.time.ZoneId.systemDefault()).toInstant();
+                        ScheduledTask latestTask = taskService.getById(task.getId());
+                        if (latestTask == null || latestTask.getStatus() != ScheduledTask.TaskStatus.RUNNING) {
+                            scheduledTasks.remove(task.getId());
+                            return null;
                         }
-                        return java.time.LocalDateTime.now().plusMinutes(5).atZone(java.time.ZoneId.systemDefault()).toInstant();
+                        LocalDateTime nextTime = latestTask.getNextExecuteTime();
+                        if (nextTime == null) {
+                            nextTime = taskService.calculateNextExecutionTime(latestTask.getCronExpression());
+                        }
+                        if (nextTime == null) {
+                            scheduledTasks.remove(task.getId());
+                            log.warn("任务 Cron 表达式无效，停止调度: taskId={}, taskKey={}, cron={}",
+                                    latestTask.getId(), latestTask.getTaskKey(), latestTask.getCronExpression());
+                            return null;
+                        }
+                        return nextTime.atZone(java.time.ZoneId.systemDefault()).toInstant();
                     }
             );
 
@@ -61,18 +76,26 @@ public class TaskScheduler {
     }
 
     private void executeTask(ScheduledTask task) {
-        log.info("开始执行任务: taskKey={}", task.getTaskKey());
+        ScheduledTask latestTask = taskService.getById(task.getId());
+        if (latestTask == null || latestTask.getStatus() != ScheduledTask.TaskStatus.RUNNING) {
+            scheduledTasks.remove(task.getId());
+            log.info("任务已停止调度，跳过本次执行: taskId={}, taskKey={}", task.getId(), task.getTaskKey());
+            return;
+        }
+
+        ScheduledTask executionTask = latestTask;
+        log.info("开始执行任务: taskKey={}", executionTask.getTaskKey());
         long startTime = System.currentTimeMillis();
 
         ScheduledTaskExecution execution = new ScheduledTaskExecution();
-        execution.setTaskId(task.getId());
-        execution.setTaskKey(task.getTaskKey());
+        execution.setTaskId(executionTask.getId());
+        execution.setTaskKey(executionTask.getTaskKey());
         execution.setStartTime(LocalDateTime.now());
         execution.setStatus(ScheduledTaskExecution.ExecutionStatus.RUNNING);
         executionMapper.insert(execution);
 
         try {
-            taskService.executeTask(task);
+            taskService.executeTask(executionTask);
 
             execution.setEndTime(LocalDateTime.now());
             execution.setDurationMs(System.currentTimeMillis() - startTime);
@@ -80,10 +103,10 @@ public class TaskScheduler {
             execution.setResult("执行成功");
             executionMapper.updateById(execution);
 
-            log.info("任务执行成功: taskKey={}", task.getTaskKey());
+            log.info("任务执行成功: taskKey={}", executionTask.getTaskKey());
 
         } catch (Exception e) {
-            log.error("任务执行失败: taskKey={}", task.getTaskKey(), e);
+            log.error("任务执行失败: taskKey={}", executionTask.getTaskKey(), e);
 
             execution.setEndTime(LocalDateTime.now());
             execution.setDurationMs(System.currentTimeMillis() - startTime);
@@ -92,8 +115,8 @@ public class TaskScheduler {
             executionMapper.updateById(execution);
 
             // 发送告警
-            if (task.getAlarmEnabled()) {
-                sendAlarm(task, e.getMessage());
+            if (Boolean.TRUE.equals(executionTask.getAlarmEnabled())) {
+                sendAlarm(executionTask, e.getMessage());
             }
         }
     }

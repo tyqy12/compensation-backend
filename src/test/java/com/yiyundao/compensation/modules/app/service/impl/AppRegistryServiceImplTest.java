@@ -17,6 +17,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -77,5 +78,88 @@ class AppRegistryServiceImplTest {
         assertThat(service.matchesSecret(app, "secret")).isTrue();
         assertThat(service.matchesSecret(app, "wrong")).isFalse();
     }
-}
 
+    @Test
+    void registerNormalizesSupportedScopeAliases() {
+        when(appRegistryMapper.insert(any(AppRegistry.class))).thenReturn(1);
+
+        AppRegistryService.AppRegistryCreateCommand cmd = new AppRegistryService.AppRegistryCreateCommand(
+                "Alias App",
+                List.of("payroll.read", "payslip.read", "payroll:read"),
+                null,
+                null,
+                "enabled"
+        );
+
+        AppRegistry saved = service.register(cmd).appRegistry();
+
+        assertThat(saved.getScopes()).isEqualTo("payroll:read,payslip:read");
+        assertThat(service.resolveScopes(saved)).containsExactly("payroll:read", "payslip:read");
+    }
+
+    @Test
+    void registerRejectsUnsupportedScopes() {
+        AppRegistryService.AppRegistryCreateCommand cmd = new AppRegistryService.AppRegistryCreateCommand(
+                "Bad Scope App",
+                List.of("payroll:write"),
+                null,
+                null,
+                "enabled"
+        );
+
+        assertThatThrownBy(() -> service.register(cmd))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("不支持的 scope");
+    }
+
+    @Test
+    void registerRejectsUnsupportedStatus() {
+        AppRegistryService.AppRegistryCreateCommand cmd = new AppRegistryService.AppRegistryCreateCommand(
+                "Bad Status App",
+                List.of("payroll:read"),
+                null,
+                null,
+                "archived"
+        );
+
+        assertThatThrownBy(() -> service.register(cmd))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("应用状态仅支持");
+    }
+
+    @Test
+    void updateRejectsUnsupportedStatus() {
+        AppRegistry app = new AppRegistry();
+        app.setId(10L);
+        app.setStatus("enabled");
+        when(appRegistryMapper.selectById(10L)).thenReturn(app);
+
+        AppRegistryService.AppRegistryUpdateCommand cmd = new AppRegistryService.AppRegistryUpdateCommand(
+                null,
+                null,
+                null,
+                null,
+                "archived"
+        );
+
+        assertThatThrownBy(() -> service.updateApp(10L, cmd))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("应用状态仅支持");
+    }
+
+    @Test
+    void isIpAllowedShouldFailClosedWhenPersistedWhitelistIsInvalidJson() {
+        AppRegistry app = new AppRegistry();
+        app.setIpWhitelist("not-json");
+
+        assertThat(service.isIpAllowed(app, "127.0.0.1")).isFalse();
+    }
+
+    @Test
+    void resolveScopesIgnoresUnsupportedPersistedScopes() {
+        AppRegistry app = new AppRegistry();
+        app.setScopes("payroll.read,unknown:scope,payslip:read");
+
+        assertThat(service.resolveScopes(app)).containsExactly("payroll:read", "payslip:read");
+    }
+}

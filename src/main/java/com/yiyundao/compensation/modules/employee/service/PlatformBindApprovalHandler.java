@@ -8,11 +8,8 @@ import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult;
 import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.event.TransactionPhase;
-import org.springframework.transaction.event.TransactionalEventListener;
 import org.springframework.util.StringUtils;
 
 /**
@@ -41,14 +38,12 @@ public class PlatformBindApprovalHandler {
      * - REJECTED/其他: 记录日志，便于追溯
      * </p>
      * <p>
-     * 使用 @TransactionalEventListener(phase = AFTER_COMMIT) 确保事件处理在审批事务提交后执行。
-     * 使用 @Transactional(propagation = REQUIRES_NEW) 开启新事务，确保平台绑定操作的独立性。
+     * 使用同步事件监听，确保绑定失败时审批事务回滚，避免审批已通过但绑定未生效。
      * </p>
      *
      * @param event 审批完成事件
      */
-    @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
-    @Transactional(propagation = Propagation.REQUIRES_NEW, rollbackFor = Exception.class)
+    @EventListener
     public void onApprovalCompleted(ApprovalCompletedEvent event) {
         ApprovalWorkflow workflow = event.getWorkflow();
         ApprovalStatus finalStatus = event.getFinalStatus();
@@ -88,8 +83,7 @@ public class PlatformBindApprovalHandler {
         try {
             var data = parseWorkflowData(workflow);
             if (data == null) {
-                log.warn("审批流程数据为空: workflowId={}", workflow.getId());
-                return;
+                throw new IllegalStateException("审批流程数据为空，无法执行平台绑定");
             }
 
             Long employeeId = toLong(data.get("employeeId"));
@@ -97,9 +91,7 @@ public class PlatformBindApprovalHandler {
             String subjectId = resolveFieldWithLegacyFallback(data, workflow.getId(), "subjectId", "platformUserId");
 
             if (employeeId == null || provider == null || subjectId == null) {
-                log.warn("审批数据不完整: workflowId={}, employeeId={}, provider={}, subjectId={}",
-                        workflow.getId(), employeeId, provider, subjectId);
-                return;
+                throw new IllegalArgumentException("审批数据缺少必需字段: employeeId/provider/subjectId");
             }
 
             BindPlatformResult result = employeeService.executeApprovedBinding(
@@ -109,8 +101,7 @@ public class PlatformBindApprovalHandler {
                 log.info("员工平台绑定审批执行成功: workflowId={}, employeeId={}, userId={}",
                         workflow.getId(), employeeId, result.getUserId());
             } else {
-                log.warn("员工平台绑定审批执行结果非预期: workflowId={}, result={}, message={}",
-                        workflow.getId(), result.getResult(), result.getMessage());
+                throw new IllegalStateException("员工平台绑定审批执行失败: " + result.getMessage());
             }
 
         } catch (Exception e) {
@@ -124,14 +115,13 @@ public class PlatformBindApprovalHandler {
      */
     @SuppressWarnings("unchecked")
     private java.util.Map<String, Object> parseWorkflowData(ApprovalWorkflow workflow) {
-        if (workflow.getWorkflowData() == null) {
+        if (workflow.getWorkflowData() == null || workflow.getWorkflowData().trim().isEmpty()) {
             return null;
         }
         try {
             return objectMapper.readValue(workflow.getWorkflowData(), java.util.Map.class);
         } catch (Exception e) {
-            log.warn("解析审批流程数据失败: workflowId={}", workflow.getId());
-            return null;
+            throw new IllegalStateException("审批流程数据解析失败: " + e.getMessage(), e);
         }
     }
 

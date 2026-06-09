@@ -83,13 +83,28 @@ export function usePermission(): PermissionContextValue {
     return permissionData?.actions ?? {};
   }, [permissionData]);
 
+  const actionsByResourceKey = useMemo((): Record<string, string[]> => {
+    if (!permissionData) return {};
+
+    const indexedActions: Record<string, string[]> = { ...permissionData.actions };
+    for (const resource of permissionData.resources) {
+      const actions = permissionData.actions[String(resource.id)] ?? [];
+      if (actions.length === 0) continue;
+
+      indexedActions[String(resource.id)] = actions;
+      if (resource.code) indexedActions[resource.code] = actions;
+      if (resource.path) indexedActions[resource.path] = actions;
+    }
+    return indexedActions;
+  }, [permissionData]);
+
   // 权限检查
   const checkPermission = useCallback(
     (resourceCode: string, action: string): boolean => {
       if (!permissionData) return false;
 
       // 检查用户操作权限
-      const actions = userActions[resourceCode] ?? permissionData.actions[String(resourceCode)] ?? [];
+      const actions = actionsByResourceKey[resourceCode] ?? [];
 
       if (actions.length === 0) return false;
 
@@ -98,7 +113,7 @@ export function usePermission(): PermissionContextValue {
 
       return actions.includes(action);
     },
-    [permissionData, userActions]
+    [permissionData, actionsByResourceKey]
   );
 
   // 检查任意权限
@@ -121,9 +136,9 @@ export function usePermission(): PermissionContextValue {
   const hasAction = useCallback(
     (actionCode: string): boolean => {
       if (!permissionData) return false;
-      return permissionData.actions.includes(actionCode);
+      return Object.values(userActions).some((actions) => actions.includes(actionCode));
     },
-    [permissionData]
+    [permissionData, userActions]
   );
 
   // 刷新权限
@@ -186,7 +201,7 @@ export function usePermission(): PermissionContextValue {
  * 获取有效权限（合并角色和用户权限）
  * @deprecated 该方法保留用于向后兼容，新代码请使用 usePermission
  */
-function getEffectivePermissions(
+function mapLegacyEffectivePermissions(
   _config: PermissionConfig,
   _userActions: Record<string, string[]>
 ): EffectivePermission[] {

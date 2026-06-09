@@ -12,19 +12,24 @@ import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollImportItem;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.payroll.entity.SalaryItem;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollImportService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.SalaryItemService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVRecord;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.io.Reader;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -33,6 +38,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -48,10 +54,22 @@ public class PayrollImportServiceImpl implements PayrollImportService {
             PayrollBatchStatus.DRAFT,
             PayrollBatchStatus.LOCKED
     );
+    private static final List<String> EXPECTED_HEADERS = List.of(
+            "employeeId", "itemCode", "amount", "note"
+    );
+    private static final int AMOUNT_INTEGER_DIGITS = 10;
+    private static final int AMOUNT_FRACTION_DIGITS = 2;
+    private static final CSVFormat IMPORT_CSV_FORMAT = CSVFormat.RFC4180.builder()
+            .setHeader()
+            .setSkipHeaderRecord(true)
+            .setIgnoreSurroundingSpaces(true)
+            .setTrim(true)
+            .build();
 
     private final PayrollBatchService payrollBatchService;
     private final EmployeeService employeeService;
     private final SalaryItemService salaryItemService;
+    private final PayrollLineService payrollLineService;
     private final PayrollImportItemMapper importItemMapper;
 
     @Override
@@ -64,6 +82,10 @@ public class PayrollImportServiceImpl implements PayrollImportService {
     @Transactional
     public String commitCsv(Long batchId, MultipartFile file) {
         Map<String, Object> summary = parseCsv(batchId, file, true);
+        Object error = summary.get("error");
+        if (error != null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "CSV导入失败: " + error);
+        }
         return toJson(summary);
     }
 
@@ -90,6 +112,7 @@ public class PayrollImportServiceImpl implements PayrollImportService {
         entity.setBatchId(batchId);
         entity.setEmployeeId(employee.getId());
         entity.setItemCode(salaryItem.getCode());
+        validateAmount(request.getAmount());
         entity.setAmount(request.getAmount());
         entity.setNote(normalizeNullableText(request.getNote()));
         entity.setSourceName(SOURCE_MANUAL);
@@ -117,6 +140,7 @@ public class PayrollImportServiceImpl implements PayrollImportService {
 
         item.setEmployeeId(employee.getId());
         item.setItemCode(salaryItem.getCode());
+        validateAmount(request.getAmount());
         item.setAmount(request.getAmount());
         item.setNote(normalizeNullableText(request.getNote()));
         if (request.getRowNo() != null) {
@@ -162,26 +186,21 @@ public class PayrollImportServiceImpl implements PayrollImportService {
         if (persist) {
             ensureBatchMutable(batch);
         }
+        String sourceName = file == null ? null : normalizeNullableText(file.getOriginalFilename());
+        List<PayrollImportItem> recordsToPersist = new ArrayList<>();
 
         Map<String, SalaryItem> itemByCode = loadEnabledSalaryItems();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
-            String header = br.readLine();
-            if (header == null) throw new IllegalArgumentException("empty file");
-            int row = 1;
-            String line;
-            while ((line = br.readLine()) != null) {
-                row++;
+        try (Reader reader = new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8);
+             CSVParser parser = IMPORT_CSV_FORMAT.parse(reader)) {
+            Map<String, String> headerByLower = normalizeHeaders(parser.getHeaderMap().keySet());
+            validateRequiredHeaders(headerByLower);
+            for (CSVRecord record : parser) {
+                int row = safeRowNumber(record);
                 total++;
-                String[] parts = line.split(",");
-                if (parts.length < 3) {
-                    invalid++;
-                    errors.add(err(row, "col < 3"));
-                    continue;
-                }
-                String employeeNo = parts[0].trim();
-                String itemCode = parts[1].trim();
-                String amountStr = parts[2].trim();
-                String note = parts.length >= 4 ? parts[3].trim() : null;
+                String employeeNo = getCsvValue(record, headerByLower, "employeeId");
+                String itemCode = getCsvValue(record, headerByLower, "itemCode");
+                String amountStr = getCsvValue(record, headerByLower, "amount");
+                String note = getCsvValue(record, headerByLower, "note");
 
                 Employee emp = employeeService.getByEmployeeId(employeeNo);
                 if (emp == null) {
@@ -198,6 +217,7 @@ public class PayrollImportServiceImpl implements PayrollImportService {
                 BigDecimal amount;
                 try {
                     amount = new BigDecimal(amountStr);
+                    validateAmount(amount);
                 } catch (Exception e) {
                     invalid++;
                     errors.add(err(row, "amount invalid:" + amountStr));
@@ -212,20 +232,82 @@ public class PayrollImportServiceImpl implements PayrollImportService {
                     rec.setItemCode(itemCode);
                     rec.setAmount(amount);
                     rec.setNote(note);
-                    rec.setSourceName(file.getOriginalFilename());
+                    rec.setSourceName(sourceName);
                     rec.setRowNo(row);
                     rec.setStatus(STATUS_VALID);
-                    importItemMapper.insert(rec);
+                    recordsToPersist.add(rec);
                 }
             }
         } catch (Exception e) {
             result.put("error", e.getMessage());
+        }
+
+        if (persist && !result.containsKey("error")) {
+            if (total == 0) {
+                result.put("error", "CSV没有可导入的数据行");
+            } else if (invalid > 0) {
+                result.put("error", "存在 " + invalid + " 行无效数据，请先使用预览接口查看错误明细");
+            }
+        }
+
+        if (persist && !result.containsKey("error") && !recordsToPersist.isEmpty()) {
+            ensureBatchStillMutableForWrite(batchId);
+            replacePreviousFileImport(batchId, sourceName);
+            recordsToPersist.forEach(importItemMapper::insert);
         }
         result.put("total", total);
         result.put("valid", valid);
         result.put("invalid", invalid);
         result.put("errors", errors);
         return result;
+    }
+
+    private Map<String, String> normalizeHeaders(Set<String> headers) {
+        Map<String, String> headerByLower = new HashMap<>();
+        for (String header : headers) {
+            String normalized = normalizeText(header);
+            if (normalized != null) {
+                headerByLower.put(normalized.toLowerCase(Locale.ROOT), header);
+            }
+        }
+        return headerByLower;
+    }
+
+    private void validateRequiredHeaders(Map<String, String> headerByLower) {
+        if (headerByLower == null || headerByLower.isEmpty()) {
+            throw new IllegalArgumentException("CSV文件头部为空");
+        }
+        List<String> missingHeaders = new ArrayList<>();
+        for (String expected : EXPECTED_HEADERS) {
+            if (!headerByLower.containsKey(expected.toLowerCase(Locale.ROOT))) {
+                missingHeaders.add(expected);
+            }
+        }
+        if (!missingHeaders.isEmpty()) {
+            throw new IllegalArgumentException("CSV头部缺少必需的列: " + String.join(", ", missingHeaders));
+        }
+    }
+
+    private String getCsvValue(CSVRecord record, Map<String, String> headerByLower, String header) {
+        String originalHeader = headerByLower.get(header.toLowerCase(Locale.ROOT));
+        if (originalHeader == null || !record.isMapped(originalHeader) || !record.isSet(originalHeader)) {
+            return null;
+        }
+        return normalizeNullableText(record.get(originalHeader));
+    }
+
+    private int safeRowNumber(CSVRecord record) {
+        long rowNumber = record.getRecordNumber() + 1;
+        return rowNumber > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) rowNumber;
+    }
+
+    private void replacePreviousFileImport(Long batchId, String sourceName) {
+        if (!StringUtils.hasText(sourceName) || SOURCE_MANUAL.equalsIgnoreCase(sourceName)) {
+            return;
+        }
+        importItemMapper.delete(new LambdaQueryWrapper<PayrollImportItem>()
+                .eq(PayrollImportItem::getBatchId, batchId)
+                .eq(PayrollImportItem::getSourceName, sourceName));
     }
 
     private Map<String, Object> err(int row, String msg) {
@@ -255,6 +337,27 @@ public class PayrollImportServiceImpl implements PayrollImportService {
         if (batch.getStatus() == null || !MUTABLE_BATCH_STATUSES.contains(batch.getStatus())) {
             throw new BusinessException(ErrorCode.INVALID_STATUS, "当前批次状态不允许继续录入，请在草稿或已锁定状态下操作");
         }
+        if (batch.getStatus() == PayrollBatchStatus.LOCKED && hasComputedLines(batch.getId())) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "当前批次已生成工资结果，请先重新打开批次后再修改导入数据");
+        }
+    }
+
+    private void ensureBatchStillMutableForWrite(Long batchId) {
+        PayrollBatch latest = payrollBatchService.getOne(new LambdaQueryWrapper<PayrollBatch>()
+                .eq(PayrollBatch::getId, batchId)
+                .last("for update"));
+        if (latest == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
+        }
+        ensureBatchMutable(latest);
+    }
+
+    private boolean hasComputedLines(Long batchId) {
+        if (batchId == null) {
+            return false;
+        }
+        return payrollLineService.count(new LambdaQueryWrapper<PayrollLine>()
+                .eq(PayrollLine::getBatchId, batchId)) > 0;
     }
 
     private Employee resolveEmployee(PayrollManualImportItemRequest request) {
@@ -288,6 +391,18 @@ public class PayrollImportServiceImpl implements PayrollImportService {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "薪资项不存在或未启用: " + normalizedItemCode);
         }
         return salaryItem;
+    }
+
+    private void validateAmount(BigDecimal amount) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("金额必须大于0");
+        }
+        BigDecimal normalized = amount.stripTrailingZeros();
+        int scale = Math.max(normalized.scale(), 0);
+        int integerDigits = normalized.precision() - scale;
+        if (integerDigits > AMOUNT_INTEGER_DIGITS || scale > AMOUNT_FRACTION_DIGITS) {
+            throw new IllegalArgumentException("金额精度超出限制");
+        }
     }
 
     private Map<String, SalaryItem> loadEnabledSalaryItems() {

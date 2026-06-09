@@ -17,8 +17,12 @@ public enum EmployeeStatus {
     }
 
     public static EmployeeStatus fromCode(String code) {
+        if (code == null) {
+            throw new IllegalArgumentException("Unknown employee status: null");
+        }
+        String normalizedCode = code.trim();
         for (EmployeeStatus status : values()) {
-            if (status.getCode().equals(code)) {
+            if (status.getCode().equalsIgnoreCase(normalizedCode)) {
                 return status;
             }
         }

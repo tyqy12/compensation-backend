@@ -2,6 +2,7 @@ package com.yiyundao.compensation.interfaces.dto.payroll;
 
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Digits;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -21,6 +22,7 @@ public class PayrollManualImportItemRequest {
 
     @NotNull
     @DecimalMin(value = "0", inclusive = false)
+    @Digits(integer = 10, fraction = 2)
     private BigDecimal amount;
 
     @Min(1)

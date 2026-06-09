@@ -1,13 +1,17 @@
 package com.yiyundao.compensation.interfaces.controller.payroll;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
-import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.interfaces.dto.payroll.PayCycleResponseDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayCycleUpsertRequest;
 import com.yiyundao.compensation.modules.payroll.entity.PayCycle;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.service.PayCycleService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
+import com.yiyundao.compensation.security.SecurityAnnotations;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,10 +26,15 @@ import java.util.Set;
 @Slf4j
 @RestController
 @RequestMapping("/payroll/cycles")
+@SecurityAnnotations.IsFinanceOrAdmin
 @RequiredArgsConstructor
 public class PayCycleController {
 
+    private static final int DEFAULT_PAGE_SIZE = 10;
+    private static final int MAX_PAGE_SIZE = 200;
+
     private final PayCycleService payCycleService;
+    private final PayrollBatchService payrollBatchService;
 
     /**
      * 状态转换守护：允许的状态转换路径
@@ -42,7 +51,7 @@ public class PayCycleController {
     );
 
     @PostMapping
-    public ApiResponse<PayCycle> create(@Valid @RequestBody PayCycleUpsertRequest req) {
+    public ApiResponse<PayCycleResponseDto> create(@Valid @RequestBody PayCycleUpsertRequest req) {
         String normalizedType = normalizeLower(req.getType());
         String normalizedPeriodLabel = normalizeText(req.getPeriodLabel());
         if (normalizedType == null || normalizedPeriodLabel == null) {
@@ -104,11 +113,11 @@ public class PayCycleController {
             return ApiResponse.error(ErrorCode.SYSTEM_ERROR, "创建薪酬周期失败");
         }
 
-        return ApiResponse.success(c);
+        return ApiResponse.success(PayCycleResponseDto.from(c));
     }
 
     @PutMapping("/{id}")
-    public ApiResponse<PayCycle> update(@PathVariable Long id, @Valid @RequestBody PayCycleUpsertRequest req) {
+    public ApiResponse<PayCycleResponseDto> update(@PathVariable Long id, @Valid @RequestBody PayCycleUpsertRequest req) {
         PayCycle c = payCycleService.getById(id);
         if (c == null) return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "pay cycle not found");
 
@@ -149,6 +158,7 @@ public class PayCycleController {
         }
 
         // 状态转换守护
+        String originalStatus = c.getStatus();
         String currentStatus = normalizeStatus(c.getStatus());
         if (currentStatus == null) {
             currentStatus = "draft";
@@ -184,14 +194,16 @@ public class PayCycleController {
         }
 
         try {
-            payCycleService.updateById(c);
+            if (!payCycleService.update(buildConditionalUpdateWrapper(c, originalStatus))) {
+                return ApiResponse.error(ErrorCode.REQUEST_CONFLICT, "薪酬周期状态已变更，请刷新后重试");
+            }
             log.info("更新薪酬周期成功: id={}", id);
         } catch (Exception e) {
             log.error("更新薪酬周期失败: id={}", id, e);
             return ApiResponse.error(ErrorCode.SYSTEM_ERROR, "更新薪酬周期失败");
         }
 
-        return ApiResponse.success(c);
+        return ApiResponse.success(PayCycleResponseDto.from(c));
     }
 
     /**
@@ -199,11 +211,14 @@ public class PayCycleController {
      * draft -> open -> closed -> archived
      */
     @PostMapping("/{id}/advance")
-    public ApiResponse<PayCycle> advanceStatus(@PathVariable Long id) {
+    public ApiResponse<PayCycleResponseDto> advanceStatus(@PathVariable Long id) {
         PayCycle c = payCycleService.getById(id);
         if (c == null) return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "pay cycle not found");
 
         String currentStatus = normalizeStatus(c.getStatus());
+        if (currentStatus == null) {
+            currentStatus = "draft";
+        }
         String nextStatus = switch (currentStatus) {
             case "draft" -> "open";
             case "open" -> "closed";
@@ -216,14 +231,16 @@ public class PayCycleController {
         }
 
         try {
-            LambdaUpdateWrapper<PayCycle> updateWrapper = new LambdaUpdateWrapper<PayCycle>()
-                .eq(PayCycle::getId, id)
-                .set(PayCycle::getStatus, nextStatus);
-            payCycleService.update(updateWrapper);
+            UpdateWrapper<PayCycle> updateWrapper = new UpdateWrapper<PayCycle>();
+            addCurrentStatusGuard(updateWrapper, id, c.getStatus());
+            updateWrapper.set("status", nextStatus);
+            if (!payCycleService.update(updateWrapper)) {
+                return ApiResponse.error(ErrorCode.REQUEST_CONFLICT, "薪酬周期状态已变更，请刷新后重试");
+            }
 
             c.setStatus(nextStatus);
             log.info("薪酬周期状态推进成功: id={}, {} -> {}", id, currentStatus, nextStatus);
-            return ApiResponse.success(c);
+            return ApiResponse.success(PayCycleResponseDto.from(c));
         } catch (Exception e) {
             log.error("推进薪酬周期状态失败: id={}", id, e);
             return ApiResponse.error(ErrorCode.SYSTEM_ERROR, "推进状态失败");
@@ -231,12 +248,12 @@ public class PayCycleController {
     }
 
     @GetMapping
-    public ApiResponse<Page<PayCycle>> list(@RequestParam(defaultValue = "1") int page,
-                                            @RequestParam(defaultValue = "10") int size,
-                                            @RequestParam(required = false) String status,
-                                            @RequestParam(required = false) String periodLabel,
-                                            @RequestParam(required = false) String keyword) {
-        Page<PayCycle> p = new Page<>(page, size);
+    public ApiResponse<Page<PayCycleResponseDto>> list(@RequestParam(defaultValue = "1") int page,
+                                                       @RequestParam(defaultValue = "10") int size,
+                                                       @RequestParam(required = false) String status,
+                                                       @RequestParam(required = false) String periodLabel,
+                                                       @RequestParam(required = false) String keyword) {
+        Page<PayCycle> p = new Page<>(safePage(page), safeSize(size));
         LambdaQueryWrapper<PayCycle> qw = new LambdaQueryWrapper<>();
 
         if (status != null && !status.isBlank()) {
@@ -262,29 +279,31 @@ public class PayCycleController {
 
         qw.orderByAsc(PayCycle::getNextExecutionTime)
             .orderByDesc(PayCycle::getCreateTime);
-        return ApiResponse.success(payCycleService.page(p, qw));
+        return ApiResponse.success(toResponsePage(payCycleService.page(p, qw)));
     }
 
     @GetMapping("/{id}")
-    public ApiResponse<PayCycle> get(@PathVariable Long id) {
+    public ApiResponse<PayCycleResponseDto> get(@PathVariable Long id) {
         PayCycle cycle = payCycleService.getById(id);
         if (cycle == null) {
             return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "pay cycle not found");
         }
-        return ApiResponse.success(cycle);
+        return ApiResponse.success(PayCycleResponseDto.from(cycle));
     }
 
     /**
      * 获取指定类型的开放周期
      */
     @GetMapping("/open")
-    public ApiResponse<List<PayCycle>> getOpenCycles(@RequestParam String type) {
+    public ApiResponse<List<PayCycleResponseDto>> getOpenCycles(@RequestParam String type) {
         String normalizedType = normalizeLower(type);
         LambdaQueryWrapper<PayCycle> qw = new LambdaQueryWrapper<PayCycle>()
             .eq(PayCycle::getType, normalizedType)
             .eq(PayCycle::getStatus, "open")
             .orderByDesc(PayCycle::getCreateTime);
-        return ApiResponse.success(payCycleService.list(qw));
+        return ApiResponse.success(payCycleService.list(qw).stream()
+            .map(PayCycleResponseDto::from)
+            .toList());
     }
 
     @DeleteMapping("/{id}")
@@ -297,11 +316,11 @@ public class PayCycleController {
             return ApiResponse.error(ErrorCode.INVALID_STATUS, "只能删除草稿状态的周期");
         }
 
-        // 检查是否有关联的数据（如果需要）
-        payCycleService.lambdaQuery()
-            .eq(PayCycle::getId, id)
-            .exists();
-        // 如果有批次关联，不允许删除（此处可根据业务需求调整）
+        long linkedBatchCount = payrollBatchService.count(new LambdaQueryWrapper<PayrollBatch>()
+            .eq(PayrollBatch::getPayCycleId, id));
+        if (linkedBatchCount > 0) {
+            return ApiResponse.error(ErrorCode.REQUEST_CONFLICT, "薪酬周期已关联薪资批次，不能删除");
+        }
 
         try {
             payCycleService.removeById(id);
@@ -314,6 +333,35 @@ public class PayCycleController {
         return ApiResponse.success(null);
     }
 
+    private UpdateWrapper<PayCycle> buildConditionalUpdateWrapper(PayCycle cycle, String originalStatus) {
+        UpdateWrapper<PayCycle> wrapper = new UpdateWrapper<>();
+        addCurrentStatusGuard(wrapper, cycle.getId(), originalStatus);
+        wrapper.set("type", cycle.getType())
+                .set("period_label", cycle.getPeriodLabel())
+                .set("cycle_code", cycle.getCycleCode())
+                .set("cycle_name", cycle.getCycleName())
+                .set("cycle_type", cycle.getCycleType())
+                .set("start_date", cycle.getStartDate())
+                .set("end_date", cycle.getEndDate())
+                .set("cutoff_date", cycle.getCutoffDate())
+                .set("pay_day", cycle.getPayDay())
+                .set("lead_days", cycle.getLeadDays())
+                .set("grace_days", cycle.getGraceDays())
+                .set("timezone", cycle.getTimezone())
+                .set("description", cycle.getDescription())
+                .set("status", cycle.getStatus());
+        return wrapper;
+    }
+
+    private void addCurrentStatusGuard(UpdateWrapper<PayCycle> wrapper, Long id, String currentStatus) {
+        wrapper.eq("id", id);
+        if (normalizeText(currentStatus) == null) {
+            wrapper.isNull("status");
+        } else {
+            wrapper.eq("status", currentStatus);
+        }
+    }
+
     private boolean isCycleCodeExists(String cycleCode, Long excludeId) {
         if (cycleCode == null) {
             return false;
@@ -324,6 +372,26 @@ public class PayCycleController {
             query.ne(PayCycle::getId, excludeId);
         }
         return payCycleService.count(query) > 0;
+    }
+
+    private static Page<PayCycleResponseDto> toResponsePage(Page<PayCycle> source) {
+        Page<PayCycleResponseDto> target = new Page<>(source.getCurrent(), source.getSize(), source.getTotal());
+        target.setPages(source.getPages());
+        target.setRecords(source.getRecords().stream()
+            .map(PayCycleResponseDto::from)
+            .toList());
+        return target;
+    }
+
+    private int safePage(int page) {
+        return page < 1 ? 1 : page;
+    }
+
+    private int safeSize(int size) {
+        if (size < 1) {
+            return DEFAULT_PAGE_SIZE;
+        }
+        return Math.min(size, MAX_PAGE_SIZE);
     }
 
     private static boolean isDateRangeValid(LocalDate startDate, LocalDate endDate) {

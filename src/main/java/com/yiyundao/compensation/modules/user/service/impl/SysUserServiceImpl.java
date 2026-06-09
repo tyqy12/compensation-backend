@@ -61,6 +61,14 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
     }
 
     @Override
+    public SysUser findFirstByRoleExcluding(String roleCode, Long excludedUserId) {
+        if (roleCode == null || roleCode.isBlank()) {
+            return null;
+        }
+        return userRoleService.findFirstUserByRoleExcluding(roleCode, excludedUserId);
+    }
+
+    @Override
     public void incrementPermissionVersion(Long userId) {
         if (userId == null) {
             return;

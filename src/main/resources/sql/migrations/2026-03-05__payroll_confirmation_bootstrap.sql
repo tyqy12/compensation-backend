@@ -39,7 +39,7 @@ INSERT INTO `sys_resource`(
 )
 SELECT
     'API','api.payroll.confirmations.pending','待确认列表','/api/payroll/confirmations/pending',
-    NULL,NULL,@menu_payroll_id,210,JSON_OBJECT('method','GET'),'enabled',@now,@now
+    NULL,NULL,@menu_payroll_id,210,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN','FINANCE','HR','MANAGER','EMPLOYEE')),'enabled',@now,@now
 WHERE @menu_payroll_id IS NOT NULL
 ON DUPLICATE KEY UPDATE
     `name`=VALUES(`name`),
@@ -56,7 +56,7 @@ INSERT INTO `sys_resource`(
 )
 SELECT
     'API','api.payroll.confirmations.summary','确认汇总','/api/payroll/confirmations/batches/*/summary',
-    NULL,NULL,@menu_payroll_id,211,JSON_OBJECT('method','GET'),'enabled',@now,@now
+    NULL,NULL,@menu_payroll_id,211,JSON_OBJECT('method','GET','roles',JSON_ARRAY('ADMIN','FINANCE','HR')),'enabled',@now,@now
 WHERE @menu_payroll_id IS NOT NULL
 ON DUPLICATE KEY UPDATE
     `name`=VALUES(`name`),
@@ -124,7 +124,7 @@ INSERT INTO `sys_resource`(
 )
 SELECT
     'API','api.payroll.confirmations.assign','分配确认负责人','/api/payroll/confirmations/batches/*/assign',
-    NULL,NULL,@menu_payroll_id,215,JSON_OBJECT('method','POST'),'enabled',@now,@now
+    NULL,NULL,@menu_payroll_id,215,JSON_OBJECT('method','POST','roles',JSON_ARRAY('ADMIN','FINANCE')),'enabled',@now,@now
 WHERE @menu_payroll_id IS NOT NULL
 ON DUPLICATE KEY UPDATE
     `name`=VALUES(`name`),
@@ -147,16 +147,42 @@ FROM `sys_role` r
 JOIN `sys_resource` res ON res.code IN (
     'view.payroll.confirmations',
     'api.payroll.confirmations.pending',
-    'api.payroll.confirmations.summary',
     'api.payroll.confirmations.confirm',
     'api.payroll.confirmations.object',
-    'api.payroll.confirmations.batch-confirm',
-    'api.payroll.confirmations.assign'
+    'api.payroll.confirmations.batch-confirm'
 )
 WHERE r.code IN (
     'ADMIN', 'FINANCE', 'HR', 'MANAGER', 'EMPLOYEE',
     'role.admin.all', 'role.finance', 'role.hr', 'role.manager', 'role.employee'
 )
+ON DUPLICATE KEY UPDATE
+    `actions_json` = COALESCE(`sys_role_resource`.`actions_json`, VALUES(`actions_json`)),
+    `update_time` = @now;
+
+INSERT INTO `sys_role_resource`(`role_id`,`resource_id`,`actions_json`,`create_time`,`update_time`)
+SELECT
+    r.id,
+    res.id,
+    CASE WHEN r.code IN ('ADMIN', 'role.admin.all') THEN JSON_ARRAY('*') ELSE NULL END,
+    @now,
+    @now
+FROM `sys_role` r
+JOIN `sys_resource` res ON res.code = 'api.payroll.confirmations.summary'
+WHERE r.code IN ('ADMIN', 'FINANCE', 'HR', 'role.admin.all', 'role.finance', 'role.hr')
+ON DUPLICATE KEY UPDATE
+    `actions_json` = COALESCE(`sys_role_resource`.`actions_json`, VALUES(`actions_json`)),
+    `update_time` = @now;
+
+INSERT INTO `sys_role_resource`(`role_id`,`resource_id`,`actions_json`,`create_time`,`update_time`)
+SELECT
+    r.id,
+    res.id,
+    CASE WHEN r.code IN ('ADMIN', 'role.admin.all') THEN JSON_ARRAY('*') ELSE NULL END,
+    @now,
+    @now
+FROM `sys_role` r
+JOIN `sys_resource` res ON res.code = 'api.payroll.confirmations.assign'
+WHERE r.code IN ('ADMIN', 'FINANCE', 'role.admin.all', 'role.finance')
 ON DUPLICATE KEY UPDATE
     `actions_json` = COALESCE(`sys_role_resource`.`actions_json`, VALUES(`actions_json`)),
     `update_time` = @now;
