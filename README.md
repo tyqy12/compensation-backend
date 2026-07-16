@@ -253,6 +253,11 @@ spring.data.redis.host: localhost
 spring.data.redis.port: 6379
 ```
 
+Redis 开启认证时，通过环境变量注入，不要把密码写进配置文件：
+```bash
+export SPRING_DATA_REDIS_PASSWORD='your-redis-password'
+```
+
 3. **JWT密钥**
 ```yaml
 jwt.secret: your-secret-key-at-least-32-chars

@@ -99,6 +99,7 @@ class PayrollPaymentServiceImplTest {
         assertThat(result.getTotalCount()).isEqualTo(1);
         assertThat(payrollBatch.getPaymentBatchNo()).isEqualTo(result.getBatchNo());
         assertThat(payrollBatch.getStatus()).isEqualTo(PayrollBatchStatus.PAY_PROCESSING);
+        assertThat(payrollBatch.getPaymentStatus()).isEqualTo(PaymentBatchProcessStatus.SUBMITTED);
 
         InOrder inOrder = inOrder(payrollBatchMapper, paymentBatchService, paymentRecordService);
         inOrder.verify(payrollBatchMapper).update(eq(null), any(UpdateWrapper.class));
@@ -115,11 +116,30 @@ class PayrollPaymentServiceImplTest {
         payrollBatchUpdateCaptor.getValue().getSqlSegment();
         assertThat(payrollBatchUpdateCaptor.getValue().getParamNameValuePairs().values())
                 .contains(10L, PayrollBatchStatus.APPROVED.getCode(), result.getBatchNo(),
-                        PayrollBatchStatus.PAY_PROCESSING.getCode());
+                        PayrollBatchStatus.PAY_PROCESSING.getCode(),
+                        PaymentBatchProcessStatus.SUBMITTED.getCode());
     }
 
     @Test
-    void createPaymentBatchShouldKeepConfiguredProviderForFullTimeAlipayAccount() {
+    void createPaymentBatchShouldAbortWhenEmployeeIsMissing() {
+        PayrollPaymentServiceImpl service = newService();
+        PayrollBatch payrollBatch = payrollBatch();
+        when(payrollLineService.list(anyPayrollLineWrapper())).thenReturn(List.of(payrollLine()));
+        when(employeeService.getById(1001L)).thenReturn(null);
+
+        assertThatThrownBy(() -> service.createPaymentBatch(payrollBatch, approver(), false))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("工资行关联的员工不存在")
+                .hasMessageContaining("employeeId=1001")
+                .hasMessageContaining("lineId=2001");
+
+        verify(payrollBatchMapper, never()).update(eq(null), any(UpdateWrapper.class));
+        verify(paymentBatchService, never()).save(any(PaymentBatch.class));
+        verify(paymentRecordService, never()).saveBatch(any(Collection.class));
+    }
+
+    @Test
+    void createPaymentBatchShouldUseAlipayForFullTimeAlipayAccount() {
         PayrollPaymentServiceImpl service = newService();
         PayrollBatch payrollBatch = payrollBatch();
         Employee employee = employee();
@@ -136,7 +156,7 @@ class PayrollPaymentServiceImplTest {
             PaymentRecord record = (PaymentRecord) records.iterator().next();
             return record.getStatus() == PaymentStatus.PENDING
                     && "ALIPAY".equals(record.getPaymentMethod())
-                    && "yunzhanghu".equals(record.getProviderCode());
+                    && "alipay".equals(record.getProviderCode());
         }));
     }
 
@@ -408,7 +428,7 @@ class PayrollPaymentServiceImplTest {
     }
 
     @Test
-    void retryFailedPaymentShouldResolveOpenFailureRecordWhenResetSucceeds() {
+    void retryFailedPaymentShouldKeepOpenFailureRecordRetryingWhenResetSucceeds() {
         PayrollPaymentServiceImpl service = newService();
         PayrollBatch payrollBatch = payrollBatch();
         payrollBatch.setStatus(PayrollBatchStatus.PAY_FAILED);
@@ -428,7 +448,7 @@ class PayrollPaymentServiceImplTest {
         PaymentBatch retried = service.retryFailedPayment(10L, false);
 
         assertThat(retried).isSameAs(paymentBatch);
-        verify(payrollPaymentFailureService).markResolvedByPayrollBatchId(10L, "PB-FAILED-10");
+        verify(payrollPaymentFailureService).markRetryingByPayrollBatchId(10L, "PB-FAILED-10");
         verify(afterCommitExecutor, never()).execute(any());
     }
 
@@ -454,7 +474,7 @@ class PayrollPaymentServiceImplTest {
         PaymentBatch retried = service.retryFailedPayment(10L, false);
 
         assertThat(retried).isSameAs(paymentBatch);
-        verify(payrollPaymentFailureService).markResolvedByPayrollBatchId(10L, "PB-PARTIAL-10");
+        verify(payrollPaymentFailureService).markRetryingByPayrollBatchId(10L, "PB-PARTIAL-10");
         verify(afterCommitExecutor, never()).execute(any());
     }
 
@@ -481,7 +501,7 @@ class PayrollPaymentServiceImplTest {
         verify(paymentRecordService, never()).update(any(UpdateWrapper.class));
         verify(paymentBatchService, never()).update(any(UpdateWrapper.class));
         verify(afterCommitExecutor, never()).execute(any());
-        verify(payrollPaymentFailureService, never()).markResolvedByPayrollBatchId(any(), any());
+        verify(payrollPaymentFailureService, never()).markRetryingByPayrollBatchId(any(), any());
     }
 
     @Test
@@ -507,7 +527,7 @@ class PayrollPaymentServiceImplTest {
         verify(paymentRecordService, never()).update(any(UpdateWrapper.class));
         verify(paymentBatchService, never()).update(any(UpdateWrapper.class));
         verify(afterCommitExecutor, never()).execute(any());
-        verify(payrollPaymentFailureService, never()).markResolvedByPayrollBatchId(any(), any());
+        verify(payrollPaymentFailureService, never()).markRetryingByPayrollBatchId(any(), any());
     }
 
     @Test
@@ -520,6 +540,9 @@ class PayrollPaymentServiceImplTest {
         paymentBatch.setBatchNo("PB-DIST-10");
         paymentBatch.setStatus(com.yiyundao.compensation.enums.BatchStatus.FAILED);
         paymentBatch.setDistributionId(55L);
+        PayrollDistribution distribution = new PayrollDistribution();
+        distribution.setId(55L);
+        distribution.setRetryLimit(3);
 
         when(payrollBatchMapper.selectById(10L)).thenReturn(payrollBatch);
         when(paymentBatchService.getByBatchNo("PB-DIST-10")).thenReturn(paymentBatch, paymentBatch);
@@ -527,6 +550,7 @@ class PayrollPaymentServiceImplTest {
         when(paymentRecordService.count(any(Wrapper.class))).thenReturn(0L, 0L);
         when(paymentRecordService.update(any(UpdateWrapper.class))).thenReturn(true);
         when(paymentBatchService.update(any(UpdateWrapper.class))).thenReturn(true);
+        when(payrollDistributionMapper.selectById(55L)).thenReturn(distribution);
         when(payrollDistributionItemMapper.update(eq(null), any(UpdateWrapper.class))).thenReturn(1);
         when(payrollDistributionMapper.update(eq(null), any(UpdateWrapper.class))).thenReturn(1);
         when(payrollBatchMapper.update(eq(null), any(UpdateWrapper.class))).thenReturn(1);
@@ -538,13 +562,74 @@ class PayrollPaymentServiceImplTest {
         verify(payrollDistributionItemMapper).update(eq(null), itemUpdateCaptor.capture());
         itemUpdateCaptor.getValue().getSqlSegment();
         assertThat(itemUpdateCaptor.getValue().getParamNameValuePairs().values())
-                .contains(55L, 501L, "retrying");
+                .contains(55L, 501L, "failed", "retrying", 3);
 
         ArgumentCaptor<UpdateWrapper<PayrollDistribution>> distributionUpdateCaptor = ArgumentCaptor.forClass(UpdateWrapper.class);
         verify(payrollDistributionMapper).update(eq(null), distributionUpdateCaptor.capture());
         distributionUpdateCaptor.getValue().getSqlSegment();
         assertThat(distributionUpdateCaptor.getValue().getParamNameValuePairs().values())
                 .contains(55L, "processing");
+    }
+
+    @Test
+    void retryFailedPaymentShouldRejectDistributionItemAtRetryLimit() {
+        PayrollPaymentServiceImpl service = newService();
+        PayrollBatch payrollBatch = payrollBatch();
+        payrollBatch.setStatus(PayrollBatchStatus.PAY_FAILED);
+        payrollBatch.setPaymentBatchNo("PB-DIST-LIMIT-10");
+        PaymentBatch paymentBatch = new PaymentBatch();
+        paymentBatch.setBatchNo("PB-DIST-LIMIT-10");
+        paymentBatch.setStatus(com.yiyundao.compensation.enums.BatchStatus.FAILED);
+        paymentBatch.setDistributionId(56L);
+        PayrollDistribution distribution = new PayrollDistribution();
+        distribution.setId(56L);
+        distribution.setRetryLimit(1);
+
+        when(payrollBatchMapper.selectById(10L)).thenReturn(payrollBatch);
+        when(paymentBatchService.getByBatchNo("PB-DIST-LIMIT-10")).thenReturn(paymentBatch);
+        when(paymentRecordService.list(any(Wrapper.class))).thenReturn(List.of(failedRecord(502L)));
+        when(paymentRecordService.update(any(UpdateWrapper.class))).thenReturn(true);
+        when(paymentBatchService.update(any(UpdateWrapper.class))).thenReturn(true);
+        when(payrollDistributionMapper.selectById(56L)).thenReturn(distribution);
+        when(payrollDistributionItemMapper.update(eq(null), any(UpdateWrapper.class))).thenReturn(0);
+
+        assertThatThrownBy(() -> service.retryFailedPayment(10L, false))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("达到最大重试次数或状态已变更");
+
+        verify(paymentBatchService).update(any(UpdateWrapper.class));
+        verify(afterCommitExecutor, never()).execute(any());
+    }
+
+    @Test
+    void retryFailedPaymentShouldRejectWhenDistributionRetryWasClaimedByAnotherEntry() {
+        PayrollPaymentServiceImpl service = newService();
+        PayrollBatch payrollBatch = payrollBatch();
+        payrollBatch.setStatus(PayrollBatchStatus.PAY_FAILED);
+        payrollBatch.setPaymentBatchNo("PB-DIST-CONFLICT-10");
+        PaymentBatch paymentBatch = new PaymentBatch();
+        paymentBatch.setBatchNo("PB-DIST-CONFLICT-10");
+        paymentBatch.setStatus(com.yiyundao.compensation.enums.BatchStatus.FAILED);
+        paymentBatch.setDistributionId(57L);
+        PayrollDistribution distribution = new PayrollDistribution();
+        distribution.setId(57L);
+        distribution.setRetryLimit(3);
+
+        when(payrollBatchMapper.selectById(10L)).thenReturn(payrollBatch);
+        when(paymentBatchService.getByBatchNo("PB-DIST-CONFLICT-10")).thenReturn(paymentBatch);
+        when(paymentRecordService.list(any(Wrapper.class))).thenReturn(List.of(failedRecord(503L)));
+        when(paymentRecordService.update(any(UpdateWrapper.class))).thenReturn(true);
+        when(paymentBatchService.update(any(UpdateWrapper.class))).thenReturn(true);
+        when(payrollDistributionMapper.selectById(57L)).thenReturn(distribution);
+        when(payrollDistributionItemMapper.update(eq(null), any(UpdateWrapper.class))).thenReturn(1);
+        when(payrollDistributionMapper.update(eq(null), any(UpdateWrapper.class))).thenReturn(0);
+
+        assertThatThrownBy(() -> service.retryFailedPayment(10L, false))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("正在被其他重试流程处理");
+
+        verify(afterCommitExecutor, never()).execute(any());
+        verify(payrollBatchMapper, never()).update(eq(null), any(UpdateWrapper.class));
     }
 
     private PayrollPaymentServiceImpl newService() {

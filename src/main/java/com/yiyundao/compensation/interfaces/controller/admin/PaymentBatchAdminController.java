@@ -20,6 +20,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import com.yiyundao.compensation.security.SecurityAnnotations;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -55,6 +56,7 @@ public class PaymentBatchAdminController {
 
     // 取消/关闭批次（将状态设为 FAILED）
     @PostMapping("/{id}/cancel")
+    @Transactional(rollbackFor = Exception.class)
     public ApiResponse<Void> cancel(@PathVariable Long id) {
         PaymentBatch batch = paymentBatchService.getById(id);
         if (batch == null) {
@@ -87,9 +89,7 @@ public class PaymentBatchAdminController {
         batch.setSuccessCount((int) successCount);
         batch.setFailedCount((int) failedCount);
         if (processingCount > 0) {
-            batch.setStatus(BatchStatus.PROCESSING);
-            batch.setPaymentStatus(PaymentBatchProcessStatus.PROCESSING);
-            batch.setProcessEndTime(null);
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "取消期间存在正在处理的支付记录，请稍后重试");
         } else if (successCount > 0) {
             batch.setStatus(BatchStatus.COMPLETED);
             batch.setPaymentStatus(PaymentBatchProcessStatus.PARTIAL_SUCCESS);
@@ -112,7 +112,9 @@ public class PaymentBatchAdminController {
         }
         return (record.getStatus() == PaymentStatus.PENDING)
                 && (org.springframework.util.StringUtils.hasText(record.getProviderOrderNo())
-                || org.springframework.util.StringUtils.hasText(record.getAlipayOrderNo()));
+                || org.springframework.util.StringUtils.hasText(record.getProviderTradeNo())
+                || org.springframework.util.StringUtils.hasText(record.getAlipayOrderNo())
+                || org.springframework.util.StringUtils.hasText(record.getAlipayTradeNo()));
     }
 
     // 概览统计：各状态数量 + 今日/本月支付成功金额

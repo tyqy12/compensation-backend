@@ -196,7 +196,7 @@ class IntegrationConfigControllerTest {
     void saveConfig_shouldPreserveExistingSecretsWhenMaskedValuesSubmitted() throws Exception {
         String existingJson = "{\"dealerId\":\"dealer-1234\",\"brokerId\":\"broker-5678\",\"appKey\":\"appkey-9999\","
                 + "\"des3Key\":\"DES3SECRET\",\"rsaPrivateKey\":\"PRIVATE\",\"rsaPublicKey\":\"PUBLIC\","
-                + "\"signType\":\"rsa\",\"url\":\"https://old.example.com\"}";
+                + "\"signType\":\"rsa\",\"url\":\"https://old.example.com\",\"dealerPlatformName\":\"薪酬助手\"}";
         IntegrationConfig existing = new IntegrationConfig();
         existing.setPlatformType("yunzhanghu");
         existing.setEnabled(true);
@@ -213,6 +213,7 @@ class IntegrationConfigControllerTest {
         submitted.setRsaPublicKey("******");
         submitted.setSignType("rsa2");
         submitted.setUrl("https://new.example.com");
+        submitted.setDealerPlatformName("薪酬助手");
 
         IntegrationConfigController.SaveConfigRequest req = new IntegrationConfigController.SaveConfigRequest();
         req.setEnabled(true);

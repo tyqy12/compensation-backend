@@ -1,6 +1,11 @@
 import React, { useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { PageContainer, ProTable, type ActionType, type ProColumns } from '@ant-design/pro-components';
+import {
+  PageContainer,
+  ProTable,
+  type ActionType,
+  type ProColumns,
+} from '@ant-design/pro-components';
 import {
   Alert,
   App as AntdApp,
@@ -124,7 +129,8 @@ const getMainTypeText = (type?: string) => {
 
 const getStatusMeta = (status?: string) => cycleStatusEnum[normalizeStatus(status) ?? ''];
 
-const formatDateTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '未记录');
+const formatDateTime = (value?: string) =>
+  value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '未记录';
 
 const formatDay = (value?: number | string, emptyText = '未配置') => {
   if (value === undefined || value === null || value === '') return emptyText;
@@ -245,7 +251,11 @@ const CyclesPage: React.FC = () => {
     if (values.startDate && values.endDate && values.startDate.isAfter(values.endDate, 'day')) {
       throw new Error('开始日期不能晚于结束日期');
     }
-    if (values.cutoffDate && values.startDate && values.cutoffDate.isBefore(values.startDate, 'day')) {
+    if (
+      values.cutoffDate &&
+      values.startDate &&
+      values.cutoffDate.isBefore(values.startDate, 'day')
+    ) {
       throw new Error('截数日不能早于开始日期');
     }
     if (values.cutoffDate && values.endDate && values.cutoffDate.isAfter(values.endDate, 'day')) {
@@ -371,7 +381,7 @@ const CyclesPage: React.FC = () => {
       dataIndex: 'cycleName',
       width: 240,
       render: (_, record) => (
-        <Space direction="vertical" size={2} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={2} style={{ width: '100%' }}>
           <Space>
             <ScheduleOutlined />
             <span style={{ fontWeight: 600 }}>{getCycleDisplayName(record)}</span>
@@ -416,7 +426,9 @@ const CyclesPage: React.FC = () => {
       dataIndex: 'status',
       width: 120,
       valueType: 'select',
-      valueEnum: Object.fromEntries(Object.entries(cycleStatusEnum).map(([key, meta]) => [key, { text: meta.text }])),
+      valueEnum: Object.fromEntries(
+        Object.entries(cycleStatusEnum).map(([key, meta]) => [key, { text: meta.text }]),
+      ),
       render: (_, record) => {
         const meta = getStatusMeta(record.status);
         return meta ? <Tag color={meta.color}>{meta.text}</Tag> : record.status || '未配置';
@@ -460,7 +472,7 @@ const CyclesPage: React.FC = () => {
       header={{
         title: '发薪周期管理',
       }}
-      content={(
+      content={
         <Row gutter={[16, 16]}>
           {summaryCards.map((item) => (
             <Col key={item.key} xs={24} sm={12} md={12} lg={6}>
@@ -469,13 +481,13 @@ const CyclesPage: React.FC = () => {
                   title={item.title}
                   value={item.value}
                   prefix={item.prefix}
-                  valueStyle={item.valueStyle}
+                  styles={{ content: item.valueStyle }}
                 />
               </Card>
             </Col>
           ))}
         </Row>
-      )}
+      }
     >
       <ProTable<PayrollCycleDto>
         cardBordered
@@ -484,7 +496,10 @@ const CyclesPage: React.FC = () => {
         actionRef={actionRef}
         scroll={{ x: 1280 }}
         rowKey={(record) =>
-          String(record.id ?? `${record.type ?? record.cycleType ?? 'cycle'}-${record.periodLabel ?? ''}`)
+          String(
+            record.id ??
+              `${record.type ?? record.cycleType ?? 'cycle'}-${record.periodLabel ?? ''}`,
+          )
         }
         request={async (params) => {
           const nextParams: PayrollCycleListParams = {
@@ -644,13 +659,21 @@ const CyclesPage: React.FC = () => {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item name="status" label="状态" rules={[{ required: true, message: '请选择状态' }]}>
+              <Form.Item
+                name="status"
+                label="状态"
+                rules={[{ required: true, message: '请选择状态' }]}
+              >
                 <Select placeholder="请选择状态" options={statusOptions} />
               </Form.Item>
             </Col>
             <Col span={24}>
               <Form.Item name="description" label="描述">
-                <Input.TextArea rows={3} maxLength={500} placeholder="可填写本周期的规则说明、适用范围等" />
+                <Input.TextArea
+                  rows={3}
+                  maxLength={500}
+                  placeholder="可填写本周期的规则说明、适用范围等"
+                />
               </Form.Item>
             </Col>
           </Row>
@@ -658,7 +681,7 @@ const CyclesPage: React.FC = () => {
       </Modal>
 
       <Drawer
-        width={620}
+        size={620}
         title={detail ? `周期详情 · ${getCycleDisplayName(detail)}` : '周期详情'}
         extra={detail?.cycleCode ? <Tag color="blue">{detail.cycleCode}</Tag> : undefined}
         open={Boolean(detail)}
@@ -666,12 +689,14 @@ const CyclesPage: React.FC = () => {
         destroyOnHidden
       >
         {detail ? (
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={16} style={{ width: '100%' }}>
             <Descriptions column={2} bordered size="small">
               <Descriptions.Item label="周期名称" span={2}>
                 {getCycleDisplayName(detail)}
               </Descriptions.Item>
-              <Descriptions.Item label="周期标签">{detail.periodLabel || '未配置'}</Descriptions.Item>
+              <Descriptions.Item label="周期标签">
+                {detail.periodLabel || '未配置'}
+              </Descriptions.Item>
               <Descriptions.Item label="周期编码">{detail.cycleCode || '未配置'}</Descriptions.Item>
               <Descriptions.Item label="主类型">{getMainTypeText(detail.type)}</Descriptions.Item>
               <Descriptions.Item label="周期类型">{getCycleTypeText(detail)}</Descriptions.Item>
@@ -681,7 +706,9 @@ const CyclesPage: React.FC = () => {
               <Descriptions.Item label="期间范围" span={2}>
                 {formatPeriodRange(detail.startDate, detail.endDate)}
               </Descriptions.Item>
-              <Descriptions.Item label="截数日">{formatDay(detail.cutoffDay ?? detail.cutoffDate)}</Descriptions.Item>
+              <Descriptions.Item label="截数日">
+                {formatDay(detail.cutoffDay ?? detail.cutoffDate)}
+              </Descriptions.Item>
               <Descriptions.Item label="发薪日">{formatDay(detail.payDay)}</Descriptions.Item>
               <Descriptions.Item label="提前天数">{formatDay(detail.leadDays)}</Descriptions.Item>
               <Descriptions.Item label="宽限天数">{formatDay(detail.graceDays)}</Descriptions.Item>
@@ -695,19 +722,23 @@ const CyclesPage: React.FC = () => {
               <Descriptions.Item label="描述" span={2}>
                 {detail.description || '未配置'}
               </Descriptions.Item>
-              <Descriptions.Item label="创建时间">{formatDateTime(detail.createdAt)}</Descriptions.Item>
-              <Descriptions.Item label="更新时间">{formatDateTime(detail.updatedAt)}</Descriptions.Item>
+              <Descriptions.Item label="创建时间">
+                {formatDateTime(detail.createdAt)}
+              </Descriptions.Item>
+              <Descriptions.Item label="更新时间">
+                {formatDateTime(detail.updatedAt)}
+              </Descriptions.Item>
             </Descriptions>
 
             <Alert
               type="info"
               showIcon
-              message="执行提示"
+              title="执行提示"
               description="推荐流程：草稿配置完成后再启用。启用中的周期如需修改，请先停用再编辑，避免影响调度一致性。"
             />
           </Space>
         ) : (
-          <Alert type="info" message="请选择一条周期记录" showIcon />
+          <Alert type="info" title="请选择一条周期记录" showIcon />
         )}
       </Drawer>
     </PageContainer>

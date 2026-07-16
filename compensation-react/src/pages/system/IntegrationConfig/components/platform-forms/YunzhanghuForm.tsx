@@ -17,12 +17,16 @@ const YunzhanghuForm: React.FC = () => {
   return (
     <>
       <Alert
-        message="云账户沙箱接入说明"
+        title="云账户沙箱接入说明"
         description={
           <div>
-            <p>1. 当前建议先接入沙箱：<code>https://api-service.yunzhanghu.com/sandbox</code></p>
-            <p>2. 必填参数由开放平台提供：dealerId、brokerId、appKey、3DES Key、RSA 公私钥。</p>
-            <p>3. 签名类型推荐 <code>rsa</code>，与 SDK 配置保持一致。</p>
+            <p>
+              1. 当前建议先接入沙箱：<code>https://api-service.yunzhanghu.com/sandbox</code>
+            </p>
+            <p>2. 必填参数由开放平台提供，互联网平台名称需填写实际收入来源平台。</p>
+            <p>
+              3. 签名类型推荐 <code>rsa</code>，与 SDK 配置保持一致。
+            </p>
           </div>
         }
         type="info"
@@ -98,22 +102,18 @@ const YunzhanghuForm: React.FC = () => {
       <ProFormText
         name={['yunzhanghu', 'dealerPlatformName']}
         label="互联网平台名称"
-        placeholder="可选，如：薪酬助手"
+        placeholder="请输入实际收入来源平台名称，如：薪酬助手"
+        rules={[{ required: true, message: '请输入互联网平台名称' }]}
       />
       <ProFormSelect
         name={['yunzhanghu', 'checkName']}
         label="姓名校验策略"
         valueEnum={{
           Check: 'Check（校验）',
-          NoCheck: 'NoCheck（不校验）',
         }}
         placeholder="可选，默认不传"
       />
-      <ProFormSwitch
-        name={['yunzhanghu', 'isDebug']}
-        label="开启SDK调试日志"
-        initialValue={true}
-      />
+      <ProFormSwitch name={['yunzhanghu', 'isDebug']} label="开启SDK调试日志" initialValue={true} />
     </>
   );
 };

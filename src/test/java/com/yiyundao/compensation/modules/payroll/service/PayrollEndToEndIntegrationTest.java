@@ -125,6 +125,37 @@ class PayrollEndToEndIntegrationTest {
     }
 
     @Test
+    void repeatedCalculationCreatesNewImmutablePayrollLineRevision() {
+        assertThat(payrollCalculationService.computeAndSave(batch.getId())).isTrue();
+        PayrollBatch firstBatch = payrollBatchService.getById(batch.getId());
+        PayrollLine firstLine = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
+                        .eq(PayrollLine::getBatchId, batch.getId()))
+                .stream()
+                .findFirst()
+                .orElseThrow();
+
+        assertThat(firstBatch.getBatchRevision()).isEqualTo(1);
+        assertThat(firstLine.getBatchRevision()).isEqualTo(1);
+        assertThat(firstBatch.getInputSnapshotJson()).contains("itemCode", SCENARIO_ID + "-BASE");
+        assertThat(firstBatch.getRuleSnapshotJson()).contains("templateId", String.valueOf(template.getId()));
+        assertThat(firstLine.getInputSnapshotHash()).isEqualTo(firstBatch.getInputSnapshotHash());
+        assertThat(firstLine.getRuleSnapshotHash()).isEqualTo(firstBatch.getRuleSnapshotHash());
+
+        assertThat(payrollCalculationService.computeAndSave(batch.getId())).isTrue();
+
+        PayrollBatch secondBatch = payrollBatchService.getById(batch.getId());
+        PayrollLine secondLine = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
+                        .eq(PayrollLine::getBatchId, batch.getId()))
+                .stream()
+                .findFirst()
+                .orElseThrow();
+        assertThat(secondBatch.getBatchRevision()).isEqualTo(2);
+        assertThat(secondLine.getBatchRevision()).isEqualTo(2);
+        assertThat(secondLine.getId()).isNotEqualTo(firstLine.getId());
+        assertThat(payrollLineService.getById(firstLine.getId())).isNull();
+    }
+
+    @Test
     void persistedPayrollLedgerShouldUseComputedTemplateAndItemSnapshots() {
         assertThat(payrollCalculationService.computeAndSave(batch.getId())).isTrue();
         PayrollLine storedLine = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
@@ -158,7 +189,12 @@ class PayrollEndToEndIntegrationTest {
         salaryItemService.updateById(baseItem);
 
         var ledger = payrollCalculationService.ledger(batch.getId());
+        PayrollBatch persistedBatch = payrollBatchService.getById(batch.getId());
 
+        assertThat(ledger.getBatchRevision()).isEqualTo(1);
+        assertThat(ledger.getInputSnapshotHash()).isEqualTo(persistedBatch.getInputSnapshotHash());
+        assertThat(ledger.getRuleSnapshotHash()).isEqualTo(persistedBatch.getRuleSnapshotHash());
+        assertThat(ledger.getCalculationEngineVersion()).isEqualTo(persistedBatch.getCalculationEngineVersion());
         assertThat(ledger.getTaxTotal()).isEqualByComparingTo("1150.00");
         assertThat(ledger.getSocialTotal()).isEqualByComparingTo("575.00");
         assertThat(ledger.getNetTotal()).isEqualByComparingTo("8975.00");

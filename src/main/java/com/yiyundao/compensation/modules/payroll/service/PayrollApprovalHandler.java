@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.modules.payroll.service;
 
 import com.yiyundao.compensation.enums.ApprovalStatus;
+import com.yiyundao.compensation.enums.BatchStatus;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.event.ApprovalCompletedEvent;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
@@ -196,8 +197,8 @@ public class PayrollApprovalHandler {
         // 如果并发创建，数据库约束会确保只有一个成功
         var paymentBatch = payrollPaymentService.createPaymentBatch(payrollBatch, approver, true);
 
-        if (paymentBatch != null) {
-            payrollPaymentFailureService.markResolved(workflow.getId(), paymentBatch.getBatchNo());
+        if (paymentBatch != null && paymentBatch.getStatus() != BatchStatus.FAILED) {
+            payrollPaymentFailureService.markRetrying(workflow.getId(), paymentBatch.getBatchNo());
             log.info("薪资批次支付批次创建成功: workflowId={}, batchId={}, paymentBatchNo={}",
                     workflow.getId(), batchId, paymentBatch.getBatchNo());
         } else {

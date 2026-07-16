@@ -40,6 +40,7 @@ public class YunzhanghuClient {
                                                                      String dealerUserId,
                                                                      String dealerUserNickname) throws YzhException {
         YunzhanghuConfigDto config = getRequiredConfig();
+        requireText(config.getDealerPlatformName(), "dealerPlatformName");
         CreateAlipayOrderRequest request = new CreateAlipayOrderRequest();
         request.setOrderId(orderId);
         request.setDealerId(config.getDealerId());
@@ -65,7 +66,8 @@ public class YunzhanghuClient {
     public YzhResponse<GetOrderResponse> queryOrder(String orderId) throws YzhException {
         GetOrderRequest request = new GetOrderRequest();
         request.setOrderId(orderId);
-        request.setChannel("alipay");
+        // 云账户实时支付查单接口要求传支付路径中文名称，而不是回调中的英文渠道编码。
+        request.setChannel("支付宝");
         return createPaymentClient().getOrder(YzhRequest.build(request));
     }
 
@@ -80,6 +82,8 @@ public class YunzhanghuClient {
 
     public boolean healthCheck() {
         try {
+            YunzhanghuConfigDto config = getRequiredConfig();
+            requireText(config.getDealerPlatformName(), "dealerPlatformName");
             buildConfig();
             return true;
         } catch (Exception ex) {

@@ -65,6 +65,7 @@ import type { PayrollBatchSummaryDto, PayrollValidationIssueDto } from '@types/o
 import { useEmployeesQuery, type Employee } from '@services/queries/employee';
 import {
   getBatchRevisionText,
+  getCalculationEvidenceMeta,
   getCalculationStatusMeta,
   getConfirmationModeText,
   getDistributionStatusMeta,
@@ -73,6 +74,7 @@ import {
   getPayrollFlowCurrentStep,
   getPayrollFlowSteps,
   getPayrollNextAction,
+  getSnapshotHashPreview,
   isPayrollBatchComputable,
 } from './payrollFlow';
 
@@ -118,6 +120,15 @@ const formatCurrency = (value?: number | null, currency = 'CNY') => {
 };
 
 const formatDateTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—');
+
+const renderSnapshotHash = (hash?: string) =>
+  hash ? (
+    <Text code copyable={{ text: hash }}>
+      {getSnapshotHashPreview(hash)}
+    </Text>
+  ) : (
+    <Text type="secondary">—</Text>
+  );
 
 const normalizeStatus = (status?: string) => String(status ?? '').toLowerCase();
 
@@ -311,6 +322,21 @@ export function BatchWorkspaceDrawer({
   );
 
   const status = normalizeStatus(mergedDetail.status);
+  const calculationEvidenceMeta = getCalculationEvidenceMeta(mergedDetail);
+  const calculationStatus = normalizeStatus(
+    mergedDetail.calculationStatus ?? mergedDetail.computeStatus,
+  );
+  const evidenceExpected =
+    ['calculating', 'calculated'].includes(calculationStatus) ||
+    [
+      'confirming',
+      'dispute_processing',
+      'confirmed',
+      'submitted',
+      'approved',
+      'pay_processing',
+      'paid',
+    ].includes(status);
   const importItems = itemsQuery.data ?? [];
   const hasImportData = importItems.length > 0;
   const canPreview = open && !!batchId && hasImportData && PREVIEWABLE_STATUSES.includes(status);
@@ -378,7 +404,8 @@ export function BatchWorkspaceDrawer({
     }
     return Array.from(merged);
   }, [hasImportData, mergedDetail, previewQuery.data?.hasBlockingIssues, structuredBlockers]);
-  const canSubmit = canManageBatch && status === 'confirmed' && !(previewQuery.data?.hasBlockingIssues ?? false);
+  const canSubmit =
+    canManageBatch && status === 'confirmed' && !(previewQuery.data?.hasBlockingIssues ?? false);
   const canRetry =
     canManageBatch &&
     ['pay_failed', 'failed', 'partial_success'].includes(
@@ -671,7 +698,7 @@ export function BatchWorkspaceDrawer({
         key: 'employee',
         width: 180,
         render: (_: unknown, record: PayrollImportItemDto) => (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Text strong>{record.employeeName || record.employeeNo || '—'}</Text>
             <Text type="secondary">工号：{record.employeeNo || '—'}</Text>
           </Space>
@@ -682,7 +709,7 @@ export function BatchWorkspaceDrawer({
         key: 'salaryItem',
         width: 180,
         render: (_: unknown, record: PayrollImportItemDto) => (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Text strong>{record.itemName || record.itemCode || '—'}</Text>
             <Text type="secondary">编码：{record.itemCode || '—'}</Text>
           </Space>
@@ -789,7 +816,7 @@ export function BatchWorkspaceDrawer({
   return (
     <Drawer
       title={
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Title level={5} style={{ margin: 0 }}>
             批次工作台
           </Title>
@@ -797,12 +824,27 @@ export function BatchWorkspaceDrawer({
             <Text strong>{mergedDetail.periodLabel || '未命名批次'}</Text>
             {batchId && <Text type="secondary">#{batchId}</Text>}
             <Tag>{getBatchRevisionText(mergedDetail.batchRevision)}</Tag>
+            {evidenceExpected && (
+              <Tag color={calculationEvidenceMeta.color}>{calculationEvidenceMeta.text}</Tag>
+            )}
             {getFlowStatusMeta(status) && (
               <Tag color={getFlowStatusMeta(status)?.color}>{getFlowStatusMeta(status)?.text}</Tag>
             )}
-            {getCalculationStatusMeta(mergedDetail.calculationStatus ?? mergedDetail.computeStatus) && (
-              <Tag color={getCalculationStatusMeta(mergedDetail.calculationStatus ?? mergedDetail.computeStatus)?.color}>
-                {getCalculationStatusMeta(mergedDetail.calculationStatus ?? mergedDetail.computeStatus)?.text}
+            {getCalculationStatusMeta(
+              mergedDetail.calculationStatus ?? mergedDetail.computeStatus,
+            ) && (
+              <Tag
+                color={
+                  getCalculationStatusMeta(
+                    mergedDetail.calculationStatus ?? mergedDetail.computeStatus,
+                  )?.color
+                }
+              >
+                {
+                  getCalculationStatusMeta(
+                    mergedDetail.calculationStatus ?? mergedDetail.computeStatus,
+                  )?.text
+                }
               </Tag>
             )}
             {getDistributionStatusMeta(mergedDetail.paymentStatus) && (
@@ -815,8 +857,8 @@ export function BatchWorkspaceDrawer({
       }
       open={open}
       onClose={onClose}
-      width={1080}
-      destroyOnClose={false}
+      size={1080}
+      destroyOnHidden={false}
       extra={
         <Space>
           <Button icon={<ReloadOutlined />} onClick={refreshAll}>
@@ -825,7 +867,9 @@ export function BatchWorkspaceDrawer({
           {mergedDetail.approvalWorkflowId && (
             <Button
               icon={<CheckCircleOutlined />}
-              onClick={() => navigate(`/approval/workflows?keyword=${mergedDetail.approvalWorkflowId}`)}
+              onClick={() =>
+                navigate(`/approval/workflows?keyword=${mergedDetail.approvalWorkflowId}`)
+              }
             >
               审批流
             </Button>
@@ -866,17 +910,17 @@ export function BatchWorkspaceDrawer({
       }
     >
       <Spin spinning={loading}>
-        <Space direction="vertical" size={16} style={{ width: '100%' }}>
+        <Space orientation="vertical" size={16} style={{ width: '100%' }}>
           {errorMessage && (
-            <Alert type="error" showIcon message="工作台数据加载失败" description={errorMessage} />
+            <Alert type="error" showIcon title="工作台数据加载失败" description={errorMessage} />
           )}
 
           <Alert
             type={canManageBatch ? 'info' : 'warning'}
             showIcon
-            message="流程与录入规则"
+            title="流程与录入规则"
             description={
-              <Space direction="vertical" size={4}>
+              <Space orientation="vertical" size={4}>
                 <Text>CSV 导入是追加，不会覆盖已有导入项；手动录入也会追加到同一批次。</Text>
                 <Text>同一员工同一薪资项若出现多条导入记录，系统会在计算时累计金额。</Text>
                 <Text>当前设计允许在“草稿 / 已锁定”状态继续补录和删除导入项，提升修正效率。</Text>
@@ -888,8 +932,21 @@ export function BatchWorkspaceDrawer({
             <Alert
               type="warning"
               showIcon
-              message={`当前展示的是 ${getBatchRevisionText(mergedDetail.batchRevision)} 版本`}
+              title={`当前展示的是 ${getBatchRevisionText(mergedDetail.batchRevision)} 版本`}
               description="如果该批次曾重算，旧的确认、审批与发放链路会失效；工作台仅展示当前有效版本。"
+            />
+          )}
+
+          {evidenceExpected && (
+            <Alert
+              type={calculationEvidenceMeta.color === 'success' ? 'success' : 'warning'}
+              showIcon
+              title={`计算证据：${calculationEvidenceMeta.text}`}
+              description={
+                calculationEvidenceMeta.color === 'success'
+                  ? '当前版本已记录输入事实、薪资规则和计算引擎版本，可用于复核与追溯。'
+                  : '当前版本缺少完整证据元数据，建议重新核算后再进入确认、审批或发放。'
+              }
             />
           )}
 
@@ -907,7 +964,7 @@ export function BatchWorkspaceDrawer({
                 key: 'overview',
                 label: '流程看板',
                 children: (
-                  <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                  <Space orientation="vertical" size={16} style={{ width: '100%' }}>
                     <Card size="small">
                       <Descriptions
                         column={2}
@@ -918,8 +975,12 @@ export function BatchWorkspaceDrawer({
                             key: 'flowStatus',
                             label: '流转状态',
                             children: getFlowStatusMeta(status) ? (
-                              <Tag color={getFlowStatusMeta(status)?.color}>{getFlowStatusMeta(status)?.text}</Tag>
-                            ) : '—',
+                              <Tag color={getFlowStatusMeta(status)?.color}>
+                                {getFlowStatusMeta(status)?.text}
+                              </Tag>
+                            ) : (
+                              '—'
+                            ),
                           },
                           {
                             key: 'calculationStatus',
@@ -928,20 +989,50 @@ export function BatchWorkspaceDrawer({
                               mergedDetail.calculationStatus ?? mergedDetail.computeStatus,
                             ) ? (
                               <Tag
-                                color={getCalculationStatusMeta(
-                                  mergedDetail.calculationStatus ?? mergedDetail.computeStatus,
-                                )?.color}
+                                color={
+                                  getCalculationStatusMeta(
+                                    mergedDetail.calculationStatus ?? mergedDetail.computeStatus,
+                                  )?.color
+                                }
                               >
-                                {getCalculationStatusMeta(
-                                  mergedDetail.calculationStatus ?? mergedDetail.computeStatus,
-                                )?.text}
+                                {
+                                  getCalculationStatusMeta(
+                                    mergedDetail.calculationStatus ?? mergedDetail.computeStatus,
+                                  )?.text
+                                }
                               </Tag>
-                            ) : '—',
+                            ) : (
+                              '—'
+                            ),
                           },
                           {
                             key: 'batchRevision',
                             label: '批次版本',
                             children: getBatchRevisionText(mergedDetail.batchRevision),
+                          },
+                          {
+                            key: 'calculationEvidence',
+                            label: '计算证据',
+                            children: (
+                              <Tag color={calculationEvidenceMeta.color}>
+                                {calculationEvidenceMeta.text}
+                              </Tag>
+                            ),
+                          },
+                          {
+                            key: 'calculationEngineVersion',
+                            label: '计算引擎版本',
+                            children: mergedDetail.calculationEngineVersion || '—',
+                          },
+                          {
+                            key: 'inputSnapshotHash',
+                            label: '输入事实摘要',
+                            children: renderSnapshotHash(mergedDetail.inputSnapshotHash),
+                          },
+                          {
+                            key: 'ruleSnapshotHash',
+                            label: '规则摘要',
+                            children: renderSnapshotHash(mergedDetail.ruleSnapshotHash),
                           },
                           {
                             key: 'nextAction',
@@ -974,7 +1065,9 @@ export function BatchWorkspaceDrawer({
                           {
                             key: 'approvalWorkflowId',
                             label: '审批流 ID',
-                            children: mergedDetail.approvalWorkflowId ? `#${mergedDetail.approvalWorkflowId}` : '—',
+                            children: mergedDetail.approvalWorkflowId
+                              ? `#${mergedDetail.approvalWorkflowId}`
+                              : '—',
                           },
                           {
                             key: 'paymentBatchNo',
@@ -999,7 +1092,6 @@ export function BatchWorkspaceDrawer({
                         ]}
                       />
                     </Card>
-
                     <div
                       style={{
                         display: 'grid',
@@ -1043,13 +1135,14 @@ export function BatchWorkspaceDrawer({
                           value={previewQuery.data?.reviewIssueCount ?? reviewReminders.length}
                         />
                       </Card>
-                    </div>                    {blockers.length > 0 && (
+                    </div>{' '}
+                    {blockers.length > 0 && (
                       <Alert
                         type="error"
                         showIcon
-                        message="当前阻塞原因"
+                        title="当前阻塞原因"
                         description={
-                          <Space direction="vertical" size={4}>
+                          <Space orientation="vertical" size={4}>
                             {blockers.map((blocker) => (
                               <Text key={blocker}>{blocker}</Text>
                             ))}
@@ -1057,12 +1150,11 @@ export function BatchWorkspaceDrawer({
                         }
                       />
                     )}
-
                     {reviewReminders.length > 0 && (
                       <Alert
                         type="warning"
                         showIcon
-                        message="复核提醒"
+                        title="复核提醒"
                         description={
                           <Space size={8} wrap>
                             {reviewReminders.map((warning) => (
@@ -1074,7 +1166,6 @@ export function BatchWorkspaceDrawer({
                         }
                       />
                     )}
-
                     <Card size="small" title="关键动作">
                       <Space wrap>
                         <Button icon={<UploadOutlined />} onClick={() => switchActiveTab('entry')}>
@@ -1139,9 +1230,10 @@ export function BatchWorkspaceDrawer({
                               title: '提交审批',
                               okText: '确认提交',
                               successMessage: '批次已提交审批',
-                              content: blockers.length > 0
-                                ? `当前仍存在阻塞问题：${blockers.join('；')}`
-                                : '请确认员工确认已完成，且台账金额与导入项一致。',
+                              content:
+                                blockers.length > 0
+                                  ? `当前仍存在阻塞问题：${blockers.join('；')}`
+                                  : '请确认员工确认已完成，且台账金额与导入项一致。',
                               run: () => submitMutation.mutateAsync(batchId as number),
                             })
                           }
@@ -1156,7 +1248,8 @@ export function BatchWorkspaceDrawer({
                               title: '重试发放',
                               okText: '立即重试',
                               successMessage: '已提交失败子集重试请求',
-                              content: '系统会针对失败明细重新发放，请先确认收款账户或渠道问题已修复。',
+                              content:
+                                '系统会针对失败明细重新发放，请先确认收款账户或渠道问题已修复。',
                               run: () =>
                                 retryPaymentMutation.mutateAsync({
                                   batchId: batchId as number,
@@ -1176,7 +1269,6 @@ export function BatchWorkspaceDrawer({
                         </Button>
                       </Space>
                     </Card>
-
                     <Card size="small" title="试算预览">
                       {previewQuery.data ? (
                         <Descriptions column={3} size="small" bordered>
@@ -1235,23 +1327,24 @@ export function BatchWorkspaceDrawer({
                 key: 'entry',
                 label: '数据录入台账',
                 children: (
-                  <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                  <Space orientation="vertical" size={16} style={{ width: '100%' }}>
                     <Alert
                       type={importMutable ? 'info' : 'warning'}
                       showIcon
-                      message={importMutable ? '录入入口已开放' : '当前状态不可修改导入数据'}
+                      title={importMutable ? '录入入口已开放' : '当前状态不可修改导入数据'}
                       description={
                         importMutable
                           ? '你可以在这里上传 CSV，或直接手工录入单条薪资项。两种方式都会追加到当前批次，并共同参与计算。'
                           : '当前批次已进入只读阶段。如需继续处理，请根据状态前往确认、审批或支付重试环节。'
                       }
-                    />                    {lastImportResult && (
+                    />{' '}
+                    {lastImportResult && (
                       <Alert
                         type="success"
                         showIcon
-                        message="最近一次 CSV 导入结果"
+                        title="最近一次 CSV 导入结果"
                         description={
-                          <Space direction="vertical" size={4}>
+                          <Space orientation="vertical" size={4}>
                             <Text>总行数：{lastImportSummary?.total ?? 0}</Text>
                             <Text>
                               成功：{lastImportSummary?.valid ?? 0}，失败：
@@ -1267,7 +1360,6 @@ export function BatchWorkspaceDrawer({
                         }
                       />
                     )}
-
                     <div
                       style={{
                         display: 'grid',
@@ -1288,9 +1380,8 @@ export function BatchWorkspaceDrawer({
                         <Statistic title="异常项" value={invalidItemCount} />
                       </Card>
                     </div>
-
                     <Card size="small" title="CSV 导入">
-                      <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
                         <Text type="secondary">
                           模板首行必须包含：employeeId,itemCode,amount,note。
                         </Text>
@@ -1335,7 +1426,6 @@ export function BatchWorkspaceDrawer({
                         </Button>
                       </Space>
                     </Card>
-
                     <Card size="small" title="手动录入">
                       <div
                         ref={(node) => {
@@ -1442,9 +1532,9 @@ export function BatchWorkspaceDrawer({
                             <Alert
                               type="success"
                               showIcon
-                              message="已选员工"
+                              title="已选员工"
                               description={
-                                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                                <Space orientation="vertical" size={4} style={{ width: '100%' }}>
                                   <Text>姓名：{selectedEmployee.name || '—'}</Text>
                                   <Text>工号：{selectedEmployee.employeeId || '—'}</Text>
                                   <Text>部门：{selectedEmployee.department || '未分配部门'}</Text>
@@ -1481,13 +1571,12 @@ export function BatchWorkspaceDrawer({
                         </Form>
                       </div>
                     </Card>
-
                     <Divider style={{ margin: '8px 0 0' }} />
-                    <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                    <Space orientation="vertical" size={16} style={{ width: '100%' }}>
                       <Alert
                         type="info"
                         showIcon
-                        message="导入项台账"
+                        title="导入项台账"
                         description="台账会完整展示 CSV / 手工录入记录、异常原因和可编辑字段，方便录入后立即核对、修正和复算。"
                       />
 
@@ -1495,7 +1584,7 @@ export function BatchWorkspaceDrawer({
                         <Alert
                           type="warning"
                           showIcon
-                          message={`发现 ${invalidItemCount} 条异常导入项`}
+                          title={`发现 ${invalidItemCount} 条异常导入项`}
                           description="表格已直接展示“异常原因”列，便于批量排查；悬停在“异常”状态标签上可查看完整原因。"
                         />
                       ) : null}
@@ -1517,7 +1606,9 @@ export function BatchWorkspaceDrawer({
                       <Card
                         size="small"
                         title="导入项明细"
-                        extra={<Text type="secondary">录入后可直接在此修正行号、员工、薪资项与金额</Text>}
+                        extra={
+                          <Text type="secondary">录入后可直接在此修正行号、员工、薪资项与金额</Text>
+                        }
                       >
                         <Table<PayrollImportItemDto>
                           rowKey="id"
@@ -1554,12 +1645,12 @@ export function BatchWorkspaceDrawer({
         confirmLoading={updateItemMutation.isPending}
         okText="保存修改"
         cancelText="取消"
-        destroyOnClose={false}
+        destroyOnHidden={false}
       >
         <Alert
           type="info"
           showIcon
-          message="可修改当前导入项"
+          title="可修改当前导入项"
           description="支持修正行号、员工工号、薪资项、金额和备注；来源、状态与录入时间保留为系统记录。"
           style={{ marginBottom: 16 }}
         />

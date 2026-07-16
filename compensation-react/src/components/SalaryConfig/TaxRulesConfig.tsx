@@ -14,11 +14,7 @@ import {
   message,
   Divider,
 } from 'antd';
-import {
-  PlusOutlined,
-  DeleteOutlined,
-  InfoCircleOutlined,
-} from '@ant-design/icons';
+import { PlusOutlined, DeleteOutlined, InfoCircleOutlined } from '@ant-design/icons';
 
 interface TaxRuleItem {
   ruleCode: string;
@@ -93,27 +89,34 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
 
   // 生成唯一编码
   const generateCode = useCallback((name: string) => {
-    return name
-      .replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '')
-      .toLowerCase()
-      .slice(0, 30) + '_' + Date.now().toString(36);
+    return (
+      name
+        .replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '')
+        .toLowerCase()
+        .slice(0, 30) +
+      '_' +
+      Date.now().toString(36)
+    );
   }, []);
 
   // 添加预设规则
-  const handleAddPreset = useCallback((preset: Partial<TaxRuleItem>) => {
-    const newItem: TaxRuleItem = {
-      ruleCode: preset.ruleCode || generateCode(preset.ruleName || 'rule'),
-      ruleName: preset.ruleName || '新规则',
-      rate: preset.rate ?? 0,
-      threshold: preset.threshold,
-      applyOn: preset.applyOn || 'TAXABLE_EARNINGS',
-      mode: preset.mode || 'HALF_UP',
-      scale: preset.scale ?? 2,
-    };
-    const newValue = [...rules, newItem];
-    onChange?.(newValue);
-    message.success(`已添加「${newItem.ruleName}」`);
-  }, [rules, onChange, generateCode]);
+  const handleAddPreset = useCallback(
+    (preset: Partial<TaxRuleItem>) => {
+      const newItem: TaxRuleItem = {
+        ruleCode: preset.ruleCode || generateCode(preset.ruleName || 'rule'),
+        ruleName: preset.ruleName || '新规则',
+        rate: preset.rate ?? 0,
+        threshold: preset.threshold,
+        applyOn: preset.applyOn || 'TAXABLE_EARNINGS',
+        mode: preset.mode || 'HALF_UP',
+        scale: preset.scale ?? 2,
+      };
+      const newValue = [...rules, newItem];
+      onChange?.(newValue);
+      message.success(`已添加「${newItem.ruleName}」`);
+    },
+    [rules, onChange, generateCode],
+  );
 
   // 添加自定义规则
   const handleAddCustom = useCallback(() => {
@@ -138,17 +141,23 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
   }, [rules, onChange, customForm]);
 
   // 删除规则
-  const handleDelete = useCallback((index: number) => {
-    const newValue = rules.filter((_, i) => i !== index);
-    onChange?.(newValue);
-    message.success('已删除');
-  }, [rules, onChange]);
+  const handleDelete = useCallback(
+    (index: number) => {
+      const newValue = rules.filter((_, i) => i !== index);
+      onChange?.(newValue);
+      message.success('已删除');
+    },
+    [rules, onChange],
+  );
 
   // 开始编辑
-  const handleEditStart = useCallback((index: number) => {
-    setEditingIndex(index);
-    setEditForm({ ...rules[index] });
-  }, [rules]);
+  const handleEditStart = useCallback(
+    (index: number) => {
+      setEditingIndex(index);
+      setEditForm({ ...rules[index] });
+    },
+    [rules],
+  );
 
   // 取消编辑
   const handleEditCancel = useCallback(() => {
@@ -263,16 +272,13 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
         style={{ marginBottom: 16 }}
         extra={
           <Space>
-            <Button
-              icon={<PlusOutlined />}
-              onClick={() => setShowCustomForm(true)}
-            >
+            <Button icon={<PlusOutlined />} onClick={() => setShowCustomForm(true)}>
               自定义规则
             </Button>
           </Space>
         }
       >
-        <Space direction="vertical" size={4}>
+        <Space orientation="vertical" size={4}>
           <div>
             <InfoCircleOutlined style={{ marginRight: 8, color: '#1890ff' }} />
             <span style={{ color: '#666' }}>
@@ -289,10 +295,7 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
       <Card size="small" title="快速添加预设规则" style={{ marginBottom: 16 }}>
         <Space wrap>
           {PRESET_TAX_RULES.map((preset, index) => (
-            <Button
-              key={index}
-              onClick={() => handleAddPreset(preset)}
-            >
+            <Button key={index} onClick={() => handleAddPreset(preset)}>
               + {preset.ruleName} ({(preset.rate! * 100).toFixed(0)}%)
             </Button>
           ))}
@@ -338,7 +341,9 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
               <div style={{ marginBottom: 4, color: '#666' }}>起征点（可选）</div>
               <InputNumber
                 value={customForm.threshold}
-                onChange={(threshold) => setCustomForm((prev) => ({ ...prev, threshold: threshold ?? undefined }))}
+                onChange={(threshold) =>
+                  setCustomForm((prev) => ({ ...prev, threshold: threshold ?? undefined }))
+                }
                 min={0}
                 placeholder="无起征点"
                 style={{ width: 120 }}
@@ -365,9 +370,7 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
             <Button type="primary" onClick={handleAddCustom}>
               添加
             </Button>
-            <Button onClick={() => setShowCustomForm(false)}>
-              取消
-            </Button>
+            <Button onClick={() => setShowCustomForm(false)}>取消</Button>
           </Space>
         </Card>
       )}
@@ -384,19 +387,16 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
       />
 
       {/* 编辑弹窗 */}
-      <Card
-        size="small"
-        title="编辑规则"
-        style={{ marginTop: 16 }}
-        hidden={editingIndex === null}
-      >
-        <Space direction="vertical" style={{ width: '100%' }} size={16}>
+      <Card size="small" title="编辑规则" style={{ marginTop: 16 }} hidden={editingIndex === null}>
+        <Space orientation="vertical" style={{ width: '100%' }} size={16}>
           <Space wrap>
             <div>
               <div style={{ marginBottom: 4, color: '#666' }}>规则名称 *</div>
               <Input
                 value={editForm?.ruleName}
-                onChange={(e) => setEditForm((prev) => prev ? { ...prev, ruleName: e.target.value } : null)}
+                onChange={(e) =>
+                  setEditForm((prev) => (prev ? { ...prev, ruleName: e.target.value } : null))
+                }
                 style={{ width: 160 }}
               />
             </div>
@@ -404,7 +404,9 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
               <div style={{ marginBottom: 4, color: '#666' }}>规则编码 *</div>
               <Input
                 value={editForm?.ruleCode}
-                onChange={(e) => setEditForm((prev) => prev ? { ...prev, ruleCode: e.target.value } : null)}
+                onChange={(e) =>
+                  setEditForm((prev) => (prev ? { ...prev, ruleCode: e.target.value } : null))
+                }
                 style={{ width: 160 }}
               />
             </div>
@@ -412,7 +414,9 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
               <div style={{ marginBottom: 4, color: '#666' }}>税率/比例 *</div>
               <InputNumber
                 value={editForm?.rate}
-                onChange={(rate) => setEditForm((prev) => prev ? { ...prev, rate: rate ?? 0 } : null)}
+                onChange={(rate) =>
+                  setEditForm((prev) => (prev ? { ...prev, rate: rate ?? 0 } : null))
+                }
                 min={0}
                 max={1}
                 step={0.001}
@@ -428,7 +432,11 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
               <div style={{ marginBottom: 4, color: '#666' }}>起征点（可选）</div>
               <InputNumber
                 value={editForm?.threshold}
-                onChange={(threshold) => setEditForm((prev) => prev ? { ...prev, threshold: threshold ?? undefined } : null)}
+                onChange={(threshold) =>
+                  setEditForm((prev) =>
+                    prev ? { ...prev, threshold: threshold ?? undefined } : null,
+                  )
+                }
                 min={0}
                 style={{ width: 140 }}
                 addonAfter="元"
@@ -438,7 +446,7 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
               <div style={{ marginBottom: 4, color: '#666' }}>适用对象</div>
               <Select
                 value={editForm?.applyOn || 'TAXABLE_EARNINGS'}
-                onChange={(applyOn) => setEditForm((prev) => prev ? { ...prev, applyOn } : null)}
+                onChange={(applyOn) => setEditForm((prev) => (prev ? { ...prev, applyOn } : null))}
                 options={applyOnOptions}
                 style={{ width: 140 }}
               />
@@ -447,7 +455,7 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
               <div style={{ marginBottom: 4, color: '#666' }}>舍入方式</div>
               <Select
                 value={editForm?.mode || 'HALF_UP'}
-                onChange={(mode) => setEditForm((prev) => prev ? { ...prev, mode } : null)}
+                onChange={(mode) => setEditForm((prev) => (prev ? { ...prev, mode } : null))}
                 options={roundingModeOptions}
                 style={{ width: 120 }}
               />
@@ -456,7 +464,7 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
               <div style={{ marginBottom: 4, color: '#666' }}>舍入精度</div>
               <Select
                 value={editForm?.scale ?? 2}
-                onChange={(scale) => setEditForm((prev) => prev ? { ...prev, scale } : null)}
+                onChange={(scale) => setEditForm((prev) => (prev ? { ...prev, scale } : null))}
                 options={[
                   { label: '0 位（整数）', value: 0 },
                   { label: '1 位', value: 1 },
@@ -472,9 +480,7 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
             <Button type="primary" onClick={handleEditSave}>
               保存
             </Button>
-            <Button onClick={handleEditCancel}>
-              取消
-            </Button>
+            <Button onClick={handleEditCancel}>取消</Button>
           </Space>
         </Space>
       </Card>

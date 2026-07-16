@@ -1,27 +1,25 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
-import api from '@services/api';
-import {
-  useLoginMutation,
-  useLogoutMutation,
-  useRefreshTokenMutation,
-  useUserProfileQuery,
-} from './auth';
+import { act, renderHook } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Provider } from 'react-redux';
+import { MemoryRouter } from 'react-router-dom';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { loginApi, logoutApi } from '@services/auth';
+import { clearSession, store } from '@services/stores/authSlice';
+import { useLoginMutation, useLogoutMutation } from './auth';
 
-// Mock the API
-vi.mock('@services/api', () => ({
-  default: {
-    get: vi.fn(),
-    post: vi.fn(),
-  },
-  unwrap: vi.fn((data) => data),
+vi.mock('@services/auth', () => ({
+  loginApi: vi.fn(),
+  logoutApi: vi.fn(),
+  oauthCallbackApi: vi.fn(),
 }));
 
-const mockApi = api as any;
+vi.mock('antd', () => ({
+  App: {
+    useApp: () => ({ message: { error: vi.fn() } }),
+  },
+}));
 
-// Test wrapper
 const createWrapper = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -30,192 +28,69 @@ const createWrapper = () => {
     },
   });
 
-  const Wrapper = ({ children }: { children: React.ReactNode }) => {
-    return React.createElement(QueryClientProvider, { client: queryClient }, children);
-  };
-
-  return Wrapper;
+  return ({ children }: { children: React.ReactNode }) => React.createElement(
+    Provider,
+    { store },
+    React.createElement(
+      QueryClientProvider,
+      { client: queryClient },
+      React.createElement(MemoryRouter, null, children),
+    ),
+  );
 };
 
-// Test data
-const mockUser = {
-  id: 1,
-  username: 'admin',
-  name: '管理员',
-  email: 'admin@company.com',
-  roles: ['ROLE_ADMIN'],
-  permissions: ['USER_READ', 'USER_WRITE'],
-  createTime: '2023-01-01T00:00:00Z',
-  lastLoginTime: '2024-01-15T10:00:00Z',
-};
-
-const mockLoginResponse = {
-  user: mockUser,
-  token: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...',
-  refreshToken: 'refresh_token_123',
-  expiresIn: 3600,
-};
-
-describe('Auth Queries', () => {
+describe('auth mutations', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    store.dispatch(clearSession());
   });
 
-  describe('useUserProfileQuery', () => {
-    it('should fetch user profile', async () => {
-      const mockResponse = { data: mockUser };
-      mockApi.get.mockResolvedValue(mockResponse);
-
-      const { result } = renderHook(() => useUserProfileQuery(), { wrapper: createWrapper() });
-
-      await waitFor(() => {
-        expect(result.current.isSuccess).toBe(true);
-      });
-
-      expect(mockApi.get).toHaveBeenCalledWith('/auth/profile');
-      expect(result.current.data).toEqual(mockUser);
-    });
-
-    it('should handle error when fetching profile', async () => {
-      const mockError = new Error('Unauthorized');
-      mockApi.get.mockRejectedValue(mockError);
-
-      const { result } = renderHook(() => useUserProfileQuery(), { wrapper: createWrapper() });
-
-      await waitFor(() => {
-        expect(result.current.isError).toBe(true);
-      });
-
-      expect(result.current.error).toEqual(mockError);
-    });
-  });
-});
-
-describe('Auth Mutations', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
+  afterEach(() => {
+    store.dispatch(clearSession());
   });
 
-  describe('useLoginMutation', () => {
-    it('should login successfully', async () => {
-      const mockResponse = { data: mockLoginResponse };
-      mockApi.post.mockResolvedValue(mockResponse);
-
-      const { result } = renderHook(() => useLoginMutation(), { wrapper: createWrapper() });
-
-      const loginData = { username: 'admin', password: 'password123' };
-      const mutateResult = await result.current.mutateAsync(loginData);
-
-      expect(mockApi.post).toHaveBeenCalledWith('/auth/login', loginData);
-      expect(mutateResult).toEqual(mockLoginResponse);
+  it('stores the session returned by the login API', async () => {
+    vi.mocked(loginApi).mockResolvedValue({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      user: { id: 'finance', username: 'finance', roles: ['FINANCE'] },
     });
 
-    it('should handle login failure', async () => {
-      const mockError = new Error('Invalid credentials');
-      mockApi.post.mockRejectedValue(mockError);
+    const { result } = renderHook(() => useLoginMutation(), { wrapper: createWrapper() });
+    await act(async () => {
+      await result.current.mutateAsync({ username: 'finance', password: 'secret' });
+    });
 
-      const { result } = renderHook(() => useLoginMutation(), { wrapper: createWrapper() });
-
-      const loginData = { username: 'admin', password: 'wrong' };
-
-      await expect(result.current.mutateAsync(loginData)).rejects.toThrow('Invalid credentials');
-      expect(mockApi.post).toHaveBeenCalledWith('/auth/login', loginData);
+    expect(loginApi).toHaveBeenCalledWith({ username: 'finance', password: 'secret' });
+    expect(store.getState().auth).toMatchObject({
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      user: { username: 'finance' },
     });
   });
 
-  describe('useLogoutMutation', () => {
-    it('should logout successfully', async () => {
-      const mockResponse = { data: { success: true, message: '登出成功' } };
-      mockApi.post.mockResolvedValue(mockResponse);
-
-      const { result } = renderHook(() => useLogoutMutation(), { wrapper: createWrapper() });
-
-      const mutateResult = await result.current.mutateAsync();
-
-      expect(mockApi.post).toHaveBeenCalledWith('/auth/logout');
-      expect(mutateResult).toEqual(mockResponse.data);
+  it('clears the session after logout settles', async () => {
+    store.dispatch({
+      type: 'auth/setSession',
+      payload: { user: { id: 'finance', username: 'finance', roles: ['FINANCE'] } },
     });
+    vi.mocked(logoutApi).mockResolvedValue();
 
-    it('should handle logout error', async () => {
-      const mockError = new Error('Session expired');
-      mockApi.post.mockRejectedValue(mockError);
-
-      const { result } = renderHook(() => useLogoutMutation(), { wrapper: createWrapper() });
-
-      await expect(result.current.mutateAsync()).rejects.toThrow('Session expired');
-    });
-  });
-
-  describe('useRefreshTokenMutation', () => {
-    it('should refresh token successfully', async () => {
-      const mockRefreshResponse = {
-        token: 'new_jwt_token',
-        refreshToken: 'new_refresh_token',
-        expiresIn: 3600,
-      };
-      const mockResponse = { data: mockRefreshResponse };
-      mockApi.post.mockResolvedValue(mockResponse);
-
-      const { result } = renderHook(() => useRefreshTokenMutation(), { wrapper: createWrapper() });
-
-      const mutateResult = await result.current.mutateAsync('refresh_token_123');
-
-      expect(mockApi.post).toHaveBeenCalledWith('/auth/refresh', {
-        refreshToken: 'refresh_token_123',
-      });
-      expect(mutateResult).toEqual(mockRefreshResponse);
-    });
-
-    it('should handle refresh token failure', async () => {
-      const mockError = new Error('Refresh token expired');
-      mockApi.post.mockRejectedValue(mockError);
-
-      const { result } = renderHook(() => useRefreshTokenMutation(), { wrapper: createWrapper() });
-
-      await expect(result.current.mutateAsync('invalid_token')).rejects.toThrow(
-        'Refresh token expired',
-      );
-      expect(mockApi.post).toHaveBeenCalledWith('/auth/refresh', {
-        refreshToken: 'invalid_token',
-      });
-    });
-  });
-
-  describe('mutation callbacks', () => {
-    it('should invalidate profile query on successful login', async () => {
-      const mockResponse = { data: mockLoginResponse };
-      mockApi.post.mockResolvedValue(mockResponse);
-
-      const queryClient = new QueryClient();
-      const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
-
-      const { result } = renderHook(() => useLoginMutation(), {
-        wrapper: function TestWrapper({ children }: { children: React.ReactNode }) {
-          return React.createElement(QueryClientProvider, { client: queryClient }, children);
-        },
-      });
-
-      await result.current.mutateAsync({ username: 'admin', password: 'password123' });
-
-      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ['user', 'profile'] });
-    });
-
-    it('should clear all queries on logout', async () => {
-      const mockResponse = { data: { success: true } };
-      mockApi.post.mockResolvedValue(mockResponse);
-
-      const queryClient = new QueryClient();
-      const clearSpy = vi.spyOn(queryClient, 'clear');
-
-      const { result } = renderHook(() => useLogoutMutation(), {
-        wrapper: function TestWrapper({ children }: { children: React.ReactNode }) {
-          return React.createElement(QueryClientProvider, { client: queryClient }, children);
-        },
-      });
-
+    const { result } = renderHook(() => useLogoutMutation(), { wrapper: createWrapper() });
+    await act(async () => {
       await result.current.mutateAsync();
-
-      expect(clearSpy).toHaveBeenCalled();
     });
+
+    expect(logoutApi).toHaveBeenCalledOnce();
+    expect(store.getState().auth.user).toBeNull();
+  });
+
+  it('propagates login errors to the mutation caller', async () => {
+    vi.mocked(loginApi).mockRejectedValue(new Error('登录失败'));
+
+    const { result } = renderHook(() => useLoginMutation(), { wrapper: createWrapper() });
+
+    await expect(result.current.mutateAsync({ username: 'finance', password: 'bad' }))
+      .rejects.toThrow('登录失败');
   });
 });

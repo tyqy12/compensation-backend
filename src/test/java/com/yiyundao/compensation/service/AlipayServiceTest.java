@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.service;
 
+import com.alipay.api.AlipayApiException;
 import com.alipay.api.internal.util.AlipaySignature;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.yiyundao.compensation.enums.BatchStatus;
@@ -76,6 +77,31 @@ class AlipayServiceTest {
         assertThatThrownBy(() -> service.queryTransferStatus("COMP_1772756263316_928CC3C9"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("PKCS8");
+    }
+
+    @Test
+    void singleTransferShouldClearGeneratedOrderWhenLocalConfigValidationFails() {
+        AlipayService service = new AlipayService(
+                paymentRecordService,
+                paymentBatchService,
+                redisTemplate,
+                notificationService,
+                integrationConfigService,
+                payrollBatchMapper);
+        PaymentRecord record = new PaymentRecord();
+        record.setId(7001L);
+        record.setAmount(new java.math.BigDecimal("100.00"));
+        when(paymentRecordService.getById(7001L)).thenReturn(record);
+        when(integrationConfigService.isPlatformEnabled("alipay")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.singleTransfer(7001L))
+                .isInstanceOf(AlipayApiException.class)
+                .hasMessageContaining("支付宝集成未启用");
+
+        ArgumentCaptor<UpdateWrapper<PaymentRecord>> captor = ArgumentCaptor.forClass(UpdateWrapper.class);
+        verify(paymentRecordService).update(captor.capture());
+        assertThat(captor.getValue().getParamNameValuePairs().values())
+                .noneMatch(value -> value instanceof String && ((String) value).startsWith("COMP_"));
     }
 
     @Test

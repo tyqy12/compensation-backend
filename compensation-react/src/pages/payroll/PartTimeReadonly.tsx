@@ -13,7 +13,6 @@ import {
   Switch,
   Tag,
   Typography,
-  List,
 } from 'antd';
 import { ReloadOutlined, SafetyCertificateOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -108,7 +107,11 @@ const batchColumns: ProColumns<OpenApiPayrollBatchDto>[] = [
       archived: { text: '已归档', status: 'Default' },
     },
     render: (_, record) => (
-      <Tag color={record.status === 'paid' ? 'green' : record.status === 'approved' ? 'blue' : 'default'}>
+      <Tag
+        color={
+          record.status === 'paid' ? 'green' : record.status === 'approved' ? 'blue' : 'default'
+        }
+      >
         {record.status?.toUpperCase()}
       </Tag>
     ),
@@ -123,13 +126,15 @@ const batchColumns: ProColumns<OpenApiPayrollBatchDto>[] = [
     dataIndex: 'paidAt',
     width: 180,
     valueType: 'dateTime',
-    render: (_, record) => record.paidAt ? dayjs(record.paidAt).format('YYYY-MM-DD HH:mm:ss') : '—',
+    render: (_, record) =>
+      record.paidAt ? dayjs(record.paidAt).format('YYYY-MM-DD HH:mm:ss') : '—',
   },
   {
     title: '更新时间',
     dataIndex: 'updatedAt',
     hideInSearch: true,
-    render: (_, record) => record.updatedAt ? dayjs(record.updatedAt).format('YYYY-MM-DD HH:mm:ss') : '—',
+    render: (_, record) =>
+      record.updatedAt ? dayjs(record.updatedAt).format('YYYY-MM-DD HH:mm:ss') : '—',
   },
   {
     title: '筛选周期',
@@ -179,7 +184,8 @@ const lineColumns: ProColumns<OpenApiPayrollLineDto>[] = [
     title: '更新时间',
     dataIndex: 'updatedAt',
     width: 180,
-    render: (_, record) => record.updatedAt ? dayjs(record.updatedAt).format('YYYY-MM-DD HH:mm:ss') : '—',
+    render: (_, record) =>
+      record.updatedAt ? dayjs(record.updatedAt).format('YYYY-MM-DD HH:mm:ss') : '—',
   },
 ];
 
@@ -199,7 +205,11 @@ const PartTimeReadonly: React.FC = () => {
   const [credentials, setCredentials] = useState<CredentialState>();
   const [autoRenew, setAutoRenew] = useState<boolean>(true);
   const [token, setToken] = useState<StoredToken | undefined>(() => readStoredToken());
-  const [batchParams, setBatchParams] = useState<PartTimeBatchQueryParams>({ current: 1, size: 10, status: 'paid' });
+  const [batchParams, setBatchParams] = useState<PartTimeBatchQueryParams>({
+    current: 1,
+    size: 10,
+    status: 'paid',
+  });
   const [selectedBatch, setSelectedBatch] = useState<OpenApiPayrollBatchDto | undefined>();
   const [lineParams, setLineParams] = useState<PartTimeLinesQueryParams>({ current: 1, size: 20 });
   const [payslipParams, setPayslipParams] = useState<PartTimePayslipQueryParams | undefined>();
@@ -211,15 +221,15 @@ const PartTimeReadonly: React.FC = () => {
     accessToken,
     enabled: Boolean(accessToken),
   });
-  const batchIdentifier = selectedBatch?.batchId ?? selectedBatch?.id ?? selectedBatch?.batchNo ?? '';
+  const batchIdentifier =
+    selectedBatch?.batchId ?? selectedBatch?.id ?? selectedBatch?.batchNo ?? '';
 
   const linesQuery = usePartTimePayrollLinesQuery(batchIdentifier, lineParams, {
     enabled: Boolean(batchIdentifier) && Boolean(accessToken),
     accessToken,
   });
   const payslipQuery = usePartTimePayslipsQuery(payslipParams ?? { employeeRef: '', period: '' }, {
-    enabled:
-      Boolean(payslipParams?.employeeRef && payslipParams?.period) && Boolean(accessToken),
+    enabled: Boolean(payslipParams?.employeeRef && payslipParams?.period) && Boolean(accessToken),
     accessToken,
   });
 
@@ -341,7 +351,10 @@ const PartTimeReadonly: React.FC = () => {
       }}
     >
       <Space size={16} style={{ width: '100%', padding: 24 }}>
-        <Card title="Client Credentials 令牌管理" extra={token ? <Tag color="blue">有效期剩余：{expiresLabel}</Tag> : null}>
+        <Card
+          title="Client Credentials 令牌管理"
+          extra={token ? <Tag color="blue">有效期剩余：{expiresLabel}</Tag> : null}
+        >
           <Space size={16} style={{ width: '100%' }}>
             <Form<CredentialFormValues>
               layout="inline"
@@ -360,7 +373,11 @@ const PartTimeReadonly: React.FC = () => {
                 label="Client Secret"
                 rules={[{ required: true, message: '请输入 Client Secret' }]}
               >
-                <Input.Password autoComplete="new-password" placeholder="密钥" style={{ width: 260 }} />
+                <Input.Password
+                  autoComplete="new-password"
+                  placeholder="密钥"
+                  style={{ width: 260 }}
+                />
               </Form.Item>
               <Form.Item name="scopes" label="Scopes">
                 <Input placeholder="payroll:read payslip:read" style={{ width: 240 }} />
@@ -370,7 +387,12 @@ const PartTimeReadonly: React.FC = () => {
               </Form.Item>
               <Form.Item>
                 <Space>
-                  <Button type="primary" htmlType="submit" loading={tokenMutation.isPending} icon={<SafetyCertificateOutlined />}>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    loading={tokenMutation.isPending}
+                    icon={<SafetyCertificateOutlined />}
+                  >
                     获取 Token
                   </Button>
                   {token && (
@@ -398,10 +420,12 @@ const PartTimeReadonly: React.FC = () => {
               <Alert
                 type="success"
                 showIcon
-                message="AccessToken 已缓存"
+                title="AccessToken 已缓存"
                 description={
                   <Space size={4} style={{ width: '100%' }}>
-                    <Text type="secondary">Authorization: Bearer {token.accessToken.slice(0, 12)}...</Text>
+                    <Text type="secondary">
+                      Authorization: Bearer {token.accessToken.slice(0, 12)}...
+                    </Text>
                     <Text type="secondary">Scope: {token.scope}</Text>
                     <Text type="secondary">TokenType: {token.tokenType}</Text>
                   </Space>
@@ -412,7 +436,7 @@ const PartTimeReadonly: React.FC = () => {
               <Alert
                 type="info"
                 showIcon
-                message="请先获取访问令牌"
+                title="请先获取访问令牌"
                 description="仅当成功获取 AccessToken 后，才能查询兼职批次和工资条数据"
               />
             )}
@@ -422,20 +446,30 @@ const PartTimeReadonly: React.FC = () => {
         <Card title="兼职批次列表">
           <ProTable<OpenApiPayrollBatchDto>
             rowKey={(record) =>
-              String(record.batchId ?? record.id ?? record.batchNo ?? `${record.periodLabel}-${record.lineCount}`)}
+              String(
+                record.batchId ??
+                  record.id ??
+                  record.batchNo ??
+                  `${record.periodLabel}-${record.lineCount}`,
+              )
+            }
             columns={batchColumns}
             dataSource={batchesQuery.data?.list ?? []}
             loading={batchesQuery.isLoading || batchesQuery.isFetching}
-            search={accessToken ? {
-              labelWidth: 'auto',
-              optionRender: (searchConfig, formProps, dom) => [
-                ...dom,
-                <Button key="reset" onClick={handleBatchReset}>
-                  重置
-                </Button>,
-              ],
-              defaultCollapsed: false,
-            } : false}
+            search={
+              accessToken
+                ? {
+                    labelWidth: 'auto',
+                    optionRender: (searchConfig, formProps, dom) => [
+                      ...dom,
+                      <Button key="reset" onClick={handleBatchReset}>
+                        重置
+                      </Button>,
+                    ],
+                    defaultCollapsed: false,
+                  }
+                : false
+            }
             onSubmit={handleBatchSubmit}
             pagination={{
               current: batchParams.current,
@@ -453,13 +487,13 @@ const PartTimeReadonly: React.FC = () => {
               },
             })}
             rowClassName={(record) =>
-              selectedBatch && (
-                (record.batchId && selectedBatch.batchId === record.batchId) ||
+              selectedBatch &&
+              ((record.batchId && selectedBatch.batchId === record.batchId) ||
                 (record.id && selectedBatch.id === record.id) ||
-                (record.batchNo && selectedBatch.batchNo === record.batchNo)
-              )
+                (record.batchNo && selectedBatch.batchNo === record.batchNo))
                 ? 'ant-table-row-selected'
-                : ''}
+                : ''
+            }
             toolBarRender={() => [
               <Button
                 key="refresh"
@@ -481,7 +515,11 @@ const PartTimeReadonly: React.FC = () => {
         {selectedBatch && accessToken && (
           <Card
             title={`工资行明细 - ${selectedBatch.batchNo || selectedBatch.batchId}`}
-            extra={<Text type="secondary">共 {selectedBatch.lineCount ?? linesQuery.data?.total ?? 0} 条</Text>}
+            extra={
+              <Text type="secondary">
+                共 {selectedBatch.lineCount ?? linesQuery.data?.total ?? 0} 条
+              </Text>
+            }
           >
             <Space size={12} style={{ width: '100%' }}>
               {/* 统计卡片 - 单行显示 */}
@@ -493,12 +531,19 @@ const PartTimeReadonly: React.FC = () => {
                   <Statistic title="状态" value={selectedBatch.status?.toUpperCase() ?? '—'} />
                 </Card>
                 <Card size="small" style={{ flex: '0 0 auto', width: 100 }}>
-                  <Statistic title="行数" value={selectedBatch.lineCount ?? linesQuery.data?.total ?? 0} />
+                  <Statistic
+                    title="行数"
+                    value={selectedBatch.lineCount ?? linesQuery.data?.total ?? 0}
+                  />
                 </Card>
                 <Card size="small" style={{ flex: '0 0 auto', width: 180 }}>
                   <Statistic
                     title="支付时间"
-                    value={selectedBatch.paidAt ? dayjs(selectedBatch.paidAt).format('YYYY-MM-DD HH:mm:ss') : '—'}
+                    value={
+                      selectedBatch.paidAt
+                        ? dayjs(selectedBatch.paidAt).format('YYYY-MM-DD HH:mm:ss')
+                        : '—'
+                    }
                   />
                 </Card>
               </div>
@@ -514,7 +559,13 @@ const PartTimeReadonly: React.FC = () => {
 
               <ProTable<OpenApiPayrollLineDto>
                 rowKey={(record) =>
-                  String(record.id ?? record.lineNo ?? record.employeeRef ?? `${record.employeeRef}-${record.updatedAt}`)}
+                  String(
+                    record.id ??
+                      record.lineNo ??
+                      record.employeeRef ??
+                      `${record.employeeRef}-${record.updatedAt}`,
+                  )
+                }
                 columns={lineColumns}
                 dataSource={linesQuery.data?.list ?? []}
                 loading={linesQuery.isLoading || linesQuery.isFetching}
@@ -554,10 +605,20 @@ const PartTimeReadonly: React.FC = () => {
                 label="工资周期"
                 rules={[{ required: true, message: '请选择工资周期' }]}
               >
-                <DatePicker picker="month" format="YYYY-MM" style={{ width: 180 }} disabled={!accessToken} />
+                <DatePicker
+                  picker="month"
+                  format="YYYY-MM"
+                  style={{ width: 180 }}
+                  disabled={!accessToken}
+                />
               </Form.Item>
               <Form.Item>
-                <Button type="primary" htmlType="submit" loading={payslipQuery.isLoading} disabled={!accessToken}>
+                <Button
+                  type="primary"
+                  htmlType="submit"
+                  loading={payslipQuery.isLoading}
+                  disabled={!accessToken}
+                >
                   查询
                 </Button>
               </Form.Item>
@@ -567,47 +628,51 @@ const PartTimeReadonly: React.FC = () => {
               <Alert
                 type="info"
                 showIcon
-                message="请先获取 AccessToken"
+                title="请先获取 AccessToken"
                 description="输入客户端凭证并点击“获取 Token”后，才能查询工资条"
               />
             )}
 
-            {accessToken && payslipQuery.isFetching && <Text type="secondary">正在查询工资条...</Text>}
+            {accessToken && payslipQuery.isFetching && (
+              <Text type="secondary">正在查询工资条...</Text>
+            )}
 
             {accessToken && payslipQuery.isError && (
               <Alert
                 type="error"
                 showIcon
-                message="查询失败"
+                title="查询失败"
                 description={(payslipQuery.error as Error)?.message ?? '请检查凭证和网络后重试'}
               />
             )}
 
-            {accessToken && payslipQuery.data && payslipQuery.data.length === 0 && payslipParams && (
-              <Alert
-                type="info"
-                showIcon
-                message="未找到工资条"
-                description="请核对员工引用、周期或 scope 权限"
-              />
-            )}
+            {accessToken &&
+              payslipQuery.data &&
+              payslipQuery.data.length === 0 &&
+              payslipParams && (
+                <Alert
+                  type="info"
+                  showIcon
+                  title="未找到工资条"
+                  description="请核对员工引用、周期或 scope 权限"
+                />
+              )}
 
             {accessToken && payslipQuery.data && payslipQuery.data.length > 0 && (
-              <List
-                itemLayout="vertical"
-                dataSource={payslipQuery.data}
-                renderItem={(item) => (
-                  <List.Item key={item.id ?? item.period}>
-                    <List.Item.Meta
-                      title={`${item.employeeRef} - ${item.period}`}
-                      description={
-                        <Space size={24} wrap>
-                          <Text>实发：{formatCurrency(item.netAmount, item.currency)}</Text>
-                          <Text>部门：{item.departments?.join(' / ') ?? '—'}</Text>
-                          <Text>更新时间：{item.updatedAt ? dayjs(item.updatedAt).format('YYYY-MM-DD HH:mm') : '—'}</Text>
-                        </Space>
-                      }
-                    />
+              <div className="part-time-payslip-list">
+                {payslipQuery.data.map((item) => (
+                  <article className="part-time-payslip-item" key={item.id ?? item.period}>
+                    <div className="part-time-payslip-heading">
+                      <Text strong>{`${item.employeeRef} - ${item.period}`}</Text>
+                      <Space size={24} wrap>
+                        <Text>实发：{formatCurrency(item.netAmount, item.currency)}</Text>
+                        <Text>部门：{item.departments?.join(' / ') ?? '—'}</Text>
+                        <Text>
+                          更新时间：
+                          {item.updatedAt ? dayjs(item.updatedAt).format('YYYY-MM-DD HH:mm') : '—'}
+                        </Text>
+                      </Space>
+                    </div>
                     <ProTable
                       rowKey={(record) => record.itemCode ?? `${record.itemName}-${record.order}`}
                       columns={[
@@ -630,9 +695,9 @@ const PartTimeReadonly: React.FC = () => {
                       options={false}
                       size="small"
                     />
-                  </List.Item>
-                )}
-              />
+                  </article>
+                ))}
+              </div>
             )}
           </Space>
         </Card>

@@ -33,6 +33,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeParseException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -204,17 +205,19 @@ public class ApprovalController {
                 .map(ApprovalStepVO::from)
                 .collect(Collectors.toList()));
 
-        // 获取关联的业务信息（从 workflowData 中解析）
-        if ("payroll".equalsIgnoreCase(workflow.getBusinessType())) {
-            Long batchId = parseBatchId(workflow.getBusinessKey());
-            if (batchId != null) {
-                detailVO.setBusinessInfo(Map.of(
-                        "batchId", String.valueOf(batchId),
-                        "periodLabel", "",
-                        "type", "",
-                        "status", workflow.getStatus() != null ? workflow.getStatus().getCode() : "",
-                        "paymentBatchNo", ""
-                ));
+        // 当前薪资流程使用 payroll_distribution 业务类型，旧实现只识别 payroll，导致详情页没有业务上下文。
+        if (isPayrollBusiness(workflow.getBusinessType())) {
+            Long businessId = parseBusinessId(workflow.getBusinessKey());
+            if (businessId != null) {
+                Map<String, Object> businessInfo = new LinkedHashMap<>();
+                businessInfo.put("businessType", workflow.getBusinessType());
+                businessInfo.put("status", workflow.getStatus() != null ? workflow.getStatus().getCode() : "");
+                if ("payroll_distribution".equalsIgnoreCase(workflow.getBusinessType())) {
+                    businessInfo.put("distributionId", String.valueOf(businessId));
+                } else {
+                    businessInfo.put("batchId", String.valueOf(businessId));
+                }
+                detailVO.setBusinessInfo(businessInfo);
             }
         }
 
@@ -330,11 +333,16 @@ public class ApprovalController {
         }
     }
 
-    private Long parseBatchId(String businessKey) {
+    private boolean isPayrollBusiness(String businessType) {
+        return "payroll".equalsIgnoreCase(businessType)
+                || "payroll_distribution".equalsIgnoreCase(businessType);
+    }
+
+    private Long parseBusinessId(String businessKey) {
         if (businessKey == null) return null;
-        int idx = businessKey.indexOf(":");
-        if (idx < 0) return null;
-        try { return Long.parseLong(businessKey.substring(idx + 1)); }
+        String[] segments = businessKey.split(":");
+        if (segments.length < 2) return null;
+        try { return Long.parseLong(segments[1]); }
         catch (Exception e) { return null; }
     }
 

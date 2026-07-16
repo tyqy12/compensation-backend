@@ -58,6 +58,7 @@ public class AlipayService {
     private static final int BATCH_SIZE = 1000; // 批量转账最大1000笔
     private static final int DEDUP_EXPIRE_HOURS = 24; // 去重缓存24小时
     private static final String DAILY_LIMIT_KEY_PREFIX = "alipay:daily_limit:";
+    public static final String RESULT_UNKNOWN_ERROR_CODE = "ALIPAY_RESULT_UNKNOWN";
     private static final int ERROR_CODE_MAX_LENGTH = 50;
     private static final int ERROR_MSG_MAX_LENGTH = 500;
     private static final int NORMALIZED_ERROR_MSG_MAX_LENGTH = 200;
@@ -167,6 +168,9 @@ public class AlipayService {
 
         // 生成商户订单号
         String outBizNo = generateOutBizNo();
+        String existingOrderNo = resolveExistingOrderNo(record);
+        boolean submissionAttempted = false;
+        boolean responseReceived = false;
         String failureCode = null;
         String failureMsg = null;
 
@@ -174,6 +178,10 @@ public class AlipayService {
                 paymentRecordId, maskOrderNo(outBizNo), record.getAmount());
 
         try {
+            if (StringUtils.hasText(existingOrderNo)) {
+                throw new IllegalStateException("支付记录已有支付宝渠道订单，请先完成渠道查单");
+            }
+
             // 检查支付宝配置是否存在且启用
             if (!integrationConfigService.isPlatformEnabled("alipay")) {
                 throw new IllegalStateException("支付宝集成未启用或配置不存在");
@@ -233,9 +241,11 @@ public class AlipayService {
             }
 
             // 调用支付宝API
+            submissionAttempted = true;
             AlipayFundTransUniTransferResponse response = alipayClient.execute(request);
+            responseReceived = response != null;
 
-            if (response.isSuccess()) {
+            if (response != null && response.isSuccess()) {
                 String tradeNo = response.getOrderId(); // 支付宝转账单据号
 
                 // 更新支付记录为成功
@@ -250,9 +260,11 @@ public class AlipayService {
 
                 return tradeNo;
             } else {
-                // 转账失败
-                failureCode = response.getCode();
-                failureMsg = response.getMsg() + " - " + response.getSubMsg();
+                // 收到明确的支付宝失败响应时才标记失败；无响应属于结果未知，必须保留订单号等待查单。
+                failureCode = response == null ? "ALIPAY_EMPTY_RESPONSE" : response.getCode();
+                failureMsg = response == null
+                        ? "支付宝未返回转账结果"
+                        : response.getMsg() + " - " + response.getSubMsg();
 
                 log.error("支付宝转账失败: recordId={}, outBizNo={}, code={}, msg={}",
                         paymentRecordId, maskOrderNo(outBizNo), failureCode, failureMsg);
@@ -261,15 +273,24 @@ public class AlipayService {
             }
 
         } catch (Exception e) {
-            // 异常情况，删除去重标记并记录失败状态
+            // 异常情况，删除去重标记并记录最终状态
             redisTemplate.delete(dedupKey);
 
             String finalFailureCode = StringUtils.hasText(failureCode) ? failureCode : "SYSTEM_ERROR";
             String finalFailureMsg = StringUtils.hasText(failureMsg) ? failureMsg : e.getMessage();
+            boolean resultUnknown = submissionAttempted
+                    && !responseReceived
+                    && !isLocalAlipayConfigurationError(e);
+            if (resultUnknown) {
+                finalFailureCode = RESULT_UNKNOWN_ERROR_CODE;
+                finalFailureMsg = "支付宝转账结果未知，请通过查单确认后再处理";
+            }
             String normalizedFailureCode = normalizeFailureCode(finalFailureCode);
             String normalizedFailureMsg = normalizeFailureMessage(finalFailureMsg);
+            String failureOrderNo = submissionAttempted ? outBizNo : existingOrderNo;
             try {
-                updatePaymentStatus(paymentRecordId, PaymentStatus.FAILED, outBizNo, null,
+                updatePaymentStatus(paymentRecordId, resultUnknown ? PaymentStatus.PROCESSING : PaymentStatus.FAILED,
+                        failureOrderNo, null,
                         normalizedFailureCode, normalizedFailureMsg);
             } catch (Exception persistEx) {
                 log.error("持久化支付失败状态异常: recordId={}, outBizNo={}",
@@ -756,6 +777,16 @@ public class AlipayService {
 
         PaymentRecordStatusTransitions.applyAllowedStatusGuard(updateWrapper, status);
         return paymentRecordService.update(updateWrapper);
+    }
+
+    private String resolveExistingOrderNo(PaymentRecord record) {
+        if (record == null) {
+            return null;
+        }
+        if (StringUtils.hasText(record.getProviderOrderNo())) {
+            return record.getProviderOrderNo();
+        }
+        return StringUtils.hasText(record.getAlipayOrderNo()) ? record.getAlipayOrderNo() : null;
     }
 
     private void safeNotifyPaymentSuccess(PaymentRecord record) {

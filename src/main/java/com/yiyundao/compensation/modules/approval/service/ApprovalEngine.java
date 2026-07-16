@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.modules.approval.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -10,11 +11,16 @@ import com.yiyundao.compensation.enums.ApprovalStatus;
 import com.yiyundao.compensation.enums.WorkflowType;
 import com.yiyundao.compensation.enums.UserStatus;
 import com.yiyundao.compensation.common.util.TransactionAfterCommitExecutor;
+import com.yiyundao.compensation.enums.EmployeeStatus;
 import com.yiyundao.compensation.infrastructure.dao.ApprovalWorkflowMapper;
+import com.yiyundao.compensation.infrastructure.dao.EmployeeMapper;
+import com.yiyundao.compensation.infrastructure.dao.PayrollLineMapper;
 import com.yiyundao.compensation.modules.approval.config.ApprovalFlowConfigManager;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalStep;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.event.ApprovalCompletedEvent;
+import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
@@ -33,10 +39,13 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * 审批引擎
@@ -54,6 +63,8 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
 
     private final ApprovalStepService approvalStepService;
     private final SysUserService sysUserService;
+    private final PayrollLineMapper payrollLineMapper;
+    private final EmployeeMapper employeeMapper;
     private final ObjectProvider<OrganizationSyncService> organizationSyncServiceProvider;
     private final ObjectMapper objectMapper;
     private final SysConfigService sysConfigService;
@@ -187,7 +198,7 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
                                                       Map<String, Object> workflowData) {
         return switch (workflowType) {
             case BATCH -> generateBatchPaymentSteps(workflow.getInitiatorId());
-            case PAYROLL_DISTRIBUTION -> generatePayrollDistributionSteps(workflow.getInitiatorId());
+            case PAYROLL_DISTRIBUTION -> generatePayrollDistributionSteps(workflow.getInitiatorId(), workflowData);
             case ADHOC -> generateAdhocPaymentSteps(workflow.getInitiatorId());
             case OFFLINE -> generateOfflineEmployeeSteps(workflow.getInitiatorId());
             case PERMISSION -> generatePermissionSteps(workflow.getInitiatorId());
@@ -209,12 +220,12 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
     /**
      * 生成薪资发放审批步骤
      */
-    private List<ApprovalStep> generatePayrollDistributionSteps(Long initiatorId) {
+    private List<ApprovalStep> generatePayrollDistributionSteps(Long initiatorId, Map<String, Object> workflowData) {
         List<ApprovalFlowConfigManager.ApprovalStepConfig> configured = loadPayrollApprovalConfig();
         if (configured.isEmpty()) {
             configured = approvalFlowConfigManager.getDefaultSteps(WorkflowType.PAYROLL_DISTRIBUTION);
         }
-        return buildStepsFromConfig(configured, initiatorId);
+        return buildStepsFromConfig(configured, initiatorId, workflowData);
     }
 
     /**
@@ -266,6 +277,11 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
      */
     private List<ApprovalStep> buildStepsFromConfig(List<ApprovalFlowConfigManager.ApprovalStepConfig> configSteps,
                                                     Long initiatorId) {
+        return buildStepsFromConfig(configSteps, initiatorId, null);
+    }
+
+    private List<ApprovalStep> buildStepsFromConfig(List<ApprovalFlowConfigManager.ApprovalStepConfig> configSteps,
+                                                    Long initiatorId, Map<String, Object> workflowData) {
         if (configSteps == null || configSteps.isEmpty()) {
             return List.of();
         }
@@ -280,8 +296,8 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
             int stepNo = cfg.getStepNo() != null ? cfg.getStepNo() : lastAutoStep + 1;
             lastAutoStep = stepNo;
 
-            SysUser approver = resolveApprover(cfg, initiatorId);
-            if (approver == null) {
+            List<SysUser> approvers = resolveApprovers(cfg, initiatorId, workflowData);
+            if (approvers.isEmpty()) {
                 if (Boolean.TRUE.equals(cfg.getOptional())) {
                     log.info("审批步骤{}({}) 未找到审批人，已跳过(可选)", stepNo, cfg.getStepName());
                     continue;
@@ -290,17 +306,133 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
                         stepNo, StringUtils.hasText(cfg.getStepName()) ? cfg.getStepName() : "未命名步骤"));
             }
 
-            String approverName = Optional.ofNullable(approver.getRealName()).filter(StringUtils::hasText)
-                    .orElse(approver.getUsername());
-            int actualStepNo = steps.size() + 1;
-            String stepName = StringUtils.hasText(cfg.getStepName())
-                    ? cfg.getStepName()
-                    : (StringUtils.hasText(cfg.getRole()) ? cfg.getRole() : "审批步骤" + actualStepNo);
-            int timeout = cfg.getTimeoutHours() != null ? cfg.getTimeoutHours() : defaultTimeout;
+            for (SysUser approver : approvers) {
+                String approverName = Optional.ofNullable(approver.getRealName()).filter(StringUtils::hasText)
+                        .orElse(approver.getUsername());
+                int actualStepNo = steps.size() + 1;
+                String stepName = StringUtils.hasText(cfg.getStepName())
+                        ? cfg.getStepName()
+                        : (StringUtils.hasText(cfg.getRole()) ? cfg.getRole() : "审批步骤" + actualStepNo);
+                int timeout = cfg.getTimeoutHours() != null ? cfg.getTimeoutHours() : defaultTimeout;
 
-            steps.add(createApprovalStep(actualStepNo, stepName, approver.getId(), approverName, timeout));
+                steps.add(createApprovalStep(actualStepNo, stepName, approver.getId(), approverName, timeout));
+            }
         }
         return steps;
+    }
+
+    private List<SysUser> resolveApprovers(ApprovalFlowConfigManager.ApprovalStepConfig cfg,
+                                           Long initiatorId, Map<String, Object> workflowData) {
+        if (isPayrollManagerStep(cfg, workflowData)) {
+            return resolvePayrollManagerApprovers(workflowData, initiatorId);
+        }
+        SysUser approver = resolveApprover(cfg, initiatorId);
+        return approver == null ? List.of() : List.of(approver);
+    }
+
+    private boolean isPayrollManagerStep(ApprovalFlowConfigManager.ApprovalStepConfig cfg,
+                                         Map<String, Object> workflowData) {
+        return cfg != null
+                && cfg.getApproverId() == null
+                && !StringUtils.hasText(cfg.getApproverUsername())
+                && isManagerRole(cfg.getRole())
+                && workflowData != null
+                && workflowData.containsKey("batchId");
+    }
+
+    private boolean isManagerRole(String role) {
+        if (!StringUtils.hasText(role)) {
+            return false;
+        }
+        String normalized = role.trim();
+        return SecurityConstants.ROLE_MANAGER.equalsIgnoreCase(normalized)
+                || "MANAGER".equalsIgnoreCase(normalized);
+    }
+
+    /**
+     * 薪资发放的部门负责人必须来自本批次员工的直属负责人关系，不能从全局角色用户中任选一人。
+     * 一个批次跨多个负责人时，为每位负责人生成独立的串行步骤，确保每个覆盖范围都完成审批。
+     */
+    private List<SysUser> resolvePayrollManagerApprovers(Map<String, Object> workflowData, Long initiatorId) {
+        Long batchId = parseLong(workflowData.get("batchId"));
+        if (batchId == null) {
+            throw new IllegalStateException("薪资发放审批缺少有效的 batchId");
+        }
+
+        List<PayrollLine> lines = payrollLineMapper.selectList(new QueryWrapper<PayrollLine>()
+                .select("employee_id")
+                .eq("batch_id", batchId));
+        if (lines == null || lines.isEmpty()) {
+            throw new IllegalStateException("薪资批次没有可解析审批人的工资行: " + batchId);
+        }
+
+        Set<Long> employeeIds = new HashSet<>();
+        for (PayrollLine line : lines) {
+            if (line == null || line.getEmployeeId() == null) {
+                throw new IllegalStateException("薪资批次存在缺少员工的工资行: " + batchId);
+            }
+            employeeIds.add(line.getEmployeeId());
+        }
+
+        Map<Long, Employee> employeeMap = mapEmployees(employeeMapper.selectBatchIds(employeeIds));
+        Set<Long> managerIds = new HashSet<>();
+        for (Long employeeId : employeeIds) {
+            Employee employee = employeeMap.get(employeeId);
+            if (employee == null) {
+                throw new IllegalStateException("薪资批次引用的员工不存在: employeeId=" + employeeId);
+            }
+            if (employee.getManagerId() == null) {
+                throw new IllegalStateException("薪资批次员工未配置直属负责人: employeeId=" + employeeId);
+            }
+            managerIds.add(employee.getManagerId());
+        }
+
+        Map<Long, Employee> managerMap = mapEmployees(employeeMapper.selectBatchIds(managerIds));
+        List<Long> orderedManagerIds = managerIds.stream().sorted().toList();
+        List<SysUser> approvers = new ArrayList<>(orderedManagerIds.size());
+        for (Long managerId : orderedManagerIds) {
+            Employee manager = managerMap.get(managerId);
+            if (manager == null) {
+                throw new IllegalStateException("薪资批次员工的直属负责人不存在: managerId=" + managerId);
+            }
+            if (!EmployeeStatus.ACTIVE.getCode().equalsIgnoreCase(manager.getStatus())) {
+                throw new IllegalStateException("薪资批次员工的直属负责人不在职: managerId=" + managerId);
+            }
+
+            SysUser approver = sysUserService.findByEmployeeId(managerId);
+            if (!isValidApprover(approver, initiatorId)) {
+                throw new IllegalStateException("薪资批次员工的直属负责人没有有效登录用户: managerId=" + managerId);
+            }
+            approvers.add(approver);
+        }
+        return approvers;
+    }
+
+    private Map<Long, Employee> mapEmployees(List<Employee> employees) {
+        Map<Long, Employee> result = new HashMap<>();
+        if (employees == null) {
+            return result;
+        }
+        for (Employee employee : employees) {
+            if (employee != null && employee.getId() != null) {
+                result.put(employee.getId(), employee);
+            }
+        }
+        return result;
+    }
+
+    private Long parseLong(Object value) {
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (!StringUtils.hasText(String.valueOf(value))) {
+            return null;
+        }
+        try {
+            return Long.parseLong(String.valueOf(value).trim());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
     }
 
     /**

@@ -1,10 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import {
-  PageContainer,
-  ProTable,
-  type ProColumns,
-} from '@ant-design/pro-components';
+import { PageContainer, ProTable, type ProColumns } from '@ant-design/pro-components';
 import {
   Alert,
   Button,
@@ -62,7 +58,10 @@ const renderIssueTags = (issues?: PayrollValidationIssueDto[], warnings?: string
     return (
       <Space wrap size={4}>
         {issues.map((issue, idx) => (
-          <Tag color={getIssueColor(issue)} key={`${issue.code ?? issue.message ?? 'issue'}-${idx}`}>
+          <Tag
+            color={getIssueColor(issue)}
+            key={`${issue.code ?? issue.message ?? 'issue'}-${idx}`}
+          >
             {issue.message}
           </Tag>
         ))}
@@ -121,10 +120,14 @@ const columns: ProColumns<PayrollPreviewLineDto>[] = [
         return (
           <Space wrap size={4}>
             {record.diff?.netDeltaAmount !== undefined && (
-              <Tag color="purple">净额差异：{formatCurrency(record.diff.netDeltaAmount, record.currency as any)}</Tag>
+              <Tag color="purple">
+                净额差异：{formatCurrency(record.diff.netDeltaAmount, record.currency as any)}
+              </Tag>
             )}
             {record.diff?.netDeltaPercent !== undefined && (
-              <Tag color="geekblue">变动比例：{`${(record.diff.netDeltaPercent * 100).toFixed(2)}%`}</Tag>
+              <Tag color="geekblue">
+                变动比例：{`${(record.diff.netDeltaPercent * 100).toFixed(2)}%`}
+              </Tag>
             )}
           </Space>
         );
@@ -161,33 +164,38 @@ const ManagerReview: React.FC = () => {
   const { batchId } = useParams<{ batchId: string }>();
   const [filters, setFilters] = useState<PayrollManagerReviewFilters>({});
 
-  const reviewQuery = usePayrollManagerReviewQuery(batchId ?? '', filters, { enabled: Boolean(batchId) });
+  const reviewQuery = usePayrollManagerReviewQuery(batchId ?? '', filters, {
+    enabled: Boolean(batchId),
+  });
   const review = reviewQuery.data;
 
   const currency = review?.currency ?? 'CNY';
 
-  const summaryCards = useMemo(() => [
-    {
-      title: '筛选后员工数',
-      value: review?.lines?.length ?? 0,
-    },
-    {
-      title: '实发合计',
-      value: formatCurrency(review?.netTotal, currency),
-    },
-    {
-      title: '阻塞员工行',
-      value: review?.linesWithBlockingIssues ?? 0,
-    },
-    {
-      title: '阻塞问题',
-      value: review?.blockingIssueCount ?? 0,
-    },
-    {
-      title: '复核提醒',
-      value: review?.reviewIssueCount ?? 0,
-    },
-  ], [review, currency]);
+  const summaryCards = useMemo(
+    () => [
+      {
+        title: '筛选后员工数',
+        value: review?.lines?.length ?? 0,
+      },
+      {
+        title: '实发合计',
+        value: formatCurrency(review?.netTotal, currency),
+      },
+      {
+        title: '阻塞员工行',
+        value: review?.linesWithBlockingIssues ?? 0,
+      },
+      {
+        title: '阻塞问题',
+        value: review?.blockingIssueCount ?? 0,
+      },
+      {
+        title: '复核提醒',
+        value: review?.reviewIssueCount ?? 0,
+      },
+    ],
+    [review, currency],
+  );
 
   const handleSearch = (values: SearchFormValues) => {
     setFilters({
@@ -207,23 +215,33 @@ const ManagerReview: React.FC = () => {
         title: '经理核对视图',
         breadcrumb: {},
         extra: [
-          <Button key="refresh" icon={<ReloadOutlined />} onClick={() => reviewQuery.refetch()} loading={reviewQuery.isFetching}>
+          <Button
+            key="refresh"
+            icon={<ReloadOutlined />}
+            onClick={() => reviewQuery.refetch()}
+            loading={reviewQuery.isFetching}
+          >
             刷新
           </Button>,
         ],
       }}
     >
-      <Space direction="vertical" size={16} style={{ width: '100%', padding: 24 }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%', padding: 24 }}>
         <Card>
-          <Space direction="vertical" size={16} style={{ width: '100%' }}>
+          <Space orientation="vertical" size={16} style={{ width: '100%' }}>
             {!batchId && (
-              <Alert type="info" showIcon message="未指定批次" description="请通过批次入口进入此页面，以便加载差异数据。" />
+              <Alert
+                type="info"
+                showIcon
+                title="未指定批次"
+                description="请通过批次入口进入此页面，以便加载差异数据。"
+              />
             )}
             {reviewQuery.isError && (
               <Alert
                 type="error"
                 showIcon
-                message="经理核对数据加载失败"
+                title="经理核对数据加载失败"
                 description={(reviewQuery.error as Error)?.message ?? '请稍后重试或联系管理员'}
               />
             )}
@@ -232,17 +250,15 @@ const ManagerReview: React.FC = () => {
                 批次 {review?.batchId ?? batchId ?? '—'}
               </Title>
               {review?.status && (
-                <Tag color={review.status === 'approved' ? 'green' : 'blue'}>{review.status.toUpperCase()}</Tag>
+                <Tag color={review.status === 'approved' ? 'green' : 'blue'}>
+                  {review.status.toUpperCase()}
+                </Tag>
               )}
               {review?.department && <Tag color="geekblue">部门：{review.department}</Tag>}
               {review?.managerId && <Tag color="volcano">经理 ID：{review.managerId}</Tag>}
             </Space>
 
-            <Form<SearchFormValues>
-              layout="inline"
-              onFinish={handleSearch}
-              onReset={handleReset}
-            >
+            <Form<SearchFormValues> layout="inline" onFinish={handleSearch} onReset={handleReset}>
               <Form.Item name="department" label="部门">
                 <Input allowClear placeholder="按部门筛选" style={{ width: 220 }} />
               </Form.Item>
@@ -254,7 +270,12 @@ const ManagerReview: React.FC = () => {
               </Form.Item>
               <Form.Item>
                 <Space>
-                  <Button type="primary" htmlType="submit" icon={<SearchOutlined />} loading={reviewQuery.isLoading}>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    icon={<SearchOutlined />}
+                    loading={reviewQuery.isLoading}
+                  >
                     查询
                   </Button>
                   <Button htmlType="reset">重置</Button>
@@ -266,7 +287,11 @@ const ManagerReview: React.FC = () => {
             <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
               {summaryCards.map((card) => (
                 <Card key={card.title} size="small" style={{ flex: '0 0 auto', width: 140 }}>
-                  <Statistic title={card.title} value={card.value} valueStyle={{ fontSize: 20 }} />
+                  <Statistic
+                    title={card.title}
+                    value={card.value}
+                    styles={{ content: { fontSize: 20 } }}
+                  />
                 </Card>
               ))}
             </div>
@@ -275,7 +300,7 @@ const ManagerReview: React.FC = () => {
               <Alert
                 type={review.hasBlockingIssues ? 'error' : 'warning'}
                 showIcon
-                message={review.hasBlockingIssues ? '批次阻塞问题' : '批次复核提醒'}
+                title={review.hasBlockingIssues ? '批次阻塞问题' : '批次复核提醒'}
                 description={renderIssueTags(review.issues, review.warnings)}
               />
             )}
@@ -283,9 +308,9 @@ const ManagerReview: React.FC = () => {
               <Alert
                 type="warning"
                 showIcon
-                message="批次复核提醒"
+                title="批次复核提醒"
                 description={
-                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <Space orientation="vertical" size={4} style={{ width: '100%' }}>
                     {review.warnings.map((warning, idx) => (
                       <Text key={`${warning}-${idx}`}>{warning}</Text>
                     ))}
@@ -300,10 +325,11 @@ const ManagerReview: React.FC = () => {
           rowKey={(record) =>
             String(
               record.lineId ??
-              record.employeeId ??
-              record.employeeNo ??
-              `${record.employeeName ?? 'line'}-${record.managerId ?? 'unknown'}`,
-            )}
+                record.employeeId ??
+                record.employeeNo ??
+                `${record.employeeName ?? 'line'}-${record.managerId ?? 'unknown'}`,
+            )
+          }
           columns={columns}
           dataSource={review?.lines ?? []}
           loading={reviewQuery.isLoading || reviewQuery.isFetching}

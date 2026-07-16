@@ -272,7 +272,9 @@ const parseWarningSource = (value: unknown): string[] => {
 };
 
 const normalizeIssueSeverity = (severity?: string, blocking?: boolean) => {
-  const normalized = String(severity ?? '').trim().toLowerCase();
+  const normalized = String(severity ?? '')
+    .trim()
+    .toLowerCase();
   if (normalized === 'blocking' || blocking) {
     return 'blocking';
   }
@@ -345,10 +347,7 @@ const parseIssueSource = (value: unknown): PayrollValidationIssueDto[] => {
 };
 
 function parsePayrollIssues(record: any): PayrollValidationIssueDto[] {
-  const issues = [
-    ...parseIssueSource(record?.issues),
-    ...parseIssueSource(record?.issueList),
-  ];
+  const issues = [...parseIssueSource(record?.issues), ...parseIssueSource(record?.issueList)];
   return Array.from(
     new Map(
       issues.map((issue) => {
@@ -388,15 +387,23 @@ function normalizePayrollPreviewLike<
     hasBlockingIssues?: boolean;
   },
 >(payload: T): T {
+  const rawPayload = payload as T & Record<string, any>;
   const issues = parsePayrollIssues(payload);
   const warnings = parsePayrollWarnings(payload);
 
   return {
     ...payload,
+    batchRevision: rawPayload.batchRevision ?? rawPayload.batch_revision,
+    inputSnapshotHash: rawPayload.inputSnapshotHash ?? rawPayload.input_snapshot_hash,
+    ruleSnapshotHash: rawPayload.ruleSnapshotHash ?? rawPayload.rule_snapshot_hash,
+    calculationEngineVersion:
+      rawPayload.calculationEngineVersion ?? rawPayload.calculation_engine_version,
     issues,
     warnings,
-    blockingIssueCount: payload.blockingIssueCount ?? issues.filter((issue) => issue.severity === 'blocking').length,
-    reviewIssueCount: payload.reviewIssueCount ?? issues.filter((issue) => issue.severity === 'review').length,
+    blockingIssueCount:
+      payload.blockingIssueCount ?? issues.filter((issue) => issue.severity === 'blocking').length,
+    reviewIssueCount:
+      payload.reviewIssueCount ?? issues.filter((issue) => issue.severity === 'review').length,
     totalWarnings: payload.totalWarnings ?? warnings.length,
     hasBlockingIssues:
       payload.hasBlockingIssues ?? issues.some((issue) => issue.severity === 'blocking'),
@@ -409,9 +416,11 @@ function normalizePayrollPreviewLike<
             issues: lineIssues,
             warnings: lineWarnings,
             blockingIssueCount:
-              line.blockingIssueCount ?? lineIssues.filter((issue) => issue.severity === 'blocking').length,
+              line.blockingIssueCount ??
+              lineIssues.filter((issue) => issue.severity === 'blocking').length,
             reviewIssueCount:
-              line.reviewIssueCount ?? lineIssues.filter((issue) => issue.severity === 'review').length,
+              line.reviewIssueCount ??
+              lineIssues.filter((issue) => issue.severity === 'review').length,
             hasBlockingIssues:
               line.hasBlockingIssues ?? lineIssues.some((issue) => issue.severity === 'blocking'),
           };
@@ -487,7 +496,13 @@ function normalizePayrollBatchRecord(record: any): PayrollBatchDetailDto {
     .trim()
     .toLowerCase();
   const batchRevision =
-    toOptionalNumber(record.batchRevision ?? record.batch_revision ?? record.runNo ?? record.run_no) ?? 1;
+    toOptionalNumber(
+      record.batchRevision ?? record.batch_revision ?? record.runNo ?? record.run_no,
+    ) ?? 1;
+  const inputSnapshotHash = record.inputSnapshotHash ?? record.input_snapshot_hash;
+  const ruleSnapshotHash = record.ruleSnapshotHash ?? record.rule_snapshot_hash;
+  const calculationEngineVersion =
+    record.calculationEngineVersion ?? record.calculation_engine_version;
   const approvalWorkflowId = toOptionalNumber(
     record.approvalWorkflowId ?? record.approval_workflow_id,
   );
@@ -500,6 +515,10 @@ function normalizePayrollBatchRecord(record: any): PayrollBatchDetailDto {
     batchId,
     batchNo,
     payCycleId: toOptionalNumber(record.payCycleId ?? record.pay_cycle_id),
+    ruleTemplateId: toOptionalNumber(record.ruleTemplateId ?? record.rule_template_id),
+    ruleTemplateVersion: toOptionalNumber(
+      record.ruleTemplateVersion ?? record.rule_template_version,
+    ),
     type: record.type ?? payrollType,
     payrollType,
     cycleType,
@@ -508,6 +527,9 @@ function normalizePayrollBatchRecord(record: any): PayrollBatchDetailDto {
     calculationStatus,
     paymentStatus: paymentStatus || undefined,
     batchRevision,
+    inputSnapshotHash,
+    ruleSnapshotHash,
+    calculationEngineVersion,
     approvalWorkflowId,
     totalEmployees,
     totalLines,
@@ -537,14 +559,15 @@ function normalizePayrollDistributionRecord(record: any): PayrollDistributionDto
     distributionNo: record.distributionNo ?? record.distribution_no,
     batchId: toOptionalNumber(record.batchId ?? record.batch_id),
     batchRevision:
-      toOptionalNumber(record.batchRevision ?? record.batch_revision ?? record.runNo ?? record.run_no) ?? 1,
+      toOptionalNumber(
+        record.batchRevision ?? record.batch_revision ?? record.runNo ?? record.run_no,
+      ) ?? 1,
     periodLabel: record.periodLabel ?? record.period_label,
     payrollType: record.payrollType ?? record.payroll_type ?? record.type,
-    distributionStatus: String(
-      record.distributionStatus ?? record.distribution_status ?? record.status ?? '',
-    )
-      .trim()
-      .toLowerCase() || undefined,
+    distributionStatus:
+      String(record.distributionStatus ?? record.distribution_status ?? record.status ?? '')
+        .trim()
+        .toLowerCase() || undefined,
     totalAmount: toOptionalNumber(record.totalAmount ?? record.total_amount),
     totalCount: toOptionalNumber(record.totalCount ?? record.total_count),
     scheduledDate: record.scheduledDate ?? record.scheduled_date,
@@ -555,12 +578,14 @@ function normalizePayrollDistributionRecord(record: any): PayrollDistributionDto
     failedCount: toOptionalNumber(record.failedCount ?? record.failed_count),
     currentAttempt: toOptionalNumber(record.currentAttempt ?? record.current_attempt),
     approvalWorkflowId: toOptionalNumber(record.approvalWorkflowId ?? record.approval_workflow_id),
-    approvalStatus: String(record.approvalStatus ?? record.approval_status ?? '')
-      .trim()
-      .toLowerCase() || undefined,
-    approvalResult: String(record.approvalResult ?? record.approval_result ?? '')
-      .trim()
-      .toLowerCase() || undefined,
+    approvalStatus:
+      String(record.approvalStatus ?? record.approval_status ?? '')
+        .trim()
+        .toLowerCase() || undefined,
+    approvalResult:
+      String(record.approvalResult ?? record.approval_result ?? '')
+        .trim()
+        .toLowerCase() || undefined,
     approvalSubmittedAt: record.approvalSubmittedAt ?? record.approval_submitted_at,
     approvalCompletedAt: record.approvalCompletedAt ?? record.approval_completed_at,
     paymentBatchNo: record.paymentBatchNo ?? record.payment_batch_no,
@@ -568,16 +593,14 @@ function normalizePayrollDistributionRecord(record: any): PayrollDistributionDto
     reconciliationTaskId: toOptionalNumber(
       record.reconciliationTaskId ?? record.reconciliation_task_id,
     ),
-    reconciliationTaskStatus: String(
-      record.reconciliationTaskStatus ?? record.reconciliation_task_status ?? '',
-    )
-      .trim()
-      .toLowerCase() || undefined,
-    reconciliationResult: String(
-      record.reconciliationResult ?? record.reconciliation_result ?? '',
-    )
-      .trim()
-      .toLowerCase() || undefined,
+    reconciliationTaskStatus:
+      String(record.reconciliationTaskStatus ?? record.reconciliation_task_status ?? '')
+        .trim()
+        .toLowerCase() || undefined,
+    reconciliationResult:
+      String(record.reconciliationResult ?? record.reconciliation_result ?? '')
+        .trim()
+        .toLowerCase() || undefined,
     reconciliationDifference: toOptionalNumber(
       record.reconciliationDifference ?? record.reconciliation_difference,
     ),
@@ -600,15 +623,17 @@ function normalizePayrollDistributionItemRecord(record: any): PayrollDistributio
     paymentMethod: record.paymentMethod ?? record.payment_method,
     providerCode: record.providerCode ?? record.provider_code,
     amount: toOptionalNumber(record.amount),
-    itemStatus: String(record.itemStatus ?? record.item_status ?? '')
-      .trim()
-      .toLowerCase() || undefined,
+    itemStatus:
+      String(record.itemStatus ?? record.item_status ?? '')
+        .trim()
+        .toLowerCase() || undefined,
     paymentRecordId: toOptionalNumber(record.paymentRecordId ?? record.payment_record_id),
     retryCount: toOptionalNumber(record.retryCount ?? record.retry_count),
     failureReason: record.failureReason ?? record.failure_reason,
-    paymentRecordStatus: String(record.paymentRecordStatus ?? record.payment_record_status ?? '')
-      .trim()
-      .toLowerCase() || undefined,
+    paymentRecordStatus:
+      String(record.paymentRecordStatus ?? record.payment_record_status ?? '')
+        .trim()
+        .toLowerCase() || undefined,
     providerOrderNo: record.providerOrderNo ?? record.provider_order_no,
     providerTradeNo: record.providerTradeNo ?? record.provider_trade_no,
     errorCode: record.errorCode ?? record.error_code,
@@ -625,23 +650,28 @@ function normalizePayrollReconciliationTaskRecord(record: any): PayrollReconcili
     id: toOptionalNumber(record.id),
     distributionId: toOptionalNumber(record.distributionId ?? record.distribution_id),
     distributionNo: record.distributionNo ?? record.distribution_no,
-    distributionStatus: String(record.distributionStatus ?? record.distribution_status ?? '')
-      .trim()
-      .toLowerCase() || undefined,
+    distributionStatus:
+      String(record.distributionStatus ?? record.distribution_status ?? '')
+        .trim()
+        .toLowerCase() || undefined,
     batchId: toOptionalNumber(record.batchId ?? record.batch_id),
     batchRevision:
-      toOptionalNumber(record.batchRevision ?? record.batch_revision ?? record.runNo ?? record.run_no) ?? 1,
+      toOptionalNumber(
+        record.batchRevision ?? record.batch_revision ?? record.runNo ?? record.run_no,
+      ) ?? 1,
     periodLabel: record.periodLabel ?? record.period_label,
     payrollType: record.payrollType ?? record.payroll_type ?? record.type,
-    taskStatus: String(record.taskStatus ?? record.task_status ?? '')
-      .trim()
-      .toLowerCase() || undefined,
+    taskStatus:
+      String(record.taskStatus ?? record.task_status ?? '')
+        .trim()
+        .toLowerCase() || undefined,
     expectedAmount: toOptionalNumber(record.expectedAmount ?? record.expected_amount),
     actualAmount: toOptionalNumber(record.actualAmount ?? record.actual_amount),
     difference: toOptionalNumber(record.difference),
-    result: String(record.result ?? '')
-      .trim()
-      .toLowerCase() || undefined,
+    result:
+      String(record.result ?? '')
+        .trim()
+        .toLowerCase() || undefined,
     differenceDetail: record.differenceDetail ?? record.difference_detail,
     createTime: record.createTime ?? record.create_time,
     updateTime: record.updateTime ?? record.update_time,
@@ -957,6 +987,10 @@ export async function fetchPayrollCycles(params: PayrollCycleListParams) {
       ...record,
       id: record.id,
       type,
+      ruleTemplateId: toOptionalNumber(record.ruleTemplateId ?? record.rule_template_id),
+      ruleTemplateVersion: toOptionalNumber(
+        record.ruleTemplateVersion ?? record.rule_template_version,
+      ),
       cycleCode: record.cycleCode ?? record.cycle_code,
       cycleName: record.cycleName ?? record.cycle_name,
       payrollType,
@@ -1125,6 +1159,31 @@ export function usePayrollDistributionReconciliationQuery(
     queryKey: qk.payrollDistributionReconciliation(distributionId),
     queryFn: () => fetchPayrollDistributionReconciliation(distributionId),
     enabled: !!distributionId && (options?.enabled ?? true),
+  });
+}
+
+export async function retryPayrollDistribution(distributionId: number): Promise<any> {
+  const { data } = await api.post(`/payroll/distributions/${distributionId}/retry`);
+  return unwrap<any>(data);
+}
+
+export function useRetryPayrollDistributionMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: retryPayrollDistribution,
+    onSuccess: async (_, distributionId) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['payroll', 'distributions'] }),
+        queryClient.invalidateQueries({ queryKey: qk.payrollDistributionDetail(distributionId) }),
+        queryClient.invalidateQueries({ queryKey: qk.payrollDistributionItems(distributionId) }),
+        queryClient.invalidateQueries({
+          queryKey: qk.payrollDistributionReconciliation(distributionId),
+        }),
+        queryClient.invalidateQueries({ queryKey: ['payroll', 'batches'] }),
+        queryClient.invalidateQueries({ queryKey: ['paymentBatches'] }),
+      ]);
+    },
   });
 }
 
@@ -1359,6 +1418,8 @@ export function useClientCredentialsTokenMutation() {
 export interface PayCycleCreateParams {
   type: string;
   periodLabel: string;
+  ruleTemplateId?: number;
+  ruleTemplateVersion?: number;
   cycleCode?: string;
   cycleName?: string;
   cycleType?: string;
@@ -1479,6 +1540,16 @@ export async function updateSalaryTemplate(
   return unwrap<SalaryTemplateDto>(data);
 }
 
+export async function publishSalaryTemplate(id: number): Promise<SalaryTemplateDto> {
+  const { data } = await api.post(`/payroll/templates/${id}/publish`);
+  return unwrap<SalaryTemplateDto>(data);
+}
+
+export async function disableSalaryTemplate(id: number): Promise<SalaryTemplateDto> {
+  const { data } = await api.post(`/payroll/templates/${id}/disable`);
+  return unwrap<SalaryTemplateDto>(data);
+}
+
 export function useSalaryTemplatesQuery(
   params: SalaryTemplateListParams,
   options?: { enabled?: boolean },
@@ -1511,6 +1582,18 @@ export function useUpdateSalaryTemplateMutation() {
   });
 }
 
+export function usePublishSalaryTemplateMutation() {
+  return useMutation({
+    mutationFn: publishSalaryTemplate,
+  });
+}
+
+export function useDisableSalaryTemplateMutation() {
+  return useMutation({
+    mutationFn: disableSalaryTemplate,
+  });
+}
+
 // ========== PayrollBatch CRUD ==========
 
 export interface PayrollBatchListParams {
@@ -1523,6 +1606,8 @@ export interface PayrollBatchListParams {
 
 export interface PayrollBatchCreateParams {
   payCycleId?: number;
+  ruleTemplateId?: number;
+  ruleTemplateVersion?: number;
   periodLabel: string;
   type?: string;
   scopeJson?: string;
@@ -1532,6 +1617,8 @@ export interface PayrollBatchCreateParams {
 
 export interface PayrollBatchUpdateParams {
   payCycleId?: number;
+  ruleTemplateId?: number;
+  ruleTemplateVersion?: number;
   periodLabel: string;
   type?: string;
   scopeJson?: string;

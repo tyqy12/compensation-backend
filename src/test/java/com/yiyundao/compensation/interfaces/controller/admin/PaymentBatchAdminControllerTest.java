@@ -182,6 +182,48 @@ class PaymentBatchAdminControllerTest {
     }
 
     @Test
+    void cancelShouldRejectPendingRecordWithProviderTradeBeforeUpdatingAnything() {
+        PaymentBatch batch = new PaymentBatch();
+        batch.setId(92L);
+        batch.setBatchNo("PB-CANCEL-92");
+        batch.setStatus(BatchStatus.SUBMITTED);
+        when(paymentBatchService.getById(92L)).thenReturn(batch);
+        PaymentRecord pendingWithProviderTrade = new PaymentRecord();
+        pendingWithProviderTrade.setStatus(PaymentStatus.PENDING);
+        pendingWithProviderTrade.setProviderTradeNo("ALI_PROVIDER_TRADE_92");
+        when(paymentRecordService.list(org.mockito.ArgumentMatchers.<Wrapper<PaymentRecord>>any()))
+                .thenReturn(List.of(pendingWithProviderTrade));
+
+        assertThatThrownBy(() -> controller.cancel(92L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("已提交渠道");
+
+        verify(paymentRecordService, never()).update(any(UpdateWrapper.class));
+        verify(paymentBatchService, never()).updateTerminalState(any(PaymentBatch.class));
+    }
+
+    @Test
+    void cancelShouldRollbackWhenRecordBecomesProcessingDuringCancellation() {
+        PaymentBatch batch = new PaymentBatch();
+        batch.setId(93L);
+        batch.setBatchNo("PB-CANCEL-93");
+        batch.setStatus(BatchStatus.SUBMITTED);
+        when(paymentBatchService.getById(93L)).thenReturn(batch);
+        PaymentRecord pending = new PaymentRecord();
+        pending.setStatus(PaymentStatus.PENDING);
+        PaymentRecord processing = new PaymentRecord();
+        processing.setStatus(PaymentStatus.PROCESSING);
+        when(paymentRecordService.list(org.mockito.ArgumentMatchers.<Wrapper<PaymentRecord>>any()))
+                .thenReturn(List.of(pending), List.of(processing));
+
+        assertThatThrownBy(() -> controller.cancel(93L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("正在处理");
+
+        verify(paymentBatchService, never()).updateTerminalState(any(PaymentBatch.class));
+    }
+
+    @Test
     void cancelShouldRejectCompletedBatch() {
         PaymentBatch batch = new PaymentBatch();
         batch.setId(89L);

@@ -146,15 +146,18 @@ const PaymentBatches: React.FC = () => {
   const retryMutation = useRetryFailedRecordsMutation();
 
   // ==================== URL 同步 ====================
-  const updateUrlParams = useCallback((params: PaymentBatchQueryParams) => {
-    const newSearchParams = new URLSearchParams();
-    Object.entries(params).forEach(([key, value]) => {
-      if (value !== undefined && value !== '' && value !== null) {
-        newSearchParams.set(key, String(value));
-      }
-    });
-    setSearchParams(newSearchParams);
-  }, [setSearchParams]);
+  const updateUrlParams = useCallback(
+    (params: PaymentBatchQueryParams) => {
+      const newSearchParams = new URLSearchParams();
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== '' && value !== null) {
+          newSearchParams.set(key, String(value));
+        }
+      });
+      setSearchParams(newSearchParams);
+    },
+    [setSearchParams],
+  );
 
   // ==================== 统计数据 ====================
   const summary = useMemo(() => {
@@ -164,7 +167,10 @@ const PaymentBatches: React.FC = () => {
     const completed = list.filter((b: PaymentBatch) => b.status === 'completed').length;
     const failed = list.filter((b: PaymentBatch) => b.status === 'failed').length;
     const readyToStart = list.filter(isStartablePaymentBatch).length;
-    const totalAmount = list.reduce((acc: number, b: PaymentBatch) => acc + (b.totalAmount || 0), 0);
+    const totalAmount = list.reduce(
+      (acc: number, b: PaymentBatch) => acc + (b.totalAmount || 0),
+      0,
+    );
     const totalCount = list.reduce((acc: number, b: PaymentBatch) => acc + (b.totalCount || 0), 0);
     return { total, processing, completed, failed, readyToStart, totalAmount, totalCount };
   }, [batchesQuery.data, tableResult]);
@@ -223,72 +229,83 @@ const PaymentBatches: React.FC = () => {
   );
 
   // ==================== 操作处理 ====================
-  const showBlockedValidationModal = useCallback((batchNo: string, issues: TransferValidationIssue[]) => {
-    modal.error({
-      title: `批次 ${batchNo} 校验未通过`,
-      width: 680,
-      content: (
-        <div>
-          <Alert
-            type="error"
-            showIcon
-            message={`检测到 ${issues.length} 条高风险记录，已拦截发放`}
-            description="请先修复员工结算账户后再启动转账"
-            style={{ marginBottom: 12 }}
-          />
-          <div style={{ maxHeight: 320, overflowY: 'auto' }}>
-            {issues.slice(0, 10).map((issue, index) => (
-              <div key={`${issue.recordId || index}-${index}`} style={{ marginBottom: 8 }}>
-                <Text>
-                  {index + 1}. {issue.employeeName || '-'} / {issue.recipientAccountMasked || '-'} / {issue.errorMsg || '校验失败'}
-                </Text>
-              </div>
-            ))}
-            {issues.length > 10 && (
-              <Text type="secondary">仅展示前 10 条，请进入记录列表查看完整失败原因。</Text>
-            )}
+  const showBlockedValidationModal = useCallback(
+    (batchNo: string, issues: TransferValidationIssue[]) => {
+      modal.error({
+        title: `批次 ${batchNo} 校验未通过`,
+        width: 680,
+        content: (
+          <div>
+            <Alert
+              type="error"
+              showIcon
+              title={`检测到 ${issues.length} 条高风险记录，已拦截发放`}
+              description="请先修复员工结算账户后再启动转账"
+              style={{ marginBottom: 12 }}
+            />
+            <div style={{ maxHeight: 320, overflowY: 'auto' }}>
+              {issues.slice(0, 10).map((issue, index) => (
+                <div key={`${issue.recordId || index}-${index}`} style={{ marginBottom: 8 }}>
+                  <Text>
+                    {index + 1}. {issue.employeeName || '-'} / {issue.recipientAccountMasked || '-'}{' '}
+                    / {issue.errorMsg || '校验失败'}
+                  </Text>
+                </div>
+              ))}
+              {issues.length > 10 && (
+                <Text type="secondary">仅展示前 10 条，请进入记录列表查看完整失败原因。</Text>
+              )}
+            </div>
           </div>
-        </div>
-      ),
-    });
-  }, [modal]);
+        ),
+      });
+    },
+    [modal],
+  );
 
-  const handleStartTransfer = useCallback(async (batch: PaymentBatch) => {
-    if (!isStartablePaymentBatch(batch)) {
-      message.warning('只能启动已提交或已审批的批次');
-      return;
-    }
+  const handleStartTransfer = useCallback(
+    async (batch: PaymentBatch) => {
+      if (!isStartablePaymentBatch(batch)) {
+        message.warning('只能启动已提交或已审批的批次');
+        return;
+      }
 
-    modal.confirm({
-      title: '启动批次转账',
-      content: (
-        <div>
-          <p>确定要启动批次 <Text code>{batch.batchNo}</Text> 的转账操作吗？</p>
-          <div style={{ marginTop: 8 }}>
-            <Text type="secondary">批次名称：{batch.batchName}</Text><br />
-            <Text type="secondary">支付总额：{formatAmount(batch.totalAmount)}</Text><br />
-            <Text type="secondary">支付笔数：{batch.totalCount} 笔</Text>
+      modal.confirm({
+        title: '启动批次转账',
+        content: (
+          <div>
+            <p>
+              确定要启动批次 <Text code>{batch.batchNo}</Text> 的转账操作吗？
+            </p>
+            <div style={{ marginTop: 8 }}>
+              <Text type="secondary">批次名称：{batch.batchName}</Text>
+              <br />
+              <Text type="secondary">支付总额：{formatAmount(batch.totalAmount)}</Text>
+              <br />
+              <Text type="secondary">支付笔数：{batch.totalCount} 笔</Text>
+            </div>
           </div>
-        </div>
-      ),
-      icon: <ExclamationCircleOutlined />,
-      onOk: async () => {
-        try {
-          const validation = await checkBatchTransfer(batch.batchNo, true);
-          if (!validation.pass) {
-            showBlockedValidationModal(batch.batchNo, validation.blockedRecords || []);
+        ),
+        icon: <ExclamationCircleOutlined />,
+        onOk: async () => {
+          try {
+            const validation = await checkBatchTransfer(batch.batchNo, true);
+            if (!validation.pass) {
+              showBlockedValidationModal(batch.batchNo, validation.blockedRecords || []);
+              actionRef.current?.reload();
+              return;
+            }
+            await startTransferMutation.mutateAsync(batch.batchNo);
+            message.success('批次转账已启动，正在后台处理');
             actionRef.current?.reload();
-            return;
+          } catch (error: any) {
+            message.error(withActionPrefix('启动失败', error));
           }
-          await startTransferMutation.mutateAsync(batch.batchNo);
-          message.success('批次转账已启动，正在后台处理');
-          actionRef.current?.reload();
-        } catch (error: any) {
-          message.error(withActionPrefix('启动失败', error));
-        }
-      },
-    });
-  }, [startTransferMutation, message, modal, showBlockedValidationModal]);
+        },
+      });
+    },
+    [startTransferMutation, message, modal, showBlockedValidationModal],
+  );
 
   const handleBatchStart = useCallback(async () => {
     const sourceBatches = tableResult?.list ?? batchesQuery.data?.list ?? [];
@@ -305,10 +322,28 @@ const PaymentBatches: React.FC = () => {
       title: '批量启动转账',
       content: (
         <div>
-          <p>确定要启动选中的 <Text strong>{selectedBatches.length}</Text> 个批次吗？</p>
+          <p>
+            确定要启动选中的 <Text strong>{selectedBatches.length}</Text> 个批次吗？
+          </p>
           <div style={{ marginTop: 8 }}>
-            <Text type="secondary">涉及总额：{formatAmount(selectedBatches.reduce((acc: number, b: PaymentBatch) => acc + (b.totalAmount || 0), 0))}</Text><br />
-            <Text type="secondary">涉及笔数：{selectedBatches.reduce((acc: number, b: PaymentBatch) => acc + (b.totalCount || 0), 0)} 笔</Text>
+            <Text type="secondary">
+              涉及总额：
+              {formatAmount(
+                selectedBatches.reduce(
+                  (acc: number, b: PaymentBatch) => acc + (b.totalAmount || 0),
+                  0,
+                ),
+              )}
+            </Text>
+            <br />
+            <Text type="secondary">
+              涉及笔数：
+              {selectedBatches.reduce(
+                (acc: number, b: PaymentBatch) => acc + (b.totalCount || 0),
+                0,
+              )}{' '}
+              笔
+            </Text>
           </div>
         </div>
       ),
@@ -335,7 +370,9 @@ const PaymentBatches: React.FC = () => {
             const firstBlocked = blockedBatches[0];
             showBlockedValidationModal(firstBlocked.batchNo, firstBlocked.issues);
             if (startedCount > 0) {
-              message.warning(`已启动 ${startedCount} 个批次，拦截 ${blockedBatches.length} 个高风险批次`);
+              message.warning(
+                `已启动 ${startedCount} 个批次，拦截 ${blockedBatches.length} 个高风险批次`,
+              );
             } else {
               message.error(`全部批次校验未通过，共拦截 ${blockedBatches.length} 个批次`);
             }
@@ -350,39 +387,58 @@ const PaymentBatches: React.FC = () => {
         }
       },
     });
-  }, [selectedRowKeys, tableResult, batchesQuery.data, startTransferMutation, message, modal, showBlockedValidationModal]);
+  }, [
+    selectedRowKeys,
+    tableResult,
+    batchesQuery.data,
+    startTransferMutation,
+    message,
+    modal,
+    showBlockedValidationModal,
+  ]);
 
   const handleViewDetail = useCallback((batch: PaymentBatch) => {
     setDrawerBatchNo(batch.batchNo);
     setDrawerVisible(true);
   }, []);
 
-  const buildDetailPath = useCallback((batchNo: string) => {
-    const queryString = searchParams.toString();
-    return queryString ? `/payments/batches/${batchNo}?${queryString}` : `/payments/batches/${batchNo}`;
-  }, [searchParams]);
+  const buildDetailPath = useCallback(
+    (batchNo: string) => {
+      const queryString = searchParams.toString();
+      return queryString
+        ? `/payments/batches/${batchNo}?${queryString}`
+        : `/payments/batches/${batchNo}`;
+    },
+    [searchParams],
+  );
 
-  const handleOpenDetailPage = useCallback((batch: PaymentBatch) => {
-    navigate(buildDetailPath(batch.batchNo));
-  }, [navigate, buildDetailPath]);
+  const handleOpenDetailPage = useCallback(
+    (batch: PaymentBatch) => {
+      navigate(buildDetailPath(batch.batchNo));
+    },
+    [navigate, buildDetailPath],
+  );
 
-  const handleRetryFailed = useCallback(async (batch: PaymentBatch) => {
-    modal.confirm({
-      title: '重试失败记录',
-      content: `确定要重试批次 ${batch.batchNo} 中的失败记录吗？`,
-      icon: <RedoOutlined />,
-      onOk: async () => {
-        try {
-          await retryMutation.mutateAsync({ batchNo: batch.batchNo });
-          message.success('重试任务已提交');
-          batchDetailQuery.refetch();
-          recordsQuery.refetch();
-        } catch (error: any) {
-          message.error(withActionPrefix('重试失败', error));
-        }
-      },
-    });
-  }, [retryMutation, message, modal, batchDetailQuery, recordsQuery]);
+  const handleRetryFailed = useCallback(
+    async (batch: PaymentBatch) => {
+      modal.confirm({
+        title: '重试失败记录',
+        content: `确定要重试批次 ${batch.batchNo} 中的失败记录吗？`,
+        icon: <RedoOutlined />,
+        onOk: async () => {
+          try {
+            await retryMutation.mutateAsync({ batchNo: batch.batchNo });
+            message.success('重试任务已提交');
+            batchDetailQuery.refetch();
+            recordsQuery.refetch();
+          } catch (error: any) {
+            message.error(withActionPrefix('重试失败', error));
+          }
+        },
+      });
+    },
+    [retryMutation, message, modal, batchDetailQuery, recordsQuery],
+  );
 
   const handleExport = useCallback(() => {
     message.info('导出功能开发中');
@@ -447,11 +503,7 @@ const PaymentBatches: React.FC = () => {
       ),
       render: (_, record) => {
         const meta = statusEnum[record.status ?? ''];
-        return meta ? (
-          <Tag color={meta.color}>{meta.text}</Tag>
-        ) : (
-          record.status
-        );
+        return meta ? <Tag color={meta.color}>{meta.text}</Tag> : record.status;
       },
     },
     {
@@ -476,7 +528,7 @@ const PaymentBatches: React.FC = () => {
           <Statistic
             value={record.totalAmount}
             formatter={(value) => formatAmount(Number(value))}
-            valueStyle={{ fontSize: 14 }}
+            styles={{ content: { fontSize: 14 } }}
           />
           <Text type="secondary" style={{ fontSize: 12 }}>
             共 {record.totalCount} 笔
@@ -673,7 +725,11 @@ const PaymentBatches: React.FC = () => {
       ellipsis: true,
       render: (_, record) => {
         const providerTradeNo = resolveProviderTradeNo(record);
-        return providerTradeNo ? <Text code>{providerTradeNo}</Text> : <Text type="secondary">-</Text>;
+        return providerTradeNo ? (
+          <Text code>{providerTradeNo}</Text>
+        ) : (
+          <Text type="secondary">-</Text>
+        );
       },
     },
     {
@@ -710,7 +766,7 @@ const PaymentBatches: React.FC = () => {
         title: '支付批次管理',
         subTitle: '管理批量支付操作和转账状态',
       }}
-      content={(
+      content={
         <Row gutter={[16, 16]}>
           {summaryCards.map((item) => (
             <Col key={item.key} xs={24} sm={12} md={8} lg={6} xl={6} xxl={4}>
@@ -719,13 +775,13 @@ const PaymentBatches: React.FC = () => {
                   title={item.title}
                   value={item.value}
                   prefix={item.prefix}
-                  valueStyle={item.valueStyle}
+                  styles={{ content: item.valueStyle }}
                 />
               </Card>
             </Col>
           ))}
         </Row>
-      )}
+      }
     >
       <ProTable<PaymentBatch>
         cardBordered
@@ -817,23 +873,25 @@ const PaymentBatches: React.FC = () => {
         locale={{
           emptyText: '暂无支付批次',
         }}
-        toolBarRender={() => [
-          canStart && (
-            <Button
-              key="batch-start"
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              onClick={handleBatchStart}
-              disabled={selectedRowKeys.length === 0}
-              loading={startTransferMutation.isPending}
-            >
-              批量启动
-            </Button>
-          ),
-          <Button key="export" icon={<ExportOutlined />} onClick={handleExport}>
-            导出
-          </Button>,
-        ].filter(Boolean) as React.ReactNode[]}
+        toolBarRender={() =>
+          [
+            canStart && (
+              <Button
+                key="batch-start"
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                onClick={handleBatchStart}
+                disabled={selectedRowKeys.length === 0}
+                loading={startTransferMutation.isPending}
+              >
+                批量启动
+              </Button>
+            ),
+            <Button key="export" icon={<ExportOutlined />} onClick={handleExport}>
+              导出
+            </Button>,
+          ].filter(Boolean) as React.ReactNode[]
+        }
         options={{ reload: true, density: true, setting: true }}
         scroll={{ x: 1400 }}
       />
@@ -846,7 +904,7 @@ const PaymentBatches: React.FC = () => {
             批次详情 - {drawerBatchNo}
           </Space>
         }
-        width={800}
+        size={800}
         open={drawerVisible}
         onClose={() => {
           setDrawerVisible(false);
@@ -856,7 +914,7 @@ const PaymentBatches: React.FC = () => {
       >
         <Spin spinning={batchDetailQuery.isLoading}>
           {batchDetailQuery.data && (
-            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={16} style={{ width: '100%' }}>
               {/* 基本信息 */}
               <Card size="small" title="基本信息">
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
@@ -878,7 +936,8 @@ const PaymentBatches: React.FC = () => {
                   <div>
                     <Text type="secondary">状态：</Text>
                     <Tag color={statusEnum[batchDetailQuery.data.status ?? '']?.color}>
-                      {statusEnum[batchDetailQuery.data.status ?? '']?.text || batchDetailQuery.data.status}
+                      {statusEnum[batchDetailQuery.data.status ?? '']?.text ||
+                        batchDetailQuery.data.status}
                     </Tag>
                   </div>
                   <div>
@@ -903,35 +962,52 @@ const PaymentBatches: React.FC = () => {
                   />
                 </div>
                 <Space size={32}>
-                  <Statistic title="成功" value={batchDetailQuery.data.successCount} valueStyle={{ color: '#52c41a' }} />
-                  <Statistic title="失败" value={batchDetailQuery.data.failedCount} valueStyle={{ color: '#ff4d4f' }} />
-                  <Statistic title="待处理" value={batchDetailQuery.data.pendingCount} valueStyle={{ color: '#1890ff' }} />
-                  <Statistic title="成功率" value={`${calculateBatchSuccessRate(batchDetailQuery.data)}%`} />
-                </Space>
-                {batchDetailQuery.data.failedCount && batchDetailQuery.data.failedCount > 0 && canRetry && (
-                  <Alert
-                    type="warning"
-                    showIcon
-                    message="有失败记录"
-                    description={
-                      <Button
-                        type="primary"
-                        size="small"
-                        icon={<RedoOutlined />}
-                        onClick={() => handleRetryFailed(batchDetailQuery.data)}
-                        loading={retryMutation.isPending}
-                      >
-                        重试失败记录
-                      </Button>
-                    }
-                    style={{ marginTop: 16 }}
+                  <Statistic
+                    title="成功"
+                    value={batchDetailQuery.data.successCount}
+                    styles={{ content: { color: '#52c41a' } }}
                   />
-                )}
+                  <Statistic
+                    title="失败"
+                    value={batchDetailQuery.data.failedCount}
+                    styles={{ content: { color: '#ff4d4f' } }}
+                  />
+                  <Statistic
+                    title="待处理"
+                    value={batchDetailQuery.data.pendingCount}
+                    styles={{ content: { color: '#1890ff' } }}
+                  />
+                  <Statistic
+                    title="成功率"
+                    value={`${calculateBatchSuccessRate(batchDetailQuery.data)}%`}
+                  />
+                </Space>
+                {batchDetailQuery.data.failedCount &&
+                  batchDetailQuery.data.failedCount > 0 &&
+                  canRetry && (
+                    <Alert
+                      type="warning"
+                      showIcon
+                      title="有失败记录"
+                      description={
+                        <Button
+                          type="primary"
+                          size="small"
+                          icon={<RedoOutlined />}
+                          onClick={() => handleRetryFailed(batchDetailQuery.data)}
+                          loading={retryMutation.isPending}
+                        >
+                          重试失败记录
+                        </Button>
+                      }
+                      style={{ marginTop: 16 }}
+                    />
+                  )}
               </Card>
 
               {/* 时间线 */}
               <Card size="small" title="时间线">
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                   {batchDetailQuery.data.submitTime && (
                     <div>
                       <Tag color="blue">提交</Tag>
@@ -979,7 +1055,11 @@ const PaymentBatches: React.FC = () => {
                         { label: '待处理', value: 'pending' },
                       ]}
                     />
-                    <Button size="small" icon={<ReloadOutlined />} onClick={() => recordsQuery.refetch()}>
+                    <Button
+                      size="small"
+                      icon={<ReloadOutlined />}
+                      onClick={() => recordsQuery.refetch()}
+                    >
                       刷新
                     </Button>
                   </Space>

@@ -5,7 +5,6 @@ import {
   Button,
   Card,
   Col,
-  Descriptions,
   Empty,
   Form,
   Input,
@@ -14,7 +13,6 @@ import {
   Row,
   Select,
   Space,
-  Statistic,
   Switch,
   Table,
   Tag,
@@ -53,6 +51,7 @@ import type {
   Platform,
   PlatformOption,
 } from '@types/api';
+import './OrgSync.less';
 
 const { Text } = Typography;
 
@@ -84,16 +83,32 @@ const getCheckStatus = (status: string | undefined) => {
   switch (normalized) {
     case 'OK':
     case 'SUCCESS':
-      return { icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />, text: '配置正常', color: 'success' as const };
+      return {
+        icon: <CheckCircleOutlined style={{ color: '#52c41a' }} />,
+        text: '配置正常',
+        color: 'success' as const,
+      };
     case 'MISSING_CONFIG':
     case 'NO_CONFIG':
-      return { icon: <InfoCircleOutlined style={{ color: '#faad14' }} />, text: '缺少配置', color: 'warning' as const };
+      return {
+        icon: <InfoCircleOutlined style={{ color: '#faad14' }} />,
+        text: '缺少配置',
+        color: 'warning' as const,
+      };
     case 'UNAUTHORIZED':
     case 'AUTH_FAILED':
-      return { icon: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />, text: '认证失败', color: 'error' as const };
+      return {
+        icon: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />,
+        text: '认证失败',
+        color: 'error' as const,
+      };
     case 'ERROR':
     case 'FAILED':
-      return { icon: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />, text: '检查失败', color: 'error' as const };
+      return {
+        icon: <CloseCircleOutlined style={{ color: '#ff4d4f' }} />,
+        text: '检查失败',
+        color: 'error' as const,
+      };
     default:
       return { icon: <InfoCircleOutlined />, text: '未知状态', color: 'default' as const };
   }
@@ -144,18 +159,24 @@ const OrgSyncPage: React.FC = () => {
   const historyQuery = useOrgHistoryQuery();
   const departmentTreeQuery = useOrgDepartmentTreeQuery(selectedPlatform as Platform);
 
-  const departmentTreeData = useMemo(() => toTreeData(departmentTreeQuery.data), [departmentTreeQuery.data]);
+  const departmentTreeData = useMemo(
+    () => toTreeData(departmentTreeQuery.data),
+    [departmentTreeQuery.data],
+  );
   const hasDepartmentTree = departmentTreeData.length > 0;
   const supportsDepartmentMode = useMemo(
     () => ['wechat', 'dingtalk', 'feishu'].includes(String(selectedPlatform).toLowerCase()),
     [selectedPlatform],
   );
-  const fetchMode = Form.useWatch('mode', fetchForm) ?? (supportsDepartmentMode ? 'department' : 'all');
+  const [fetchMode, setFetchMode] = useState<FetchMode>(
+    supportsDepartmentMode ? 'department' : 'all',
+  );
 
   useEffect(() => {
     const currentMode = fetchForm.getFieldValue('mode') as FetchMode | undefined;
     if (!supportsDepartmentMode && currentMode === 'department') {
       fetchForm.setFieldsValue({ mode: 'all' });
+      setFetchMode('all');
     }
   }, [supportsDepartmentMode, fetchForm]);
 
@@ -190,7 +211,10 @@ const OrgSyncPage: React.FC = () => {
   }, [historyList]);
 
   const sortedHistory = useMemo(
-    () => [...historyList].sort((a, b) => new Date(b.syncTime ?? 0).getTime() - new Date(a.syncTime ?? 0).getTime()),
+    () =>
+      [...historyList].sort(
+        (a, b) => new Date(b.syncTime ?? 0).getTime() - new Date(a.syncTime ?? 0).getTime(),
+      ),
     [historyList],
   );
 
@@ -244,9 +268,13 @@ const OrgSyncPage: React.FC = () => {
       setIncludeImported(false);
       setSelectedEmployees(defaultSelected);
       setIsPreviewModalVisible(true);
-      const newEmployees = result.newEmployees ?? employeesWithKey.filter((emp) => !emp.alreadyImported).length;
-      const existingEmployees = result.existingEmployees ?? Math.max(0, employeesWithKey.length - newEmployees);
-      message.success(`成功拉取 ${result.totalEmployees} 名员工信息（未导入 ${newEmployees}，已导入 ${existingEmployees}）`);
+      const newEmployees =
+        result.newEmployees ?? employeesWithKey.filter((emp) => !emp.alreadyImported).length;
+      const existingEmployees =
+        result.existingEmployees ?? Math.max(0, employeesWithKey.length - newEmployees);
+      message.success(
+        `成功拉取 ${result.totalEmployees} 名员工信息（未导入 ${newEmployees}，已导入 ${existingEmployees}）`,
+      );
     } catch (error: any) {
       if (error?.errorFields) return;
       message.error(`拉取预览失败：${error?.message || '请检查平台配置'}`);
@@ -254,7 +282,11 @@ const OrgSyncPage: React.FC = () => {
   };
 
   const handleResetFetchOptions = () => {
-    fetchForm.setFieldsValue({ mode: supportsDepartmentMode ? 'department' : 'all', userIds: undefined });
+    fetchForm.setFieldsValue({
+      mode: supportsDepartmentMode ? 'department' : 'all',
+      userIds: undefined,
+    });
+    setFetchMode(supportsDepartmentMode ? 'department' : 'all');
     setSelectedDeptKeys([]);
   };
 
@@ -405,11 +437,17 @@ const OrgSyncPage: React.FC = () => {
       title: '姓名',
       dataIndex: 'name',
       key: 'name',
+      width: 150,
       render: (_, record) => (
         <Space size={8}>
           <UserOutlined />
           <Text strong>{record.name}</Text>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEditEmployee(record)}>
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => handleEditEmployee(record)}
+          >
             编辑
           </Button>
         </Space>
@@ -419,16 +457,20 @@ const OrgSyncPage: React.FC = () => {
       title: '工号',
       dataIndex: 'employeeId',
       key: 'employeeId',
+      width: 110,
     },
     {
       title: '导入状态',
       key: 'importStatus',
+      width: 120,
       render: (_, record) => {
         if (record.alreadyImported) {
           return (
             <Space size={6}>
               <Tag color="default">已导入</Tag>
-              {record.existingEmployeeNo ? <Text type="secondary">{record.existingEmployeeNo}</Text> : null}
+              {record.existingEmployeeNo ? (
+                <Text type="secondary">{record.existingEmployeeNo}</Text>
+              ) : null}
             </Space>
           );
         }
@@ -439,32 +481,39 @@ const OrgSyncPage: React.FC = () => {
       title: '部门',
       dataIndex: 'department',
       key: 'department',
+      width: 160,
       render: (_, record) => record.department ?? record.departments?.join(' / ') ?? '—',
     },
     {
       title: '职位',
       dataIndex: 'position',
       key: 'position',
+      width: 120,
       render: (value) => value || '—',
     },
     {
       title: '手机号',
       dataIndex: 'phone',
       key: 'phone',
+      width: 140,
       render: (value) => value || '—',
     },
     {
       title: '邮箱',
       dataIndex: 'email',
       key: 'email',
+      width: 210,
       render: (value) => value || '—',
     },
     {
       title: '员工类型',
       dataIndex: 'employmentType',
       key: 'employmentType',
+      width: 100,
       render: (type) => (
-        <Tag color={type === 'full_time' ? 'blue' : 'orange'}>{type === 'full_time' ? '全职' : '兼职'}</Tag>
+        <Tag color={type === 'full_time' ? 'blue' : 'orange'}>
+          {type === 'full_time' ? '全职' : '兼职'}
+        </Tag>
       ),
     },
   ];
@@ -486,53 +535,97 @@ const OrgSyncPage: React.FC = () => {
 
   const previewModal = (
     <Modal
-      title={`员工预览 - ${getPlatformName(selectedPlatform)}`}
+      className="org-sync-preview-modal"
+      title={
+        <div className="org-sync-modal-heading">
+          <Text className="org-sync-modal-eyebrow">IMPORT PREVIEW</Text>
+          <Typography.Title level={4} className="org-sync-modal-title">
+            {`员工预览 - ${getPlatformName(selectedPlatform)}`}
+          </Typography.Title>
+          <Text type="secondary" className="org-sync-modal-subtitle">
+            检查员工资料和导入状态，确认后再写入员工档案。
+          </Text>
+        </div>
+      }
       open={isPreviewModalVisible}
       onCancel={() => setIsPreviewModalVisible(false)}
       zIndex={PREVIEW_MODAL_Z_INDEX}
       width="90%"
       style={{ top: 20 }}
-      footer={[
-        <Button key="cancel" onClick={() => setIsPreviewModalVisible(false)}>
-          取消
-        </Button>,
-        <Button
-          key="import"
-          type="primary"
-          icon={<DownloadOutlined />}
-          loading={importMutation.isPending}
-          disabled={selectedEmployees.length === 0}
-          onClick={handleImport}
-        >
-          导入选中员工 ({selectedEmployees.length})
-        </Button>,
-      ]}
+      footer={
+        <div className="org-sync-modal-footer">
+          <Text type="secondary">
+            {selectedEmployees.length > 0
+              ? `当前选择 ${selectedEmployees.length} 人`
+              : '请选择要导入的员工'}
+          </Text>
+          <Space>
+            <Button key="cancel" onClick={() => setIsPreviewModalVisible(false)}>
+              取消
+            </Button>
+            <Button
+              key="import"
+              type="primary"
+              icon={<DownloadOutlined />}
+              loading={importMutation.isPending}
+              disabled={selectedEmployees.length === 0}
+              onClick={handleImport}
+            >
+              导入选中员工 ({selectedEmployees.length})
+            </Button>
+          </Space>
+        </div>
+      }
     >
-      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Alert
-          message={`从 ${getPlatformName(selectedPlatform)} 拉取到 ${previewData.length} 名员工`}
-          description={
-            <Space direction="vertical" size={8}>
+      <div className="org-sync-preview-body">
+        <div className="org-sync-preview-summary">
+          <div className="org-sync-preview-summary-main">
+            <div className="org-sync-preview-summary-icon">
+              <EyeOutlined />
+            </div>
+            <div className="org-sync-preview-summary-copy">
+              <Text strong>预览已准备</Text>
               <Text type="secondary">
-                未导入 {newCount} 人，已导入 {importedCount} 人。默认仅勾选未导入员工，避免重复导入。
+                从 {getPlatformName(selectedPlatform)} 拉取到 {previewData.length}{' '}
+                名员工，确认无误后再执行导入。
               </Text>
-              <Space size={8} align="center">
-                <Text>包含已导入员工（执行更新）</Text>
-                <Switch
-                  checked={includeImported}
-                  onChange={(checked) => {
-                    setIncludeImported(checked);
-                    resetSelectedByMode(checked);
-                  }}
-                />
-              </Space>
-            </Space>
-          }
-          type="info"
-          showIcon
-        />
+            </div>
+          </div>
+
+          <div className="org-sync-preview-stat-list">
+            <div className="org-sync-preview-stat">
+              <Text type="secondary">员工总数</Text>
+              <Text strong>{previewData.length}</Text>
+            </div>
+            <div className="org-sync-preview-stat">
+              <Text type="secondary">待新增</Text>
+              <Text strong className="is-positive">
+                {newCount}
+              </Text>
+            </div>
+            <div className="org-sync-preview-stat">
+              <Text type="secondary">已导入</Text>
+              <Text strong>{importedCount}</Text>
+            </div>
+          </div>
+
+          <div className="org-sync-preview-option">
+            <div>
+              <Text strong>包含已导入员工</Text>
+              <Text type="secondary">开启后会执行更新</Text>
+            </div>
+            <Switch
+              checked={includeImported}
+              onChange={(checked) => {
+                setIncludeImported(checked);
+                resetSelectedByMode(checked);
+              }}
+            />
+          </div>
+        </div>
 
         <Table<EmployeePreviewDto>
+          className="org-sync-preview-table"
           rowSelection={{
             selectedRowKeys: selectedEmployees,
             onChange: setSelectedEmployees,
@@ -551,16 +644,28 @@ const OrgSyncPage: React.FC = () => {
               return `第 ${start}-${end} 条，共 ${total} 条`;
             },
           }}
-          scroll={{ x: 900 }}
-          size="small"
+          rowClassName={(record) => (record.alreadyImported ? 'is-already-imported' : '')}
+          scroll={{ x: 1100 }}
+          size="medium"
         />
-      </Space>
+      </div>
     </Modal>
   );
 
   const editModal = (
     <Modal
-      title="编辑员工信息"
+      className="org-sync-edit-modal"
+      title={
+        <div className="org-sync-modal-heading">
+          <Text className="org-sync-modal-eyebrow">EMPLOYEE PROFILE</Text>
+          <Typography.Title level={4} className="org-sync-modal-title">
+            编辑员工信息
+          </Typography.Title>
+          <Text type="secondary" className="org-sync-modal-subtitle">
+            修改只作用于当前预览记录，确认导入后才会提交到员工档案。
+          </Text>
+        </div>
+      }
       open={Boolean(editingEmployee)}
       onCancel={() => {
         setEditingEmployee(null);
@@ -568,6 +673,10 @@ const OrgSyncPage: React.FC = () => {
       onOk={handleSaveEmployee}
       confirmLoading={false}
       zIndex={EDIT_MODAL_Z_INDEX}
+      width={560}
+      okText="保存修改"
+      cancelText="取消"
+      okButtonProps={{ icon: <CheckCircleOutlined /> }}
       forceRender
       afterOpenChange={(open) => {
         if (open && editingEmployee) {
@@ -587,34 +696,52 @@ const OrgSyncPage: React.FC = () => {
         }
       }}
     >
-      <Form form={editForm} layout="vertical" preserve={false}>
-        <Form.Item name="name" label="姓名" rules={[{ required: true, message: '请输入姓名' }]}
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item name="employeeId" label="工号" rules={[{ required: true, message: '请输入工号' }]}
-        >
-          <Input />
-        </Form.Item>
-        <Form.Item name="department" label="部门">
-          <Input placeholder="支持手动修改部门名称" />
-        </Form.Item>
-        <Form.Item name="position" label="职位">
-          <Input />
-        </Form.Item>
-        <Form.Item name="phone" label="手机号">
-          <Input />
-        </Form.Item>
-        <Form.Item name="email" label="邮箱">
-          <Input />
-        </Form.Item>
-        <Form.Item name="employmentType" label="员工类型" rules={[{ required: true, message: '请选择员工类型' }]}
-        >
-          <Select>
-            <Select.Option value="full_time">全职</Select.Option>
-            <Select.Option value="part_time">兼职</Select.Option>
-          </Select>
-        </Form.Item>
+      <div className="org-sync-edit-context">
+        <div className="org-sync-edit-avatar">
+          <UserOutlined />
+        </div>
+        <div>
+          <Text strong>{editingEmployee?.name ?? '员工信息'}</Text>
+          <Text type="secondary">当前正在编辑预览中的员工资料</Text>
+        </div>
+      </div>
+
+      <Form form={editForm} layout="vertical" preserve={false} className="org-sync-edit-form">
+        <div className="org-sync-edit-grid">
+          <Form.Item name="name" label="姓名" rules={[{ required: true, message: '请输入姓名' }]}>
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="employeeId"
+            label="工号"
+            rules={[{ required: true, message: '请输入工号' }]}
+          >
+            <Input />
+          </Form.Item>
+          <Form.Item name="department" label="部门">
+            <Input placeholder="支持手动修改部门名称" />
+          </Form.Item>
+          <Form.Item name="position" label="职位">
+            <Input />
+          </Form.Item>
+          <Form.Item name="phone" label="手机号">
+            <Input />
+          </Form.Item>
+          <Form.Item name="email" label="邮箱">
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="employmentType"
+            label="员工类型"
+            className="org-sync-edit-field-full"
+            rules={[{ required: true, message: '请选择员工类型' }]}
+          >
+            <Select>
+              <Select.Option value="full_time">全职</Select.Option>
+              <Select.Option value="part_time">兼职</Select.Option>
+            </Select>
+          </Form.Item>
+        </div>
       </Form>
     </Modal>
   );
@@ -623,6 +750,8 @@ const OrgSyncPage: React.FC = () => {
   const successfulSyncs = historyList.filter((item) => item.success).length;
   const lastSyncRecord = sortedHistory[0];
   const lastSyncTime = lastSyncRecord ? formatDateTime(lastSyncRecord.syncTime) : '—';
+  const connectionStatus = getCheckStatus(orgCheckQuery.data?.status);
+  const selectedPlatformName = getPlatformName(selectedPlatform);
 
   return (
     <PageContainer
@@ -646,92 +775,148 @@ const OrgSyncPage: React.FC = () => {
         </Button>,
       ]}
     >
-      <Space direction="vertical" style={{ width: '100%' }} size="large">
-        <Row gutter={[12, 12]}>
-          <Col xs={24} sm={8}>
-            <Card size="small">
-              <Statistic title="接入平台" value={totalPlatforms} suffix="个" />
-            </Card>
-          </Col>
-          <Col xs={24} sm={8}>
-            <Card size="small">
-              <Statistic title="成功同步" value={successfulSyncs} suffix="次" valueStyle={{ color: '#52c41a' }} />
-            </Card>
-          </Col>
-          <Col xs={24} sm={8}>
-            <Card size="small">
-              <Statistic title="最近同步时间" value={lastSyncTime} />
-            </Card>
-          </Col>
-        </Row>
+      <div className="org-sync-page">
+        <section className="org-sync-summary-grid" aria-label="同步概览">
+          <div className="org-sync-stat-card">
+            <div className="org-sync-stat-icon org-sync-stat-icon-platform">
+              <ApartmentOutlined />
+            </div>
+            <div className="org-sync-stat-content">
+              <Text className="org-sync-stat-label">接入平台</Text>
+              <div className="org-sync-stat-value">
+                <span>{totalPlatforms}</span>
+                <Text type="secondary">个</Text>
+              </div>
+              <Text type="secondary" className="org-sync-stat-hint">
+                当前可用的数据来源
+              </Text>
+            </div>
+          </div>
 
-        <Row gutter={[16, 16]}>
+          <div className="org-sync-stat-card">
+            <div className="org-sync-stat-icon org-sync-stat-icon-success">
+              <CheckCircleOutlined />
+            </div>
+            <div className="org-sync-stat-content">
+              <Text className="org-sync-stat-label">成功同步</Text>
+              <div className="org-sync-stat-value">
+                <span>{successfulSyncs}</span>
+                <Text type="secondary">次</Text>
+              </div>
+              <Text type="secondary" className="org-sync-stat-hint">
+                所有平台的历史成功记录
+              </Text>
+            </div>
+          </div>
+
+          <div className="org-sync-stat-card org-sync-stat-card-time">
+            <div className="org-sync-stat-icon org-sync-stat-icon-time">
+              <ReloadOutlined />
+            </div>
+            <div className="org-sync-stat-content">
+              <Text className="org-sync-stat-label">最近同步时间</Text>
+              <Text className="org-sync-stat-date">{lastSyncTime}</Text>
+              <Text type="secondary" className="org-sync-stat-hint">
+                最近一次组织数据变更
+              </Text>
+            </div>
+          </div>
+        </section>
+
+        <Row gutter={[16, 16]} className="org-sync-workspace">
           <Col xs={24} xl={16}>
-            <Card
-              title="同步操作"
-              size="small"
-              style={{ height: '100%' }}
-            >
-              <Space direction="vertical" size="large" style={{ width: '100%' }}>
+            <Card className="org-sync-operation-card">
+              <div className="org-sync-panel-heading">
                 <div>
-                  <Text strong>选择平台</Text>
-                  <div style={{ marginTop: 8 }}>
-                    <Radio.Group
-                      value={selectedPlatform}
-                      onChange={(e) => setSelectedPlatform(e.target.value)}
-                      optionType="button"
-                      buttonStyle="solid"
-                    >
-                      {platforms.map((item) => (
-                        <Radio.Button key={item.code} value={item.code}>
-                          {item.name}
-                        </Radio.Button>
-                      ))}
-                    </Radio.Group>
+                  <Text className="org-sync-panel-kicker">SYNC WORKFLOW</Text>
+                  <Typography.Title level={4} className="org-sync-panel-title">
+                    同步操作
+                  </Typography.Title>
+                  <Text type="secondary">先拉取预览，再确认导入，确保组织数据变更可控。</Text>
+                </div>
+                <Tag color="blue" className="org-sync-current-platform">
+                  {selectedPlatformName}
+                </Tag>
+              </div>
+
+              <div className="org-sync-form-section org-sync-platform-section">
+                <div className="org-sync-section-heading">
+                  <div>
+                    <Text strong>选择平台</Text>
+                    <Text type="secondary">从已接入的第三方平台读取数据</Text>
                   </div>
+                  <Text type="secondary" className="org-sync-section-index">
+                    01
+                  </Text>
+                </div>
+                <Radio.Group
+                  className="org-sync-platform-switch"
+                  value={selectedPlatform}
+                  onChange={(e) => setSelectedPlatform(e.target.value)}
+                  optionType="button"
+                  buttonStyle="solid"
+                >
+                  {platforms.map((item) => (
+                    <Radio.Button key={item.code} value={item.code}>
+                      <span>{item.name}</span>
+                      {item.configured !== undefined && (
+                        <span
+                          aria-hidden="true"
+                          className={`org-sync-config-dot ${item.configured ? 'is-configured' : ''}`}
+                        />
+                      )}
+                    </Radio.Button>
+                  ))}
+                </Radio.Group>
+              </div>
+
+              <div className="org-sync-workflow-divider" />
+
+              <div className="org-sync-form-section">
+                <div className="org-sync-section-heading">
+                  <div>
+                    <Text strong>同步范围</Text>
+                    <Text type="secondary">选择本次需要拉取的组织和人员范围</Text>
+                  </div>
+                  <Text type="secondary" className="org-sync-section-index">
+                    02
+                  </Text>
                 </div>
 
-                <Descriptions column={3} size="small" bordered>
-                  <Descriptions.Item label="平台">
-                    <Tag color="blue">{getPlatformName(selectedPlatform)}</Tag>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="已配置">
-                    <Tag color={selectedPlatformMeta?.configured ? 'success' : 'default'}>
-                      {selectedPlatformMeta?.configured ? '已配置' : '未配置'}
-                    </Tag>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="连接状态">
-                    <Space size={8} align="center">
-                      <Tag color={getCheckStatus(orgCheckQuery.data?.status).color}>
-                        {getCheckStatus(orgCheckQuery.data?.status).text}
-                      </Tag>
-                      {orgCheckQuery.data?.message && (
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          {orgCheckQuery.data.message}
-                        </Text>
-                      )}
-                    </Space>
-                  </Descriptions.Item>
-                  <Descriptions.Item label="最近同步" span={3}>
-                    {selectedHistory ? formatDateTime(selectedHistory.syncTime) : '—'}
-                  </Descriptions.Item>
-                </Descriptions>
-
-                <Alert
-                  type="info"
-                  showIcon
-                  message="同步步骤"
-                  description="1. 选择同步范围 2. 拉取预览 3. 确认并导入。建议逐步校验，避免直接导入全部数据。"
-                />
+                <div className="org-sync-steps" aria-label="同步步骤">
+                  <div className="org-sync-step is-active">
+                    <span className="org-sync-step-number">1</span>
+                    <Text>选择范围</Text>
+                  </div>
+                  <div className="org-sync-step-connector" />
+                  <div className="org-sync-step">
+                    <span className="org-sync-step-number">2</span>
+                    <Text>拉取预览</Text>
+                  </div>
+                  <div className="org-sync-step-connector" />
+                  <div className="org-sync-step">
+                    <span className="org-sync-step-number">3</span>
+                    <Text>确认导入</Text>
+                  </div>
+                </div>
 
                 <Form
                   form={fetchForm}
                   layout="vertical"
                   requiredMark={false}
                   initialValues={{ mode: supportsDepartmentMode ? 'department' : 'all' }}
+                  onValuesChange={(changedValues) => {
+                    if (changedValues.mode) {
+                      setFetchMode(changedValues.mode as FetchMode);
+                    }
+                  }}
                 >
-                  <Form.Item label="同步范围" name="mode">
-                    <Radio.Group optionType="button" buttonStyle="solid">
+                  <Form.Item label="同步范围" name="mode" className="org-sync-mode-item">
+                    <Radio.Group
+                      className="org-sync-mode-switch"
+                      optionType="button"
+                      buttonStyle="solid"
+                    >
                       <Radio.Button value="department" disabled={!supportsDepartmentMode}>
                         按部门
                       </Radio.Button>
@@ -740,28 +925,45 @@ const OrgSyncPage: React.FC = () => {
                     </Radio.Group>
                   </Form.Item>
                   {!supportsDepartmentMode && (
-                    <Text type="secondary">当前平台不支持按部门拉取，仅支持按用户或全部。</Text>
+                    <div className="org-sync-inline-note">
+                      <InfoCircleOutlined />
+                      <Text type="secondary">当前平台不支持按部门拉取，仅支持按用户或全部。</Text>
+                    </div>
                   )}
 
                   {fetchMode === 'department' && (
-                    <Form.Item label="选择部门">
+                    <Form.Item label="选择部门" className="org-sync-data-input">
                       <Spin spinning={departmentTreeQuery.isLoading}>
                         {hasDepartmentTree ? (
-                          <div style={{ maxHeight: 260, overflow: 'auto', padding: '4px 8px', border: '1px solid #f0f0f0', borderRadius: 4 }}>
+                          <div className="org-sync-tree-shell">
+                            <div className="org-sync-tree-toolbar">
+                              <Text type="secondary">勾选需要同步的部门节点</Text>
+                              <Text className="org-sync-tree-count">
+                                已选 {selectedDeptKeys.length} 个
+                              </Text>
+                            </div>
                             <Tree
+                              className="org-sync-tree"
                               checkable
                               selectable={false}
                               treeData={departmentTreeData}
                               checkedKeys={selectedDeptKeys}
                               onCheck={(keys) =>
-                                setSelectedDeptKeys(Array.isArray(keys) ? keys : (keys as any).checked)
+                                setSelectedDeptKeys(
+                                  Array.isArray(keys) ? keys : (keys as any).checked,
+                                )
                               }
                               defaultExpandAll
                               switcherIcon={<ApartmentOutlined />}
                             />
                           </div>
                         ) : (
-                          <Empty description="暂未获取到部门树，请检查平台配置后点击刷新状态重试" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                          <div className="org-sync-empty-state">
+                            <Empty
+                              description="暂未获取到部门树，请检查平台配置后点击刷新状态重试"
+                              image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            />
+                          </div>
                         )}
                       </Spin>
                     </Form.Item>
@@ -771,13 +973,26 @@ const OrgSyncPage: React.FC = () => {
                     <Form.Item
                       label="平台用户ID"
                       name="userIds"
+                      className="org-sync-data-input"
                       rules={[{ required: true, message: '请输入平台用户ID，每行一个' }]}
                     >
                       <Input.TextArea rows={4} placeholder="每行一个用户ID，可粘贴企业微信成员ID" />
                     </Form.Item>
                   )}
 
-                  <Space>
+                  {fetchMode === 'all' && (
+                    <div className="org-sync-all-note">
+                      <InfoCircleOutlined />
+                      <div>
+                        <Text strong>全量拉取</Text>
+                        <Text type="secondary">
+                          将读取当前平台可见的全部组织和人员数据，建议先检查预览结果。
+                        </Text>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="org-sync-form-actions">
                     <Button
                       type="primary"
                       icon={<EyeOutlined />}
@@ -786,62 +1001,134 @@ const OrgSyncPage: React.FC = () => {
                     >
                       拉取预览
                     </Button>
-                    <Button onClick={handleResetFetchOptions} disabled={fetchPreviewMutation.isPending}>
+                    <Button
+                      icon={<ReloadOutlined />}
+                      onClick={handleResetFetchOptions}
+                      disabled={fetchPreviewMutation.isPending}
+                    >
                       重置选项
                     </Button>
-                  </Space>
+                  </div>
                 </Form>
-              </Space>
+              </div>
             </Card>
           </Col>
 
           <Col xs={24} xl={8}>
-            <Card title="同步历史" size="small" style={{ height: '100%' }}>
-              {historyQuery.isLoading ? (
-                <Spin />
-              ) : historyQuery.isError ? (
-                <Alert
-                  type="error"
-                  showIcon
-                  message="同步历史加载失败"
-                  description={
-                    historyQuery.error instanceof Error ? historyQuery.error.message : '请稍后再试'
-                  }
-                />
-              ) : sortedHistory.length ? (
-                <Timeline
-                  mode="left"
-                  items={sortedHistory.map((item) => {
-                    const status = getHistoryStatus(item);
-                    return {
-                      color: status.timelineColor,
-                      label: formatTimeLabel(item.syncTime),
-                      children: (
-                        <div>
-                          <Space size={8} wrap>
-                            <Text strong>{getPlatformName(item.provider ?? 'unknown')}</Text>
-                            <Tag color={status.tagColor}>{status.text}</Tag>
-                          </Space>
-                          {item.message && (
-                            <div style={{ marginTop: 4 }}>
-                              <Text type="secondary">{item.message}</Text>
-                            </div>
-                          )}
-                          <Text type="secondary" style={{ display: 'block', marginTop: 4, fontSize: 12 }}>
-                            {formatDateTime(item.syncTime)}
-                          </Text>
-                        </div>
-                      ),
-                    };
-                  })}
-                />
-              ) : (
-                <Empty description="暂无同步记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-              )}
-            </Card>
+            <div className="org-sync-side-column">
+              <Card className="org-sync-health-card">
+                <div className="org-sync-side-heading">
+                  <div>
+                    <Text className="org-sync-panel-kicker">PLATFORM HEALTH</Text>
+                    <Typography.Title level={4} className="org-sync-side-title">
+                      平台状态
+                    </Typography.Title>
+                  </div>
+                  <span
+                    className={`org-sync-health-pulse is-${connectionStatus.color}`}
+                    aria-hidden="true"
+                  />
+                </div>
+
+                <div className="org-sync-health-summary">
+                  <div className={`org-sync-health-icon is-${connectionStatus.color}`}>
+                    {connectionStatus.icon}
+                  </div>
+                  <div>
+                    <Text type="secondary">当前平台</Text>
+                    <Typography.Title level={4} className="org-sync-health-platform">
+                      {selectedPlatformName}
+                    </Typography.Title>
+                    <Tag color={connectionStatus.color}>{connectionStatus.text}</Tag>
+                  </div>
+                </div>
+
+                <div className="org-sync-health-details">
+                  <div>
+                    <Text type="secondary">配置状态</Text>
+                    <Tag color={selectedPlatformMeta?.configured ? 'success' : 'default'}>
+                      {selectedPlatformMeta?.configured ? '已配置' : '未配置'}
+                    </Tag>
+                  </div>
+                  <div>
+                    <Text type="secondary">最近同步</Text>
+                    <Text>{selectedHistory ? formatDateTime(selectedHistory.syncTime) : '—'}</Text>
+                  </div>
+                </div>
+
+                {orgCheckQuery.data?.message && (
+                  <div className="org-sync-health-message">
+                    <InfoCircleOutlined />
+                    <Text type="secondary">{orgCheckQuery.data.message}</Text>
+                  </div>
+                )}
+              </Card>
+
+              <Card
+                className="org-sync-history-card"
+                title={
+                  <div className="org-sync-history-heading">
+                    <div>
+                      <Typography.Title level={4} className="org-sync-side-title">
+                        同步历史
+                      </Typography.Title>
+                      <Text type="secondary">按时间倒序展示最近记录</Text>
+                    </div>
+                    <span className="org-sync-history-count">{sortedHistory.length}</span>
+                  </div>
+                }
+              >
+                {historyQuery.isLoading ? (
+                  <div className="org-sync-history-loading">
+                    <Spin />
+                  </div>
+                ) : historyQuery.isError ? (
+                  <Alert
+                    type="error"
+                    showIcon
+                    title="同步历史加载失败"
+                    description={
+                      historyQuery.error instanceof Error
+                        ? historyQuery.error.message
+                        : '请稍后再试'
+                    }
+                  />
+                ) : sortedHistory.length ? (
+                  <Timeline
+                    className="org-sync-history-timeline"
+                    mode="start"
+                    items={sortedHistory.map((item) => {
+                      const status = getHistoryStatus(item);
+                      return {
+                        color: status.timelineColor,
+                        title: formatTimeLabel(item.syncTime),
+                        content: (
+                          <div className="org-sync-history-item">
+                            <Space size={8} wrap>
+                              <Text strong>{getPlatformName(item.provider ?? 'unknown')}</Text>
+                              <Tag color={status.tagColor}>{status.text}</Tag>
+                            </Space>
+                            {item.message && (
+                              <div className="org-sync-history-message">
+                                <Text type="secondary">{item.message}</Text>
+                              </div>
+                            )}
+                            <Text type="secondary" className="org-sync-history-datetime">
+                              {formatDateTime(item.syncTime)}
+                            </Text>
+                          </div>
+                        ),
+                      };
+                    })}
+                  />
+                ) : (
+                  <Empty description="暂无同步记录" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                )}
+              </Card>
+            </div>
           </Col>
         </Row>
-      </Space>
+      </div>
 
       {previewModal}
       {editModal}

@@ -76,10 +76,12 @@ curl -X POST "http://localhost:8080/api/admin/integration-configs/yunzhanghu/tes
 - `rsaPublicKey`
 - `signType`
 - `url`
+- `dealerPlatformName`
 
 ## 6. 说明
 
-- 本系统当前接入的是云账户 SDK：`com.yunzhanghu.openapi:sdk:1.4.38-RELEASE`。
+- 本系统当前接入的是云账户 SDK：`com.yunzhanghu.openapi:sdk:1.4.39-RELEASE`。
+- 云账户实时支付回调验签、解密并更新记录成功后，接口返回小写字符串 `success`，否则云账户会继续重试。
 - 配置统一存储在 `integration_config` 表中（加密落库），不依赖 yml。
 - 完整回归步骤见：`docs/yunzhanghu-crud-regression.md`。
 - 可直接执行自动化脚本：`scripts/test_yunzhanghu_config_crud.sh`。

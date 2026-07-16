@@ -75,6 +75,7 @@ public class PayrollConfirmationAggregateServiceImpl
 
         List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, batch.getId())
+                .eq(PayrollLine::getBatchRevision, batchRevision)
                 .orderByAsc(PayrollLine::getId));
         Map<Long, PayrollConfirmationRecord> existingByLineId = loadExistingRecordMap(confirmation.getId());
         Set<Long> keepIds = new HashSet<>();

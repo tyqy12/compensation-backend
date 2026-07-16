@@ -57,7 +57,8 @@ public class PayrollImportServiceImpl implements PayrollImportService {
     private static final List<String> EXPECTED_HEADERS = List.of(
             "employeeId", "itemCode", "amount", "note"
     );
-    private static final int AMOUNT_INTEGER_DIGITS = 10;
+    // payment_record.amount is decimal(10,2), so keep import validation within its 8-digit integer capacity.
+    private static final int AMOUNT_INTEGER_DIGITS = 8;
     private static final int AMOUNT_FRACTION_DIGITS = 2;
     private static final CSVFormat IMPORT_CSV_FORMAT = CSVFormat.RFC4180.builder()
             .setHeader()

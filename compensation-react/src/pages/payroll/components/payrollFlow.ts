@@ -16,6 +16,8 @@ export interface PayrollStatusMeta {
   color: string;
 }
 
+export type PayrollEvidenceStatus = 'complete' | 'partial' | 'missing';
+
 const flowStatusMetaMap: Record<string, PayrollStatusMeta> = {
   draft: { text: '草稿', color: 'default' },
   locked: { text: '已锁定', color: 'warning' },
@@ -48,6 +50,7 @@ const distributionStatusMetaMap: Record<string, PayrollStatusMeta> = {
   success: { text: '全部成功', color: 'success' },
   failed: { text: '发放失败', color: 'error' },
   cancelled: { text: '已取消', color: 'default' },
+  superseded: { text: '已作废', color: 'default' },
   pay_processing: { text: '发放处理中', color: 'processing' },
   pay_failed: { text: '发放失败', color: 'error' },
   paid: { text: '全部成功', color: 'success' },
@@ -68,19 +71,27 @@ const distributionStatusAliasMap: Record<string, string> = {
   completed: 'success',
 };
 
-export const normalizeFlowStatus = (status?: string) => String(status ?? '').trim().toLowerCase();
+export const normalizeFlowStatus = (status?: string) =>
+  String(status ?? '')
+    .trim()
+    .toLowerCase();
 
 export const normalizeCalculationStatus = (status?: string) => {
-  const normalized = String(status ?? '').trim().toLowerCase();
+  const normalized = String(status ?? '')
+    .trim()
+    .toLowerCase();
   return calculationStatusAliasMap[normalized] ?? normalized;
 };
 
 export const normalizeDistributionStatus = (status?: string) => {
-  const normalized = String(status ?? '').trim().toLowerCase();
+  const normalized = String(status ?? '')
+    .trim()
+    .toLowerCase();
   return distributionStatusAliasMap[normalized] ?? normalized;
 };
 
-export const getFlowStatusMeta = (status?: string) => flowStatusMetaMap[normalizeFlowStatus(status)];
+export const getFlowStatusMeta = (status?: string) =>
+  flowStatusMetaMap[normalizeFlowStatus(status)];
 
 export const getCalculationStatusMeta = (status?: string) =>
   calculationStatusMetaMap[normalizeCalculationStatus(status)];
@@ -88,23 +99,101 @@ export const getCalculationStatusMeta = (status?: string) =>
 export const getDistributionStatusMeta = (status?: string) =>
   distributionStatusMetaMap[normalizeDistributionStatus(status)];
 
-export const isPayrollBatchComputable = (status?: string) => [
-  'locked',
-  'confirming',
-  'dispute_processing',
-  'rejected',
-].includes(normalizeFlowStatus(status));
+export const isPayrollBatchComputable = (status?: string) =>
+  ['locked', 'confirming', 'dispute_processing', 'rejected'].includes(normalizeFlowStatus(status));
 
 export const getBatchRevisionText = (batchRevision?: number | null) => {
   const revision = typeof batchRevision === 'number' && batchRevision > 0 ? batchRevision : 1;
   return `R${revision}`;
 };
 
-export const getConfirmationModeText = (confirmationMode?: string, confirmationRequired?: boolean) => {
+export const getCalculationEvidenceStatus = (
+  record: Pick<
+    PayrollBatchFlowLike,
+    'inputSnapshotHash' | 'ruleSnapshotHash' | 'calculationEngineVersion'
+  >,
+): PayrollEvidenceStatus => {
+  const presentCount = [
+    record.inputSnapshotHash,
+    record.ruleSnapshotHash,
+    record.calculationEngineVersion,
+  ].filter((value) => typeof value === 'string' && value.trim().length > 0).length;
+  if (presentCount === 3) {
+    return 'complete';
+  }
+  return presentCount > 0 ? 'partial' : 'missing';
+};
+
+export const getCalculationEvidenceMeta = (
+  record: Pick<
+    PayrollBatchFlowLike,
+    'inputSnapshotHash' | 'ruleSnapshotHash' | 'calculationEngineVersion'
+  >,
+): PayrollStatusMeta => {
+  const status = getCalculationEvidenceStatus(record);
+  if (status === 'complete') {
+    return { text: '证据完整', color: 'success' };
+  }
+  if (status === 'partial') {
+    return { text: '证据不完整', color: 'warning' };
+  }
+  return { text: '历史批次无证据', color: 'default' };
+};
+
+export const getSnapshotHashPreview = (hash?: string | null) => {
+  const normalized = String(hash ?? '').trim();
+  if (!normalized) {
+    return '—';
+  }
+  if (normalized.length <= 16) {
+    return normalized;
+  }
+  return `${normalized.slice(0, 8)}…${normalized.slice(-8)}`;
+};
+
+const routeFailureMetaMap: Record<string, PayrollStatusMeta> = {
+  ACCOUNT_MISSING: { text: '缺少收款账号', color: 'error' },
+  ACCOUNT_DECRYPT_FAILED: { text: '收款账号解密失败', color: 'error' },
+  ACCOUNT_TYPE_UNSUPPORTED: { text: '收款账户类型不支持', color: 'error' },
+  EMPLOYMENT_TYPE_MISSING: { text: '缺少用工类型', color: 'error' },
+  EMPLOYMENT_TYPE_UNSUPPORTED: { text: '用工类型不支持', color: 'error' },
+  PROVIDER_UNKNOWN: { text: '未找到结算渠道', color: 'error' },
+  UNSUPPORTED_PROVIDER: { text: '结算渠道不支持', color: 'error' },
+};
+
+export const getSettlementRouteFailureMeta = (errorCode?: string) =>
+  routeFailureMetaMap[
+    String(errorCode ?? '')
+      .trim()
+      .toUpperCase()
+  ] ?? {
+    text: '收款路由失败',
+    color: 'error',
+  };
+
+export const isSettlementRouteBlocked = (item: {
+  itemStatus?: string;
+  paymentRecordId?: number;
+  paymentMethod?: string;
+  providerCode?: string;
+  failureReason?: string;
+}) =>
+  normalizeFlowStatus(item.itemStatus) === 'failed' &&
+  !item.paymentRecordId &&
+  (normalizeFlowStatus(item.paymentMethod) === 'unknown' || !item.providerCode);
+
+export const getConfirmationModeText = (
+  confirmationMode?: string,
+  confirmationRequired?: boolean,
+) => {
   if (confirmationRequired === false) {
     return '无需确认';
   }
-  switch (String(confirmationMode ?? '').trim().toLowerCase()) {
+  switch (
+    String(confirmationMode ?? '')
+      .trim()
+      .toLowerCase()
+  ) {
     case 'group':
       return '组确认';
     case 'individual':
@@ -129,7 +218,9 @@ export const getPayrollFlowCurrentStep = (record: PayrollBatchFlowLike) => {
   }
   if (
     ['pay_processing', 'pay_failed'].includes(flowStatus) ||
-    ['planned', 'created', 'submitted', 'processing', 'failed', 'cancelled'].includes(distributionStatus)
+    ['planned', 'created', 'submitted', 'processing', 'failed', 'cancelled'].includes(
+      distributionStatus,
+    )
   ) {
     return 4;
   }
@@ -139,14 +230,19 @@ export const getPayrollFlowCurrentStep = (record: PayrollBatchFlowLike) => {
   if (['confirming', 'dispute_processing', 'confirmed'].includes(flowStatus)) {
     return 2;
   }
-  if (['locked'].includes(flowStatus) || ['calculating', 'calculated', 'failed'].includes(calculationStatus)) {
+  if (
+    ['locked'].includes(flowStatus) ||
+    ['calculating', 'calculated', 'failed'].includes(calculationStatus)
+  ) {
     return 1;
   }
   return 0;
 };
 
 export const getPayrollFlowSteps = (record: PayrollBatchFlowLike) => {
-  const calculationMeta = getCalculationStatusMeta(record.calculationStatus ?? record.computeStatus);
+  const calculationMeta = getCalculationStatusMeta(
+    record.calculationStatus ?? record.computeStatus,
+  );
   const flowMeta = getFlowStatusMeta(record.status);
   const distributionMeta = getDistributionStatusMeta(record.paymentStatus);
   const confirmationModeText = getConfirmationModeText(
@@ -165,14 +261,13 @@ export const getPayrollFlowSteps = (record: PayrollBatchFlowLike) => {
     },
     {
       title: '员工确认',
-      description:
-        record.confirmationRequired === false
-          ? '已跳过确认'
-          : confirmationModeText,
+      description: record.confirmationRequired === false ? '已跳过确认' : confirmationModeText,
     },
     {
       title: '审批流',
-      description: record.approvalWorkflowId ? `工作流 #${record.approvalWorkflowId}` : flowMeta?.text ?? '待提交',
+      description: record.approvalWorkflowId
+        ? `工作流 #${record.approvalWorkflowId}`
+        : (flowMeta?.text ?? '待提交'),
     },
     {
       title: '发放执行',
@@ -180,7 +275,9 @@ export const getPayrollFlowSteps = (record: PayrollBatchFlowLike) => {
     },
     {
       title: '完成归档',
-      description: ['archived', 'paid'].includes(normalizeFlowStatus(record.status)) ? '已完成' : '待完成',
+      description: ['archived', 'paid'].includes(normalizeFlowStatus(record.status))
+        ? '已完成'
+        : '待完成',
     },
   ];
 };
@@ -229,7 +326,9 @@ export const getPayrollNextAction = (
   if (flowStatus === 'approved' && !distributionStatus) {
     return '审批已通过，等待系统创建发放链路并提交支付渠道。';
   }
-  if (['planned', 'created', 'submitted', 'processing', 'pay_processing'].includes(distributionStatus)) {
+  if (
+    ['planned', 'created', 'submitted', 'processing', 'pay_processing'].includes(distributionStatus)
+  ) {
     return '发放链路处理中，请跟踪渠道结果与回执。';
   }
   if (['failed', 'pay_failed'].includes(distributionStatus) || flowStatus === 'pay_failed') {
@@ -267,13 +366,18 @@ export const getPayrollBlockers = (record: PayrollBatchFlowLike, hasImportData: 
   if (flowStatus === 'submitted') {
     blockers.push('审批进行中，需等待审批结果。');
   }
-  if (['processing', 'submitted', 'created', 'planned', 'pay_processing'].includes(distributionStatus)) {
+  if (
+    ['processing', 'submitted', 'created', 'planned', 'pay_processing'].includes(distributionStatus)
+  ) {
     blockers.push('发放链路处理中，当前不可修改导入数据。');
   }
   if (['failed', 'pay_failed'].includes(distributionStatus) || flowStatus === 'pay_failed') {
     blockers.push('发放失败，需修复渠道或账户问题后重试。');
   }
-  if (['paid', 'archived'].includes(flowStatus) || ['success', 'partial_success'].includes(distributionStatus)) {
+  if (
+    ['paid', 'archived'].includes(flowStatus) ||
+    ['success', 'partial_success'].includes(distributionStatus)
+  ) {
     blockers.push('当前版本已进入完成态，页面以查看为主。');
   }
   return blockers;

@@ -146,6 +146,36 @@ class PayrollDistributionServiceImplTest {
     }
 
     @Test
+    void createOrRefreshItemsShouldRejectStaleDistributionRevision() {
+        PayrollBatchMapper payrollBatchMapper = mock(PayrollBatchMapper.class);
+        PayrollLineService payrollLineService = mock(PayrollLineService.class);
+        PayrollDistributionServiceImpl service = new PayrollDistributionServiceImpl(
+                payrollBatchMapper,
+                mock(PayrollDistributionItemMapper.class),
+                payrollLineService,
+                mock(EmployeeMapper.class),
+                mock(PaymentRecordService.class),
+                mock(PayrollDistributionRoutingSupport.class),
+                mock(PayrollReconciliationTaskService.class)
+        );
+
+        PayrollDistribution distribution = new PayrollDistribution();
+        distribution.setId(12L);
+        distribution.setBatchId(22L);
+        distribution.setBatchRevision(1);
+
+        PayrollBatch batch = new PayrollBatch();
+        batch.setId(22L);
+        batch.setBatchRevision(2);
+        when(payrollBatchMapper.selectById(22L)).thenReturn(batch);
+
+        assertThatThrownBy(() -> service.createOrRefreshItems(distribution))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("发放单已过期");
+        verify(payrollLineService, never()).list(org.mockito.ArgumentMatchers.<Wrapper<PayrollLine>>any());
+    }
+
+    @Test
     void createOrRefreshItemsShouldRejectUnconfirmedLinesWhenConfirmationIsRequired() {
         PayrollBatchMapper payrollBatchMapper = mock(PayrollBatchMapper.class);
         PayrollDistributionItemMapper itemMapper = mock(PayrollDistributionItemMapper.class);

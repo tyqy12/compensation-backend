@@ -29,13 +29,13 @@ import {
   Typography,
 } from 'antd';
 import type { TransferDirection } from 'antd/es/transfer';
-import {
-  ArrowLeftOutlined,
-  SaveOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons';
+import { ArrowLeftOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useRolesQuery } from '@services/queries/roles';
-import { useUserAggregateSearchQuery, useUserRolesQuery, useSetUserRolesMutation } from '@services/queries/adminAuth';
+import {
+  useUserAggregateSearchQuery,
+  useUserRolesQuery,
+  useSetUserRolesMutation,
+} from '@services/queries/adminAuth';
 import type { RoleInfo } from '@types/api';
 
 interface TransferItem {
@@ -110,7 +110,11 @@ const UserRoleAssign: React.FC = () => {
   }, [userRolesQuery.data]);
 
   // Transfer 变化处理
-  const handleChange = (newTargetKeys: string[], _direction: TransferDirection, _moveKeys: string[]) => {
+  const handleChange = (
+    newTargetKeys: string[],
+    _direction: TransferDirection,
+    _moveKeys: string[],
+  ) => {
     setTargetKeys(newTargetKeys);
   };
 
@@ -124,9 +128,7 @@ const UserRoleAssign: React.FC = () => {
   };
 
   const selectedRoles = useMemo(() => {
-    return targetKeys
-      .map((key) => roleMap.get(key))
-      .filter((r): r is TransferItem => !!r);
+    return targetKeys.map((key) => roleMap.get(key)).filter((r): r is TransferItem => !!r);
   }, [targetKeys, roleMap]);
 
   const addedRoleKeys = useMemo(() => {
@@ -184,7 +186,7 @@ const UserRoleAssign: React.FC = () => {
     return (
       <PageContainer>
         <Card>
-          <Spin tip="加载中..." />
+          <Spin description="加载中..." />
         </Card>
       </PageContainer>
     );
@@ -194,12 +196,7 @@ const UserRoleAssign: React.FC = () => {
     return (
       <PageContainer>
         <Card>
-          <Alert
-            message="用户不存在"
-            description="未找到指定的用户信息"
-            type="error"
-            showIcon
-          />
+          <Alert title="用户不存在" description="未找到指定的用户信息" type="error" showIcon />
         </Card>
       </PageContainer>
     );
@@ -221,7 +218,7 @@ const UserRoleAssign: React.FC = () => {
         onBack: () => navigate('/admin/auth-center/users'),
       }}
     >
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         {/* 用户信息 */}
         <Card title="用户信息" size="small">
           <Descriptions column={2} size="small">
@@ -238,7 +235,7 @@ const UserRoleAssign: React.FC = () => {
           <Col xs={24} lg={16}>
             <Card
               title="角色分配"
-              extra={(
+              extra={
                 <Space>
                   <Text type="secondary">已选 {targetKeys.length} 项</Text>
                   <Button
@@ -250,7 +247,7 @@ const UserRoleAssign: React.FC = () => {
                     恢复初始
                   </Button>
                 </Space>
-              )}
+              }
             >
               <Transfer
                 dataSource={transferData}
@@ -262,9 +259,7 @@ const UserRoleAssign: React.FC = () => {
                 render={(item) => (
                   <Space size={6} wrap>
                     <Text strong>{item.title}</Text>
-                    <Tag color={ROLE_TYPE_COLOR[item.roleType] || 'default'}>
-                      {item.roleType}
-                    </Tag>
+                    <Tag color={ROLE_TYPE_COLOR[item.roleType] || 'default'}>{item.roleType}</Tag>
                     {item.status !== 'enabled' && <Tag color="default">已禁用</Tag>}
                     {item.isProtected && <Tag color="red">保护角色</Tag>}
                     <Text type="secondary" style={{ fontSize: 11 }}>
@@ -278,12 +273,12 @@ const UserRoleAssign: React.FC = () => {
                 }}
                 showSearch
                 filterOption={(inputValue, item) =>
-                  item.title.toLowerCase().includes(inputValue.toLowerCase())
-                  || item.description.toLowerCase().includes(inputValue.toLowerCase())
+                  item.title.toLowerCase().includes(inputValue.toLowerCase()) ||
+                  item.description.toLowerCase().includes(inputValue.toLowerCase())
                 }
               />
               <Alert
-                message="分配规则"
+                title="分配规则"
                 description="禁用角色不允许新分配，但如果用户当前已拥有该角色，仍允许移除；保存为覆盖式更新。"
                 type="info"
                 showIcon
@@ -298,7 +293,7 @@ const UserRoleAssign: React.FC = () => {
               extra={<Badge count={selectedRoles.length} style={{ backgroundColor: '#1890ff' }} />}
             >
               {selectedRoles.length > 0 ? (
-                <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                   <Space wrap>
                     {selectedRoles.map((role) => (
                       <Tag key={role.key} color={ROLE_TYPE_COLOR[role.roleType] || 'default'}>
@@ -331,7 +326,7 @@ const UserRoleAssign: React.FC = () => {
                     <Alert
                       type="warning"
                       showIcon
-                      message={`当前角色中包含 ${roleStats.disabledCount} 个已禁用角色`}
+                      title={`当前角色中包含 ${roleStats.disabledCount} 个已禁用角色`}
                     />
                   )}
                 </Space>

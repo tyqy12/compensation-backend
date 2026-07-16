@@ -8,6 +8,10 @@ import java.util.List;
 @Data
 public class PayrollLedgerDto {
     private Long batchId;
+    private Integer batchRevision;
+    private String inputSnapshotHash;
+    private String ruleSnapshotHash;
+    private String calculationEngineVersion;
     private String status;
     private String periodLabel;
     private String currency;
@@ -28,4 +32,3 @@ public class PayrollLedgerDto {
     private List<PayrollValidationIssueDto> issues;
     private List<PayrollPreviewDto.PayrollPreviewLineDto> lines;
 }
-

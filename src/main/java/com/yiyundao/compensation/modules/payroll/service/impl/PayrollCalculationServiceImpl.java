@@ -18,13 +18,16 @@ import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollImportItem;
 import com.yiyundao.compensation.modules.payroll.entity.SalaryItem;
 import com.yiyundao.compensation.modules.payroll.entity.SalaryTemplate;
+import com.yiyundao.compensation.modules.payroll.entity.SalaryTemplateVersion;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.infrastructure.dao.PayrollImportItemMapper;
 import com.yiyundao.compensation.modules.payroll.service.SalaryItemService;
 import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateService;
+import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateVersionService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.modules.payroll.service.PayrollCalculationService;
+import com.yiyundao.compensation.modules.payroll.support.PayrollCalculationSnapshotSupport;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,6 +41,7 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.Locale;
+import java.util.Objects;
 
 @Slf4j
 @Service
@@ -48,6 +52,7 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
     private final PayrollImportItemMapper importItemMapper;
     private final SalaryItemService salaryItemService;
     private final SalaryTemplateService salaryTemplateService;
+    private final SalaryTemplateVersionService salaryTemplateVersionService;
     private final PayrollLineService payrollLineService;
     private final EmployeeMapper employeeMapper;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
@@ -77,8 +82,14 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
                 new LambdaQueryWrapper<PayrollLine>().eq(PayrollLine::getBatchId, batchId)
         );
         boolean revisionAdvance = existingLines != null && !existingLines.isEmpty();
+        ctx.createNewRevision = revisionAdvance;
+        int currentRevision = normalizeRevision(ctx.batch.getBatchRevision());
+        ctx.calculationRevision = revisionAdvance ? currentRevision + 1 : currentRevision;
+        ctx.batch.setBatchRevision(ctx.calculationRevision);
         LinesSummary summary = computeLines(ctx);
+        validatePersistedSnapshot(ctx);
         rejectBlockingIssuesBeforePersist(summary, ctx.globalIssues);
+        applySnapshotMetadata(ctx);
         FailureGuard rollbackFailureGuard = FailureGuard.from(ctx.batch);
         FailureGuard calculatingFailureGuard = markBatchCalculating(ctx.batch);
 
@@ -95,20 +106,24 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
                 entities.add(toPayrollLine(ctx, entry.getKey(), entry.getValue(), existingByEmployee.get(entry.getKey())));
             }
 
-            java.util.Set<Long> keepEmployeeIds = summary.linesByEmployee.keySet();
-            if (keepEmployeeIds.isEmpty()) {
+            if (ctx.createNewRevision) {
                 payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>().eq(PayrollLine::getBatchId, batchId));
             } else {
-                payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>()
-                        .eq(PayrollLine::getBatchId, batchId)
-                        .notIn(PayrollLine::getEmployeeId, keepEmployeeIds));
+                java.util.Set<Long> keepEmployeeIds = summary.linesByEmployee.keySet();
+                if (keepEmployeeIds.isEmpty()) {
+                    payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>().eq(PayrollLine::getBatchId, batchId));
+                } else {
+                    payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>()
+                            .eq(PayrollLine::getBatchId, batchId)
+                            .notIn(PayrollLine::getEmployeeId, keepEmployeeIds));
+                }
             }
 
             if (!entities.isEmpty()) {
                 payrollLineService.saveOrUpdateBatch(entities);
             }
 
-            updateBatchToConfirming(ctx.batch, revisionAdvance);
+            updateBatchToConfirming(ctx.batch);
             return true;
         } catch (Exception ex) {
             markBatchCalculationFailedAfterRollback(ctx.batch.getId(), rollbackFailureGuard, calculatingFailureGuard);
@@ -142,32 +157,13 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
     @Override
     @Transactional
     public boolean recomputeLine(Long batchId, Long employeeId) {
-        log.info("Recompute payroll line: batch={}, employeeId= {}", batchId, employeeId);
-        PreviewContext ctx = prepareContext(batchId, true);
-        if (ctx == null) return false;
-        if (!canPersist(ctx.batch)) {
-            log.warn("Batch status not allowed for recompute: id={} status={}", ctx.batch.getId(), ctx.batch.getStatus());
-            return false;
+        log.info("Recompute payroll revision for employee: batch={}, employeeId={}", batchId, employeeId);
+        if (employeeId == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "员工ID不能为空");
         }
-        var records = ctx.itemsByEmployee.get(employeeId);
-        if (records == null || records.isEmpty()) {
-            payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>()
-                    .eq(PayrollLine::getBatchId, batchId)
-                    .eq(PayrollLine::getEmployeeId, employeeId));
-            return true;
-        }
-
-        var previewLine = buildPreviewLine(ctx, employeeId, records);
-        var existing = payrollLineService.getOne(new LambdaQueryWrapper<PayrollLine>()
-                .eq(PayrollLine::getBatchId, batchId)
-                .eq(PayrollLine::getEmployeeId, employeeId)
-                .last("limit 1"));
-        PayrollLine entity = toPayrollLine(ctx, employeeId, previewLine, existing);
-        if (existing != null) {
-            entity.setId(existing.getId());
-            entity.setVersion(existing.getVersion());
-        }
-        return payrollLineService.saveOrUpdate(entity);
+        // 工资行属于批次 revision 的完整结果集，单行重算也必须生成一套新的整批结果，
+        // 避免活动 revision 同时混用新旧工资行。
+        return computeAndSave(batchId);
     }
 
     @Override
@@ -228,6 +224,7 @@ public PayrollLedgerDto ledger(Long batchId) {
 
     var persisted = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
             .eq(PayrollLine::getBatchId, batchId)
+            .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision()))
             .orderByAsc(PayrollLine::getEmployeeId));
 
     LinesSummary computedSummary = ctx != null ? computeLines(ctx) : new LinesSummary();
@@ -386,6 +383,10 @@ public PayrollLedgerDto ledger(Long batchId) {
 
     PayrollLedgerDto dto = new PayrollLedgerDto();
     dto.setBatchId(batchId);
+    dto.setBatchRevision(normalizeRevision(batch.getBatchRevision()));
+    dto.setInputSnapshotHash(batch.getInputSnapshotHash());
+    dto.setRuleSnapshotHash(batch.getRuleSnapshotHash());
+    dto.setCalculationEngineVersion(batch.getCalculationEngineVersion());
     dto.setStatus(batch.getStatus().getCode());
     dto.setPeriodLabel(batch.getPeriodLabel());
     dto.setCurrency(batch.getCurrency());
@@ -730,6 +731,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
     ctx.batch = batch;
     ctx.persistedLines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
             .eq(PayrollLine::getBatchId, batchId)
+            .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision()))
             .orderByAsc(PayrollLine::getId));
     if (!ready) {
         PayrollBatchStatus status = batch.getStatus();
@@ -751,12 +753,22 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         }
     }
     ctx.template = resolveTemplateForBatch(batch, ctx.persistedLines);
+    ctx.ruleSnapshotJson = PayrollCalculationSnapshotSupport.ruleSnapshotJson(objectMapper, ctx.template);
+    ctx.ruleSnapshotHash = PayrollCalculationSnapshotSupport.ruleHash(objectMapper, ctx.template);
     ctx.rule = parseBasicRule(ctx.template);
     ctx.expectedItemRules = parseItemRules(ctx.template);
-    if (ctx.template == null) {
+    if (ctx.rule.parseError != null) {
         ctx.globalIssues.add(validationIssueSupport.blocking(
-                "NO_ACTIVE_SALARY_TEMPLATE",
-                "未配置适用于当前批次类型的启用薪资模板",
+                "INVALID_PAYROLL_RULE_JSON",
+                "薪资模板规则无法解析，已阻止本次计算"
+        ));
+    }
+    if (ctx.template == null) {
+        boolean pinnedRuleMissing = batch.getRuleTemplateId() != null;
+        ctx.globalIssues.add(validationIssueSupport.blocking(
+                pinnedRuleMissing ? "PINNED_PAYROLL_RULE_VERSION_MISSING" : "NO_ACTIVE_SALARY_TEMPLATE",
+                pinnedRuleMissing ? "批次锁定的薪资规则包版本不存在或已变化，请创建新的批次版本"
+                        : "未配置适用于当前批次类型的启用薪资模板",
                 null,
                 batch.getType(),
                 null
@@ -774,6 +786,8 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
             .eq(PayrollImportItem::getBatchId, batchId)
             .eq(PayrollImportItem::getStatus, "valid")
             .orderByAsc(PayrollImportItem::getEmployeeId));
+    ctx.inputSnapshotJson = PayrollCalculationSnapshotSupport.inputSnapshotJson(objectMapper, items);
+    ctx.inputSnapshotHash = PayrollCalculationSnapshotSupport.inputHash(objectMapper, items);
     for (var item : items) {
         ctx.itemsByEmployee.computeIfAbsent(item.getEmployeeId(), key -> new java.util.ArrayList<>()).add(item);
     }
@@ -803,6 +817,38 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
     return ctx;
 }
 
+    private void applySnapshotMetadata(PreviewContext ctx) {
+        if (ctx == null || ctx.batch == null) {
+            return;
+        }
+        ctx.calculationEngineVersion = PayrollCalculationSnapshotSupport.LEGACY_BASIC_ENGINE_VERSION;
+        ctx.batch.setInputSnapshotHash(ctx.inputSnapshotHash);
+        ctx.batch.setInputSnapshotJson(ctx.inputSnapshotJson);
+        ctx.batch.setRuleSnapshotHash(ctx.ruleSnapshotHash);
+        ctx.batch.setRuleSnapshotJson(ctx.ruleSnapshotJson);
+        ctx.batch.setCalculationEngineVersion(ctx.calculationEngineVersion);
+    }
+
+    private void validatePersistedSnapshot(PreviewContext ctx) {
+        if (ctx == null || ctx.batch == null) {
+            return;
+        }
+        if (StringUtils.hasText(ctx.batch.getInputSnapshotHash())
+                && !ctx.batch.getInputSnapshotHash().equals(ctx.inputSnapshotHash)) {
+            ctx.globalIssues.add(validationIssueSupport.blocking(
+                    "PAYROLL_INPUT_SNAPSHOT_CHANGED",
+                    "薪资输入事实已变化，请创建新的批次版本后再计算"
+            ));
+        }
+        if (StringUtils.hasText(ctx.batch.getRuleSnapshotHash())
+                && !ctx.batch.getRuleSnapshotHash().equals(ctx.ruleSnapshotHash)) {
+            ctx.globalIssues.add(validationIssueSupport.blocking(
+                    "PAYROLL_RULE_SNAPSHOT_CHANGED",
+                    "薪资规则已变化，请创建新的批次版本后再计算"
+            ));
+        }
+    }
+
     private boolean canPersist(PayrollBatch batch) {
         if (batch == null || batch.getStatus() == null) {
             return false;
@@ -819,10 +865,15 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
                                   PayrollPreviewDto.PayrollPreviewLineDto lineDto,
                                   PayrollLine existing) {
     PayrollLine entity = new PayrollLine();
-    entity.setBatchId(ctx.batch.getId());
-    entity.setEmployeeId(empId);
-    entity.setTemplateId(ctx.template != null ? ctx.template.getId() : null);
-    Employee employee = ctx.employeeMap.get(empId);
+        entity.setBatchId(ctx.batch.getId());
+        entity.setBatchRevision(ctx.calculationRevision);
+        entity.setEmployeeId(empId);
+        entity.setTemplateId(ctx.template != null ? ctx.template.getId() : null);
+        entity.setTemplateVersion(ctx.template != null ? ctx.template.getDataVersion() : null);
+        entity.setInputSnapshotHash(ctx.inputSnapshotHash);
+        entity.setRuleSnapshotHash(ctx.ruleSnapshotHash);
+        entity.setCalculationEngineVersion(ctx.calculationEngineVersion);
+        Employee employee = ctx.employeeMap.get(empId);
     entity.setEmploymentType(employee != null ? employee.getEmploymentType() : ctx.batch.getType());
     entity.setCurrency(ctx.batch.getCurrency());
     entity.setGrossAmount(lineDto.getGrossAmount());
@@ -844,7 +895,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
     entity.setObjectionAt(null);
     entity.setDisputeWorkflowId(null);
 
-    if (existing != null) {
+    if (existing != null && !ctx.createNewRevision) {
         entity.setId(existing.getId());
         entity.setVersion(existing.getVersion());
     }
@@ -899,7 +950,11 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         return employeeId;
     }
 
-    private void updateBatchToConfirming(PayrollBatch batch, boolean revisionAdvance) {
+    private int normalizeRevision(Integer revision) {
+        return revision == null || revision < 1 ? 1 : revision;
+    }
+
+    private void updateBatchToConfirming(PayrollBatch batch) {
         if (batch == null) {
             return;
         }
@@ -911,9 +966,16 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         }
         batch.setCalculationStatus(PayrollCalculationStatus.CALCULATED);
         batch.setConfirmationCompletedTime(null);
-        int currentRevision = batch.getBatchRevision() == null || batch.getBatchRevision() < 1 ? 1 : batch.getBatchRevision();
-        batch.setBatchRevision(revisionAdvance ? currentRevision + 1 : currentRevision);
+        batch.setBatchRevision(normalizeRevision(batch.getBatchRevision()));
         if (Boolean.TRUE.equals(batch.getConfirmationRequired())) {
+            if (batch.getStatus() == null || !batch.getStatus().canTransitionTo(PayrollBatchStatus.CONFIRMING)) {
+                throw new BusinessException(
+                        ErrorCode.INVALID_STATUS,
+                        "不允许的薪资批次状态转移: "
+                                + (batch.getStatus() == null ? "null" : batch.getStatus().getCode())
+                                + " -> " + PayrollBatchStatus.CONFIRMING.getCode()
+                );
+            }
             batch.setStatus(PayrollBatchStatus.CONFIRMING);
         }
         batch.setUpdateTime(LocalDateTime.now());
@@ -1019,6 +1081,21 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
 
     private SalaryTemplate resolveTemplateForBatch(PayrollBatch batch, java.util.List<PayrollLine> persistedLines) {
         try {
+            if (batch != null && batch.getRuleTemplateId() != null) {
+                if (batch.getRuleTemplateVersion() == null) {
+                    log.error("批次缺少锁定的规则包版本: batchId={}, templateId={}",
+                            batch.getId(), batch.getRuleTemplateId());
+                    return null;
+                }
+                SalaryTemplate pinnedTemplate = resolvePinnedTemplate(batch);
+                if (pinnedTemplate == null) {
+                    log.error("批次锁定规则包与当前规则包版本不一致: batchId={}, templateId={}, expectedVersion={}, actualVersion={}",
+                            batch.getId(), batch.getRuleTemplateId(), batch.getRuleTemplateVersion(),
+                            pinnedTemplate == null ? null : pinnedTemplate.getDataVersion());
+                    return null;
+                }
+                return pinnedTemplate;
+            }
             Long persistedTemplateId = resolvePersistedTemplateId(persistedLines);
             if (persistedTemplateId != null) {
                 SalaryTemplate persistedTemplate = salaryTemplateService.getById(persistedTemplateId);
@@ -1032,13 +1109,46 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
                     .eq(SalaryTemplate::getType, batch.getType())
                     .eq(SalaryTemplate::getStatus, "enabled"));
             if (list == null || list.isEmpty()) return null;
-            // pick the latest by id
-            list.sort(java.util.Comparator.comparingLong(SalaryTemplate::getId).reversed());
+            if (list.size() > 1) {
+                log.error("同一用工类型存在多个启用规则包，停止隐式选择: batchId={}, type={}, count={}",
+                        batch != null ? batch.getId() : null, batch != null ? batch.getType() : null, list.size());
+                return null;
+            }
             return list.get(0);
         } catch (Exception e) {
             log.warn("resolveTemplateForBatch failed: {}", e.getMessage());
             return null;
         }
+    }
+
+    private SalaryTemplate resolvePinnedTemplate(PayrollBatch batch) {
+        SalaryTemplate current = salaryTemplateService.getById(batch.getRuleTemplateId());
+        if (current != null
+                && Objects.equals(batch.getType(), current.getType())
+                && Objects.equals(batch.getRuleTemplateVersion(), current.getDataVersion())) {
+            return current;
+        }
+        if (salaryTemplateVersionService == null) {
+            return null;
+        }
+        SalaryTemplateVersion snapshot = salaryTemplateVersionService.getOne(
+                new LambdaQueryWrapper<SalaryTemplateVersion>()
+                        .eq(SalaryTemplateVersion::getTemplateId, batch.getRuleTemplateId())
+                        .eq(SalaryTemplateVersion::getVersionNo, batch.getRuleTemplateVersion())
+                        .eq(SalaryTemplateVersion::getDeleted, 0)
+        );
+        if (snapshot == null || !Objects.equals(batch.getType(), snapshot.getType())) {
+            return null;
+        }
+        SalaryTemplate restored = new SalaryTemplate();
+        restored.setId(snapshot.getTemplateId());
+        restored.setName(snapshot.getName());
+        restored.setType(snapshot.getType());
+        restored.setItemsJson(snapshot.getItemsJson());
+        restored.setTaxRuleJson(snapshot.getTaxRuleJson());
+        restored.setStatus(snapshot.getStatus());
+        restored.setDataVersion(snapshot.getVersionNo());
+        return restored;
     }
 
     private Long resolvePersistedTemplateId(java.util.List<PayrollLine> persistedLines) {
@@ -1114,7 +1224,8 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
                 }
             }
         } catch (Exception e) {
-            log.warn("parseBasicRule failed, fallback to default zero rates: {}", e.getMessage());
+            rule.parseError = e.getMessage();
+            log.warn("parseBasicRule failed, calculation is blocked: {}", e.getMessage());
         }
         return rule;
     }
@@ -1236,6 +1347,13 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         java.util.Map<Long, Employee> managerMap;
         java.util.List<PayrollLine> persistedLines = java.util.Collections.emptyList();
         java.util.List<PayrollValidationIssueDto> globalIssues = new java.util.ArrayList<>();
+        String inputSnapshotHash;
+        String inputSnapshotJson;
+        String ruleSnapshotHash;
+        String ruleSnapshotJson;
+        String calculationEngineVersion = PayrollCalculationSnapshotSupport.LEGACY_BASIC_ENGINE_VERSION;
+        int calculationRevision = 1;
+        boolean createNewRevision;
     }
 
     private record FailureGuard(LocalDateTime updateTime, Integer version) {
@@ -1271,6 +1389,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         int scale = 2;
         RoundingMode roundingMode = RoundingMode.HALF_UP;
         BigDecimal netDeltaWarnPct; // e.g. 0.2 for 20%
+        String parseError;
 
         static RoundingMode rounding(String s) {
             if (s == null) return RoundingMode.HALF_UP;

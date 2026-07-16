@@ -1,13 +1,10 @@
 import React, { useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import {
-  PageContainer,
-  ProTable,
-  type ProColumns,
-} from '@ant-design/pro-components';
+import { PageContainer, ProTable, type ProColumns } from '@ant-design/pro-components';
 import {
   Alert,
   Card,
+  Descriptions,
   Space,
   Statistic,
   Tag,
@@ -18,6 +15,11 @@ import {
 import { ReloadOutlined, WarningOutlined } from '@ant-design/icons';
 import { usePayrollLedgerQuery } from '@services/queries/payroll';
 import type { PayrollPreviewLineDto, PayrollValidationIssueDto } from '@types/openapi';
+import {
+  getBatchRevisionText,
+  getCalculationEvidenceMeta,
+  getSnapshotHashPreview,
+} from './components/payrollFlow';
 
 const { Text, Title } = Typography;
 
@@ -29,6 +31,15 @@ const formatCurrency = (value?: number, currency = 'CNY') => {
     minimumFractionDigits: 2,
   }).format(value);
 };
+
+const renderSnapshotHash = (hash?: string) =>
+  hash ? (
+    <Typography.Text code copyable={{ text: hash }}>
+      {getSnapshotHashPreview(hash)}
+    </Typography.Text>
+  ) : (
+    <Text type="secondary">—</Text>
+  );
 
 const EMPLOYMENT_TEXT: Record<string, string> = {
   full_time: '全职',
@@ -63,7 +74,10 @@ const renderIssueTags = (issues?: PayrollValidationIssueDto[], warnings?: string
     return (
       <Space size={4} wrap>
         {issues.map((issue, idx) => (
-          <Tag color={getIssueColor(issue)} key={`${issue.code ?? issue.message ?? 'issue'}-${idx}`}>
+          <Tag
+            color={getIssueColor(issue)}
+            key={`${issue.code ?? issue.message ?? 'issue'}-${idx}`}
+          >
             {issue.message}
           </Tag>
         ))}
@@ -114,7 +128,8 @@ const columns: ProColumns<PayrollPreviewLineDto>[] = [
     title: '雇佣类型',
     dataIndex: 'employmentType',
     width: 100,
-    render: (_, record) => EMPLOYMENT_TEXT[record.employmentType ?? ''] ?? record.employmentType ?? '—',
+    render: (_, record) =>
+      EMPLOYMENT_TEXT[record.employmentType ?? ''] ?? record.employmentType ?? '—',
   },
   {
     title: '应发',
@@ -168,40 +183,48 @@ const BatchLedger: React.FC = () => {
   const ledger = ledgerQuery.data;
 
   const currency = ledger?.currency ?? 'CNY';
+  const evidenceMeta = getCalculationEvidenceMeta(ledger ?? {});
 
-  const summaryCards = useMemo(() => [
-    {
-      title: '员工数',
-      value: ledger?.totalEmployees ?? 0,
-    },
-    {
-      title: '应发合计',
-      value: formatCurrency(ledger?.grossTotal, currency),
-    },
-    {
-      title: '扣除合计',
-      value: formatCurrency(ledger?.deductionsTotal, currency),
-    },
-    {
-      title: '实发合计',
-      value: formatCurrency(ledger?.netTotal, currency),
-    },
-    {
-      title: '阻塞员工行',
-      value: ledger?.linesWithBlockingIssues ?? 0,
-    },
-    {
-      title: '阻塞问题',
-      value: ledger?.blockingIssueCount ?? 0,
-    },
-    {
-      title: '复核提醒',
-      value: ledger?.reviewIssueCount ?? 0,
-    },
-  ], [ledger, currency]);
+  const summaryCards = useMemo(
+    () => [
+      {
+        title: '员工数',
+        value: ledger?.totalEmployees ?? 0,
+      },
+      {
+        title: '应发合计',
+        value: formatCurrency(ledger?.grossTotal, currency),
+      },
+      {
+        title: '扣除合计',
+        value: formatCurrency(ledger?.deductionsTotal, currency),
+      },
+      {
+        title: '实发合计',
+        value: formatCurrency(ledger?.netTotal, currency),
+      },
+      {
+        title: '阻塞员工行',
+        value: ledger?.linesWithBlockingIssues ?? 0,
+      },
+      {
+        title: '阻塞问题',
+        value: ledger?.blockingIssueCount ?? 0,
+      },
+      {
+        title: '复核提醒',
+        value: ledger?.reviewIssueCount ?? 0,
+      },
+    ],
+    [ledger, currency],
+  );
 
   const statusTag = ledger?.status ? (
-    <Tag color={ledger.status === 'approved' ? 'green' : ledger.status === 'locked' ? 'blue' : 'default'}>
+    <Tag
+      color={
+        ledger.status === 'approved' ? 'green' : ledger.status === 'locked' ? 'blue' : 'default'
+      }
+    >
       {ledger.status?.toUpperCase()}
     </Tag>
   ) : null;
@@ -212,23 +235,33 @@ const BatchLedger: React.FC = () => {
         title: '薪酬财务台账',
         breadcrumb: {},
         extra: [
-          <Button key="refresh" icon={<ReloadOutlined />} onClick={() => ledgerQuery.refetch()} loading={ledgerQuery.isFetching}>
+          <Button
+            key="refresh"
+            icon={<ReloadOutlined />}
+            onClick={() => ledgerQuery.refetch()}
+            loading={ledgerQuery.isFetching}
+          >
             刷新
           </Button>,
         ],
       }}
     >
-      <Space direction="vertical" size={16} style={{ width: '100%', padding: 24 }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%', padding: 24 }}>
         <Card>
-          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+          <Space orientation="vertical" style={{ width: '100%' }} size={16}>
             {!batchId && (
-              <Alert type="info" showIcon message="未指定批次" description="请从批次列表进入此页面，或检查路由参数。" />
+              <Alert
+                type="info"
+                showIcon
+                title="未指定批次"
+                description="请从批次列表进入此页面，或检查路由参数。"
+              />
             )}
             {ledgerQuery.isError && (
               <Alert
                 type="error"
                 showIcon
-                message="财务台账加载失败"
+                title="财务台账加载失败"
                 description={(ledgerQuery.error as Error)?.message ?? '请稍后重试或联系管理员'}
               />
             )}
@@ -236,14 +269,46 @@ const BatchLedger: React.FC = () => {
               <Title level={4} style={{ margin: 0 }}>
                 批次 {ledger?.batchId ?? batchId ?? '—'}
               </Title>
+              <Tag>{getBatchRevisionText(ledger?.batchRevision)}</Tag>
               {statusTag}
               {ledger?.periodLabel && <Tag color="cyan">周期：{ledger.periodLabel}</Tag>}
+              <Tag color={evidenceMeta.color}>{evidenceMeta.text}</Tag>
             </Space>
+            <Descriptions
+              size="small"
+              column={{ xs: 1, sm: 2, md: 4 }}
+              items={[
+                {
+                  key: 'engine',
+                  label: '计算引擎',
+                  children: ledger?.calculationEngineVersion || '—',
+                },
+                {
+                  key: 'inputHash',
+                  label: '输入事实摘要',
+                  children: renderSnapshotHash(ledger?.inputSnapshotHash),
+                },
+                {
+                  key: 'ruleHash',
+                  label: '规则摘要',
+                  children: renderSnapshotHash(ledger?.ruleSnapshotHash),
+                },
+                {
+                  key: 'evidence',
+                  label: '证据状态',
+                  children: <Tag color={evidenceMeta.color}>{evidenceMeta.text}</Tag>,
+                },
+              ]}
+            />
             {/* 统计卡片 - 单行显示 */}
             <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
               {summaryCards.map((card) => (
                 <Card key={card.title} size="small" style={{ flex: '0 0 auto', width: 130 }}>
-                  <Statistic title={card.title} value={card.value} valueStyle={{ fontSize: 20 }} />
+                  <Statistic
+                    title={card.title}
+                    value={card.value}
+                    styles={{ content: { fontSize: 20 } }}
+                  />
                 </Card>
               ))}
             </div>
@@ -251,7 +316,7 @@ const BatchLedger: React.FC = () => {
               <Alert
                 type={ledger.hasBlockingIssues ? 'error' : 'warning'}
                 showIcon
-                message={ledger.hasBlockingIssues ? '批次阻塞问题' : '批次复核提醒'}
+                title={ledger.hasBlockingIssues ? '批次阻塞问题' : '批次复核提醒'}
                 description={renderIssueTags(ledger.issues, ledger.warnings)}
               />
             )}
@@ -259,9 +324,9 @@ const BatchLedger: React.FC = () => {
               <Alert
                 type="warning"
                 showIcon
-                message="批次复核提醒"
+                title="批次复核提醒"
                 description={
-                  <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                  <Space orientation="vertical" size={4} style={{ width: '100%' }}>
                     {ledger.warnings.map((warning, idx) => (
                       <Text key={`${warning}-${idx}`}>{warning}</Text>
                     ))}
@@ -276,10 +341,11 @@ const BatchLedger: React.FC = () => {
           rowKey={(record) =>
             String(
               record.lineId ??
-              record.employeeId ??
-              record.employeeNo ??
-              `${record.employeeName ?? 'line'}-${record.managerId ?? 'unknown'}`,
-            )}
+                record.employeeId ??
+                record.employeeNo ??
+                `${record.employeeName ?? 'line'}-${record.managerId ?? 'unknown'}`,
+            )
+          }
           columns={columns}
           dataSource={ledger?.lines ?? []}
           loading={ledgerQuery.isLoading || ledgerQuery.isFetching}

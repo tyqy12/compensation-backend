@@ -301,9 +301,12 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  `type` varchar(20) NOT NULL COMMENT 'full_time/part_time',\n" +
                 "  `scope_json` json DEFAULT NULL COMMENT '范围JSON',\n" +
                 "  `currency` varchar(10) DEFAULT 'CNY',\n" +
+                "  `input_snapshot_json` json DEFAULT NULL COMMENT '薪资输入事实完整快照',\n" +
+                "  `rule_snapshot_json` json DEFAULT NULL COMMENT '薪资规则完整快照',\n" +
                 "  `status` varchar(20) DEFAULT 'draft',\n" +
                 "  `approval_workflow_id` bigint DEFAULT NULL,\n" +
                 "  `payment_batch_no` varchar(50) DEFAULT NULL,\n" +
+                "  `payment_status` varchar(32) DEFAULT NULL COMMENT '支付子域状态投影',\n" +
                 "  `remark` varchar(500) DEFAULT NULL,\n" +
                 "  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,\n" +
                 "  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n" +
@@ -321,10 +324,14 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "CREATE TABLE `payroll_line` (\n" +
                 "  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',\n" +
                 "  `batch_id` bigint NOT NULL COMMENT '批次ID',\n" +
+                "  `batch_revision` int NOT NULL DEFAULT '1' COMMENT '工资行所属批次版本号',\n" +
                 "  `employee_id` bigint NOT NULL COMMENT '员工ID',\n" +
                 "  `employment_type` varchar(20) NOT NULL COMMENT 'full_time/part_time',\n" +
                 "  `template_id` bigint DEFAULT NULL COMMENT '模板ID',\n" +
                 "  `items_snapshot_json` json DEFAULT NULL COMMENT '项快照JSON',\n" +
+                "  `input_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资输入事实快照摘要',\n" +
+                "  `rule_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资规则快照摘要',\n" +
+                "  `calculation_engine_version` varchar(64) DEFAULT NULL COMMENT '计算引擎版本',\n" +
                 "  `gross_amount` decimal(12,2) DEFAULT '0.00',\n" +
                 "  `tax_amount` decimal(12,2) DEFAULT '0.00',\n" +
                 "  `social_amount` decimal(12,2) DEFAULT '0.00',\n" +
@@ -339,7 +346,8 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  `deleted` tinyint(1) DEFAULT '0',\n" +
                 "  `version` int DEFAULT '0',\n" +
                 "  PRIMARY KEY (`id`),\n" +
-                "  KEY `idx_batch_employee` (`batch_id`,`employee_id`)\n" +
+                "  KEY `idx_batch_employee` (`batch_id`,`employee_id`),\n" +
+                "  KEY `idx_batch_revision_employee` (`batch_id`,`batch_revision`,`employee_id`)\n" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工资行';");
 
         // 6) payroll_adjustment
@@ -408,6 +416,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         // Payroll confirmation workflow columns
         migratePayrollConfirmationColumns();
         migratePayrollV21AggregateColumns();
+        migratePayrollRuleVersionColumns();
         // Approval workflow incremental columns
         migrateApprovalWorkflowColumns();
         log.info("DB migrations finished.");
@@ -851,10 +860,34 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "ALTER TABLE payroll_batch ADD COLUMN `calculation_status` varchar(32) DEFAULT 'draft' COMMENT '核算状态' AFTER `currency`");
         addColumnIfMissing("payroll_batch", "batch_revision",
                 "ALTER TABLE payroll_batch ADD COLUMN `batch_revision` int DEFAULT 1 COMMENT '业务批次版本号' AFTER `calculation_status`");
+        addColumnIfMissing("payroll_batch", "input_snapshot_hash",
+                "ALTER TABLE payroll_batch ADD COLUMN `input_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资输入事实快照摘要' AFTER `batch_revision`");
+        addColumnIfMissing("payroll_batch", "input_snapshot_json",
+                "ALTER TABLE payroll_batch ADD COLUMN `input_snapshot_json` json DEFAULT NULL COMMENT '薪资输入事实完整快照' AFTER `input_snapshot_hash`");
+        addColumnIfMissing("payroll_batch", "rule_snapshot_hash",
+                "ALTER TABLE payroll_batch ADD COLUMN `rule_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资规则快照摘要' AFTER `input_snapshot_hash`");
+        addColumnIfMissing("payroll_batch", "rule_snapshot_json",
+                "ALTER TABLE payroll_batch ADD COLUMN `rule_snapshot_json` json DEFAULT NULL COMMENT '薪资规则完整快照' AFTER `rule_snapshot_hash`");
+        addColumnIfMissing("payroll_batch", "calculation_engine_version",
+                "ALTER TABLE payroll_batch ADD COLUMN `calculation_engine_version` varchar(64) DEFAULT NULL COMMENT '计算引擎版本' AFTER `rule_snapshot_hash`");
+        addColumnIfMissing("payroll_batch", "payment_status",
+                "ALTER TABLE payroll_batch ADD COLUMN `payment_status` varchar(32) DEFAULT NULL COMMENT '支付子域状态投影' AFTER `payment_batch_no`");
+        addColumnIfMissing("payroll_line", "input_snapshot_hash",
+                "ALTER TABLE payroll_line ADD COLUMN `input_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资输入事实快照摘要' AFTER `items_snapshot_json`");
+        addColumnIfMissing("payroll_line", "batch_revision",
+                "ALTER TABLE payroll_line ADD COLUMN `batch_revision` int NOT NULL DEFAULT 1 COMMENT '工资行所属批次版本号' AFTER `batch_id`");
+        addColumnIfMissing("payroll_line", "rule_snapshot_hash",
+                "ALTER TABLE payroll_line ADD COLUMN `rule_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资规则快照摘要' AFTER `input_snapshot_hash`");
+        addColumnIfMissing("payroll_line", "calculation_engine_version",
+                "ALTER TABLE payroll_line ADD COLUMN `calculation_engine_version` varchar(64) DEFAULT NULL COMMENT '计算引擎版本' AFTER `rule_snapshot_hash`");
         addIndexIfMissing("payroll_batch", "idx_calculation_status",
                 "CREATE INDEX `idx_calculation_status` ON `payroll_batch` (`calculation_status`)");
         addIndexIfMissing("payroll_batch", "idx_batch_revision",
                 "CREATE INDEX `idx_batch_revision` ON `payroll_batch` (`batch_revision`)");
+        addIndexIfMissing("payroll_batch", "idx_payroll_payment_status",
+                "CREATE INDEX `idx_payroll_payment_status` ON `payroll_batch` (`payment_status`)");
+        addIndexIfMissing("payroll_line", "idx_batch_revision_employee",
+                "CREATE INDEX `idx_batch_revision_employee` ON `payroll_line` (`batch_id`, `batch_revision`, `employee_id`)");
         executeSqlSafely("UPDATE payroll_batch SET calculation_status = CASE " +
                 "WHEN status IN ('draft', 'locked') THEN status " +
                 "WHEN status = 'calculating' THEN 'calculating' " +
@@ -1064,6 +1097,68 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "WHEN status = 'failed' THEN 'failed' " +
                 "ELSE COALESCE(NULLIF(payment_status, ''), 'created') END " +
                 "WHERE payment_status IS NULL OR payment_status = ''");
+    }
+
+    private void migratePayrollRuleVersionColumns() {
+        createTableIfMissing("salary_template_version", """
+                CREATE TABLE `salary_template_version` (
+                  `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
+                  `template_id` bigint NOT NULL COMMENT '薪资规则包ID',
+                  `version_no` bigint NOT NULL COMMENT '规则包数据版本号',
+                  `name` varchar(100) NOT NULL COMMENT '规则包名称快照',
+                  `type` varchar(20) NOT NULL COMMENT '适用用工类型',
+                  `items_json` json DEFAULT NULL COMMENT '薪资项规则快照',
+                  `tax_rule_json` json DEFAULT NULL COMMENT '税社保规则快照',
+                  `status` varchar(20) DEFAULT 'disabled' COMMENT '生成快照时的规则包状态',
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  `create_by` varchar(50) DEFAULT NULL,
+                  `update_by` varchar(50) DEFAULT NULL,
+                  `deleted` tinyint(1) DEFAULT '0',
+                  `version` int DEFAULT '0',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_template_version` (`template_id`,`version_no`),
+                  KEY `idx_template_type_version` (`type`,`version_no`),
+                  KEY `idx_template_version_status` (`status`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪资规则包不可变版本快照'
+                """);
+
+        addColumnIfMissing("pay_cycle", "rule_template_id",
+                "ALTER TABLE pay_cycle ADD COLUMN `rule_template_id` bigint DEFAULT NULL COMMENT '绑定的薪资规则包ID' AFTER `type`");
+        addColumnIfMissing("pay_cycle", "rule_template_version",
+                "ALTER TABLE pay_cycle ADD COLUMN `rule_template_version` bigint DEFAULT NULL COMMENT '绑定的薪资规则包版本' AFTER `rule_template_id`");
+        addColumnIfMissing("payroll_batch", "rule_template_id",
+                "ALTER TABLE payroll_batch ADD COLUMN `rule_template_id` bigint DEFAULT NULL COMMENT '批次锁定的薪资规则包ID' AFTER `pay_cycle_id`");
+        addColumnIfMissing("payroll_batch", "rule_template_version",
+                "ALTER TABLE payroll_batch ADD COLUMN `rule_template_version` bigint DEFAULT NULL COMMENT '批次锁定的薪资规则包版本' AFTER `rule_template_id`");
+        addColumnIfMissing("payroll_line", "template_version",
+                "ALTER TABLE payroll_line ADD COLUMN `template_version` bigint DEFAULT NULL COMMENT '工资行使用的规则包版本' AFTER `template_id`");
+
+        addIndexIfMissing("pay_cycle", "idx_cycle_rule_template",
+                "CREATE INDEX `idx_cycle_rule_template` ON `pay_cycle` (`rule_template_id`, `rule_template_version`)");
+        addIndexIfMissing("payroll_batch", "idx_batch_rule_template",
+                "CREATE INDEX `idx_batch_rule_template` ON `payroll_batch` (`rule_template_id`, `rule_template_version`)");
+        addIndexIfMissing("payroll_line", "idx_line_template_version",
+                "CREATE INDEX `idx_line_template_version` ON `payroll_line` (`template_id`, `template_version`)");
+
+        executeSqlSafely("UPDATE salary_template SET data_version = 1 WHERE data_version IS NULL");
+        executeSqlSafely("INSERT INTO salary_template_version "
+                + "(template_id, version_no, name, type, items_json, tax_rule_json, status, create_time, update_time, create_by, update_by, deleted, version) "
+                + "SELECT st.id, COALESCE(st.data_version, 1), st.name, st.type, st.items_json, st.tax_rule_json, COALESCE(st.status, 'disabled'), "
+                + "st.create_time, st.update_time, st.create_by, st.update_by, COALESCE(st.deleted, 0), COALESCE(st.version, 0) "
+                + "FROM salary_template st WHERE NOT EXISTS (SELECT 1 FROM salary_template_version stv "
+                + "WHERE stv.template_id = st.id AND stv.version_no = COALESCE(st.data_version, 1))");
+        executeSqlSafely("UPDATE pay_cycle pc JOIN (SELECT pay_cycle_id, MIN(type) AS payroll_type "
+                + "FROM payroll_batch WHERE deleted = 0 AND pay_cycle_id IS NOT NULL GROUP BY pay_cycle_id "
+                + "HAVING COUNT(DISTINCT type) = 1) legacy ON legacy.pay_cycle_id = pc.id "
+                + "SET pc.type = legacy.payroll_type WHERE pc.deleted = 0 "
+                + "AND pc.type IN ('monthly', 'custom') "
+                + "AND legacy.payroll_type IN ('full_time', 'part_time', 'contractor')");
+        executeSqlSafely("UPDATE payroll_batch pb JOIN pay_cycle pc ON pc.id = pb.pay_cycle_id "
+                + "SET pb.rule_template_id = pc.rule_template_id, pb.rule_template_version = pc.rule_template_version "
+                + "WHERE pb.rule_template_id IS NULL AND pc.rule_template_id IS NOT NULL");
+        executeSqlSafely("UPDATE payroll_line pl JOIN salary_template st ON st.id = pl.template_id "
+                + "SET pl.template_version = COALESCE(st.data_version, 1) WHERE pl.template_version IS NULL");
     }
 
     private void migrateApprovalWorkflowColumns() {

@@ -8,6 +8,7 @@ import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.interfaces.dto.payroll.SalaryTemplateUpsertRequest;
 import com.yiyundao.compensation.modules.payroll.entity.SalaryTemplate;
 import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateService;
+import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateVersionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -26,15 +27,18 @@ import static org.mockito.Mockito.when;
 class SalaryTemplateControllerTest {
 
     private SalaryTemplateService salaryTemplateService;
+    private SalaryTemplateVersionService salaryTemplateVersionService;
     private SalaryTemplateController controller;
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
         salaryTemplateService = mock(SalaryTemplateService.class);
+        salaryTemplateVersionService = mock(SalaryTemplateVersionService.class);
+        when(salaryTemplateVersionService.save(any())).thenReturn(true);
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
-        controller = new SalaryTemplateController(salaryTemplateService, objectMapper);
+        controller = new SalaryTemplateController(salaryTemplateService, salaryTemplateVersionService, objectMapper);
     }
 
     @Test
@@ -166,6 +170,34 @@ class SalaryTemplateControllerTest {
         assertThat(response.getMessage()).contains("taxRuleJson.tax.rate必须在0到1之间",
                 "taxRuleJson.social.rate必须在0到1之间");
         verify(salaryTemplateService, never()).save(any(SalaryTemplate.class));
+    }
+
+    @Test
+    void publishShouldEnableAValidDisabledTemplate() {
+        SalaryTemplate template = template();
+        template.setStatus("disabled");
+        when(salaryTemplateService.getById(10L)).thenReturn(template);
+        when(salaryTemplateService.count(any())).thenReturn(0L);
+        when(salaryTemplateService.updateById(any(SalaryTemplate.class))).thenReturn(true);
+
+        var response = controller.publish(10L);
+
+        assertThat(response.getCode()).isZero();
+        assertThat(response.getData().getStatus()).isEqualTo("enabled");
+        verify(salaryTemplateService).updateById(template);
+    }
+
+    @Test
+    void publishShouldRejectAnotherEnabledTemplateForSameType() {
+        SalaryTemplate template = template();
+        template.setStatus("disabled");
+        when(salaryTemplateService.getById(10L)).thenReturn(template);
+        when(salaryTemplateService.count(any())).thenReturn(1L);
+
+        var response = controller.publish(10L);
+
+        assertThat(response.getCode()).isEqualTo(ErrorCode.REQUEST_CONFLICT.getCode());
+        verify(salaryTemplateService, never()).updateById(any(SalaryTemplate.class));
     }
 
     @Test

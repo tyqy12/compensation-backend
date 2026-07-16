@@ -4,16 +4,14 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.yiyundao.compensation.enums.BatchStatus;
-import com.yiyundao.compensation.enums.EmploymentType;
 import com.yiyundao.compensation.enums.PaymentBatchProcessStatus;
 import com.yiyundao.compensation.enums.PaymentStatus;
 import com.yiyundao.compensation.enums.PaymentType;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
-import com.yiyundao.compensation.enums.SettlementAccountType;
-import com.yiyundao.compensation.common.utils.SettlementAccountPlaintextGuard;
 import com.yiyundao.compensation.common.utils.ValidationUtils;
 import com.yiyundao.compensation.infrastructure.dao.EmployeeMapper;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
+import com.yiyundao.compensation.infrastructure.dao.PayrollDistributionItemMapper;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.payment.dto.PaymentBatchTransferValidationDto;
 import com.yiyundao.compensation.modules.payment.dto.TransferValidationIssueDto;
@@ -29,10 +27,13 @@ import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.modules.payment.service.SettlementProviderRoutingService;
 import com.yiyundao.compensation.modules.payment.service.SettlementService;
 import com.yiyundao.compensation.modules.payment.support.PaymentRecordStatusTransitions;
-import com.yiyundao.compensation.modules.payment.support.SettlementRouteProviderResolver;
+import com.yiyundao.compensation.modules.payment.support.SettlementRecipientRouteResolver;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollDistribution;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollDistributionItem;
+import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentFailureService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollDistributionService;
+import com.yiyundao.compensation.enums.PayrollDistributionItemStatus;
 import com.yiyundao.compensation.service.EncryptionService;
 import com.yiyundao.compensation.service.NotificationService;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionCallback;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.util.StringUtils;
 
 import jakarta.annotation.PostConstruct;
@@ -51,6 +55,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -70,9 +75,12 @@ public class SettlementServiceImpl implements SettlementService {
     private final NotificationService notificationService;
     private final EmployeeMapper employeeMapper;
     private final PayrollBatchMapper payrollBatchMapper;
+    private final PayrollDistributionItemMapper payrollDistributionItemMapper;
     private final SettlementProviderRoutingService routingService;
     private final EncryptionService encryptionService;
     private final ObjectProvider<PayrollDistributionService> payrollDistributionServiceProvider;
+    private final ObjectProvider<PayrollPaymentFailureService> payrollPaymentFailureServiceProvider;
+    private final ObjectProvider<PlatformTransactionManager> transactionManagerProvider;
 
     private Map<String, SettlementProvider> providerMap;
 
@@ -141,7 +149,19 @@ public class SettlementServiceImpl implements SettlementService {
         record.setStatus(PaymentStatus.PROCESSING);
 
         SettlementRequest request = buildRequest(record);
-        SettlementResult result = provider.singleTransfer(request);
+        SettlementResult result;
+        try {
+            result = provider.singleTransfer(request);
+        } catch (Exception ex) {
+            log.error("结算渠道调用异常: recordId={}, provider={}", record.getId(), providerCode, ex);
+            result = SettlementResult.builder()
+                    .success(false)
+                    .status(SettlementStatus.FAILED)
+                    .errorCode("PROVIDER_EXCEPTION")
+                    .errorMsg(safeErrorMessage(ex.getMessage(), "结算渠道调用异常"))
+                    .responseTime(LocalDateTime.now())
+                    .build();
+        }
         boolean updated = persistProviderResult(record, providerCode, result);
         if (updated) {
             notifyTerminalPaymentRecordFromResult(providerCode, record, result);
@@ -180,18 +200,53 @@ public class SettlementServiceImpl implements SettlementService {
         if (reconciledResult != null) {
             return reconciledResult;
         }
+        AtomicReference<PaymentBatch> claimedBatch = new AtomicReference<>();
+        PaymentBatch preparedBatch;
+        try {
+            preparedBatch = executeRetryPreparation(transactionStatus ->
+                    prepareRetrySubmission(record, batch, claimedBatch));
+        } catch (Exception ex) {
+            PaymentBatch batchToSettle = claimedBatch.get();
+            if (batchToSettle != null) {
+                PaymentBatch latestBatch = paymentBatchService.getByBatchNo(batchToSettle.getBatchNo());
+                settleBatchStatus(latestBatch != null ? latestBatch : batchToSettle, BatchStatus.PROCESSING);
+            }
+            throw ex;
+        }
+
+        SettlementResult result;
+        try {
+            result = singleTransfer(paymentRecordId);
+            if (shouldMarkRecordFailed(result)) {
+                markRecordFailedOnSubmitFailure(paymentRecordService.getById(paymentRecordId), result);
+            }
+        } catch (Exception ex) {
+            markRecordFailedOnException(paymentRecordService.getById(paymentRecordId), ex);
+            throw ex;
+        } finally {
+            if (preparedBatch != null) {
+                PaymentBatch latestBatch = paymentBatchService.getByBatchNo(preparedBatch.getBatchNo());
+                settleBatchStatus(latestBatch != null ? latestBatch : preparedBatch, BatchStatus.PROCESSING);
+            }
+        }
+        return result;
+    }
+
+    private PaymentBatch prepareRetrySubmission(PaymentRecord record,
+                                                PaymentBatch batch,
+                                                AtomicReference<PaymentBatch> claimedBatch) {
+        claimDistributionRecordRetry(batch, record);
         PayrollDistributionTransferCheck distributionCheck = validatePayrollDistributionForTransfer(batch);
         if (!distributionCheck.pass()) {
             throw new IllegalStateException(distributionCheck.message());
         }
 
-        boolean batchClaimed = false;
         if (batch != null) {
             LocalDateTime processStartTime = LocalDateTime.now();
-            batchClaimed = claimBatchForRecordRetry(batch, processStartTime);
-            if (!batchClaimed) {
+            if (!claimBatchForRecordRetry(batch, processStartTime)) {
                 throw new IllegalStateException("支付批次状态已变更，不能重试");
             }
+            claimedBatch.set(batch);
             batch.setStatus(BatchStatus.PROCESSING);
             batch.setPaymentStatus(PaymentBatchProcessStatus.PROCESSING);
             batch.setProcessStartTime(processStartTime);
@@ -211,32 +266,20 @@ public class SettlementServiceImpl implements SettlementService {
                 .set("alipay_order_no", null)
                 .set("alipay_trade_no", null));
         if (!reset) {
-            if (batchClaimed) {
-                PaymentBatch latestBatch = paymentBatchService.getByBatchNo(batch.getBatchNo());
-                settleBatchStatus(latestBatch != null ? latestBatch : batch, BatchStatus.PROCESSING);
-            }
             throw new IllegalStateException("支付记录状态已变更，不能重试");
         }
-        if (batchClaimed) {
+        if (claimedBatch.get() != null) {
             syncPayrollBatchProcessing(batch);
         }
+        return batch;
+    }
 
-        SettlementResult result;
-        try {
-            result = singleTransfer(paymentRecordId);
-            if (result == null || !result.isSuccess()) {
-                markRecordFailedOnSubmitFailure(paymentRecordService.getById(paymentRecordId), result);
-            }
-        } catch (Exception ex) {
-            markRecordFailedOnException(paymentRecordService.getById(paymentRecordId), ex);
-            throw ex;
-        } finally {
-            if (batch != null) {
-                PaymentBatch latestBatch = paymentBatchService.getByBatchNo(batch.getBatchNo());
-                settleBatchStatus(latestBatch != null ? latestBatch : batch, BatchStatus.PROCESSING);
-            }
+    private <T> T executeRetryPreparation(TransactionCallback<T> callback) {
+        PlatformTransactionManager transactionManager = transactionManagerProvider.getIfAvailable();
+        if (transactionManager == null) {
+            return callback.doInTransaction(null);
         }
-        return result;
+        return new TransactionTemplate(transactionManager).execute(callback);
     }
 
     private boolean claimBatchForRecordRetry(PaymentBatch batch, LocalDateTime processStartTime) {
@@ -257,6 +300,52 @@ public class SettlementServiceImpl implements SettlementService {
                 .set("payment_status", PaymentBatchProcessStatus.PROCESSING.getCode())
                 .set("process_start_time", processStartTime)
                 .set("process_end_time", null));
+    }
+
+    private void claimDistributionRecordRetry(PaymentBatch batch, PaymentRecord record) {
+        if (batch == null || batch.getDistributionId() == null || record == null || record.getId() == null) {
+            return;
+        }
+        PayrollDistributionService distributionService = payrollDistributionServiceProvider.getIfAvailable();
+        if (distributionService == null) {
+            throw new IllegalStateException("薪资发放服务不可用，无法校验记录重试次数");
+        }
+        PayrollDistribution distribution = distributionService.getById(batch.getDistributionId());
+        if (distribution == null) {
+            throw new IllegalStateException("关联薪资发放单不存在，无法重试支付记录");
+        }
+        List<PayrollDistributionItem> activeItems = distributionService.listActiveItems(distribution.getId());
+        if (activeItems == null || activeItems.isEmpty()) {
+            return;
+        }
+        PayrollDistributionItem item = activeItems.stream()
+                .filter(candidate -> record.getId().equals(candidate.getPaymentRecordId()))
+                .findFirst()
+                .orElse(null);
+        if (item == null) {
+            return;
+        }
+        int retryCount = item.getRetryCount() == null ? 0 : Math.max(item.getRetryCount(), 0);
+        int retryLimit = distribution.getRetryLimit() == null || distribution.getRetryLimit() < 1
+                ? 3
+                : distribution.getRetryLimit();
+        if (retryCount >= retryLimit) {
+            throw new IllegalStateException("该工资明细已达到最大重试次数: " + retryLimit);
+        }
+        if (item.getId() == null || item.getItemStatus() != PayrollDistributionItemStatus.FAILED) {
+            throw new IllegalStateException("工资明细状态已变更，不能重复重试");
+        }
+        boolean claimed = payrollDistributionItemMapper.update(null, new UpdateWrapper<PayrollDistributionItem>()
+                .eq("id", item.getId())
+                .eq("payment_record_id", record.getId())
+                .eq("item_status", PayrollDistributionItemStatus.FAILED.getCode())
+                .eq("retry_count", retryCount)
+                .set("item_status", PayrollDistributionItemStatus.RETRYING.getCode())
+                .set("retry_count", retryCount + 1)
+                .set("failure_reason", null)) > 0;
+        if (!claimed) {
+            throw new IllegalStateException("工资明细状态已变更，不能重试");
+        }
     }
 
     private SettlementResult reconcileExistingProviderOrderBeforeRetry(PaymentRecord record, PaymentBatch batch) {
@@ -443,6 +532,7 @@ public class SettlementServiceImpl implements SettlementService {
         PayrollDistributionTransferCheck distributionCheck = validatePayrollDistributionForTransfer(batch);
         if (!distributionCheck.pass()) {
             log.warn("薪资支付批次关联发放单不可启动转账: batchNo={}, reason={}", batchNo, distributionCheck.message());
+            markBatchTransferBlocked(batch, distributionCheck.message());
             return;
         }
 
@@ -464,7 +554,7 @@ public class SettlementServiceImpl implements SettlementService {
                 }
                 try {
                     SettlementResult result = singleTransfer(record.getId());
-                    if (result == null || !result.isSuccess()) {
+                    if (shouldMarkRecordFailed(result)) {
                         log.warn("批次转账提交失败: batchNo={}, recordId={}, provider={}, error={}",
                                 batchNo,
                                 record.getId(),
@@ -490,6 +580,29 @@ public class SettlementServiceImpl implements SettlementService {
                 .set("payment_status", PaymentBatchProcessStatus.PROCESSING.getCode())
                 .set("process_start_time", processStartTime)
                 .set("process_end_time", null));
+    }
+
+    private void markBatchTransferBlocked(PaymentBatch batch, String reason) {
+        if (batch == null || !StringUtils.hasText(batch.getBatchNo())) {
+            return;
+        }
+
+        List<PaymentRecord> records = paymentRecordService.getByBatchNo(batch.getBatchNo(), null);
+        if (records != null) {
+            for (PaymentRecord record : records) {
+                if (record == null
+                        || record.getId() == null
+                        || (record.getStatus() != PaymentStatus.PENDING
+                        && record.getStatus() != PaymentStatus.PROCESSING)
+                        || hasProviderOrder(record)) {
+                    continue;
+                }
+                markRecordFailed(record.getId(), record.getProviderCode(),
+                        "PAYROLL_DISTRIBUTION_INVALID",
+                        StringUtils.hasText(reason) ? reason : "薪资发放单校验失败，无法启动转账");
+            }
+        }
+        settleBatchStatus(batch, batch.getStatus());
     }
 
     private PayrollDistributionTransferCheck validatePayrollDistributionForTransfer(PaymentBatch paymentBatch) {
@@ -596,7 +709,9 @@ public class SettlementServiceImpl implements SettlementService {
                         + " AND pr.status IN ('failed', 'cancelled')"
                         + " AND ("
                         + "   (pr.provider_order_no IS NOT NULL AND pr.provider_order_no <> '')"
+                        + "   OR (pr.provider_trade_no IS NOT NULL AND pr.provider_trade_no <> '')"
                         + "   OR (pr.alipay_order_no IS NOT NULL AND pr.alipay_order_no <> '')"
+                        + "   OR (pr.alipay_trade_no IS NOT NULL AND pr.alipay_trade_no <> '')"
                         + " )")
                 .orderByDesc(PaymentBatch::getUpdateTime)
                 .last("limit " + batchLimit));
@@ -678,7 +793,7 @@ public class SettlementServiceImpl implements SettlementService {
                 record.getId(), record.getBatchNo());
         try {
             SettlementResult result = singleTransfer(record.getId());
-            if (result == null || !result.isSuccess()) {
+            if (shouldMarkRecordFailed(result)) {
                 markRecordFailedOnSubmitFailure(paymentRecordService.getById(record.getId()), result);
             }
         } catch (Exception ex) {
@@ -765,6 +880,12 @@ public class SettlementServiceImpl implements SettlementService {
                 || StringUtils.hasText(record.getAlipayTradeNo()));
     }
 
+    private boolean hasProviderOrder(PaymentRecord record) {
+        return record != null
+                && (StringUtils.hasText(resolveProviderOrderNo(record))
+                || hasProviderTradeNo(record));
+    }
+
     private Map<Long, Employee> buildEmployeeMap(List<PaymentRecord> records) {
         if (records == null || records.isEmpty()) {
             return Map.of();
@@ -820,13 +941,24 @@ public class SettlementServiceImpl implements SettlementService {
                     StringUtils.hasText(latest.getErrorCode()) ? latest.getErrorCode() : "STATUS_INVALID",
                     StringUtils.hasText(latest.getErrorMsg())
                             ? latest.getErrorMsg()
-                            : "记录状态不是待处理，禁止发起转账"
+                    : "记录状态不是待处理，禁止发起转账"
             );
+        }
+
+        if (hasProviderOrder(latest)) {
+            String errorCode = "PROVIDER_ORDER_EXISTS";
+            String errorMsg = "支付记录已有渠道订单或交易号，请先完成渠道对账";
+            if (persistFailure) {
+                markRecordFailed(latest.getId(), resolveProviderCode(latest), errorCode, errorMsg);
+            }
+            return buildValidationIssue(latest, employee, errorCode, errorMsg);
         }
 
         try {
             refreshRecipientRouteBeforeTransfer(latest);
         } catch (Exception ex) {
+            log.warn("支付记录收款路由刷新失败: recordId={}, employeeId={}, message={}",
+                    latest.getId(), latest.getEmployeeId(), ex.getMessage(), ex);
             PaymentRecord refreshed = paymentRecordService.getById(latest.getId());
             String errorCode = refreshed != null && StringUtils.hasText(refreshed.getErrorCode())
                     ? refreshed.getErrorCode()
@@ -1043,197 +1175,16 @@ public class SettlementServiceImpl implements SettlementService {
     }
 
     private RecipientRouteResult resolveRecipientRoute(PayrollBatch payrollBatch, Employee employee) {
-        if (employee == null) {
-            return RecipientRouteResult.failed("ACCOUNT_MISSING", "员工信息不存在");
-        }
-
-        String employmentType = resolveEmploymentType(payrollBatch, employee);
-        if (!StringUtils.hasText(employmentType)) {
-            return RecipientRouteResult.failed("EMPLOYMENT_TYPE_MISSING", "缺少用工类型，无法路由结算渠道");
-        }
-
-        String settlementType = normalizeSettlementType(employee.getSettlementAccountType());
-        AccountResolution settlementAccountResult = decryptAccount(employee.getSettlementAccount());
-        if (settlementAccountResult.decryptFailed()) {
-            return RecipientRouteResult.failed("ACCOUNT_DECRYPT_FAILED", "收款账号解密失败，请重新维护收款信息");
-        }
-        String settlementAccount = settlementAccountResult.value();
-        boolean hasConfiguredAccount = settlementAccountResult.configured();
-
-        if (!StringUtils.hasText(settlementAccount)) {
-            AccountResolution bankAccountResult = decryptAccount(employee.getBankAccount());
-            if (bankAccountResult.decryptFailed()) {
-                return RecipientRouteResult.failed("ACCOUNT_DECRYPT_FAILED", "收款账号解密失败，请重新维护收款信息");
-            }
-            hasConfiguredAccount = hasConfiguredAccount || bankAccountResult.configured();
-            if (StringUtils.hasText(bankAccountResult.value())) {
-                settlementAccount = bankAccountResult.value();
-                if (!StringUtils.hasText(settlementType)) {
-                    settlementType = SettlementAccountType.BANK_CARD.getCode();
-                }
-            }
-        }
-        if (!StringUtils.hasText(settlementType) && StringUtils.hasText(settlementAccount)) {
-            settlementType = inferSettlementType(settlementAccount);
-        }
-
-        if (!StringUtils.hasText(settlementAccount) && !hasConfiguredAccount) {
-            String fallbackAlipayAccount = resolveFallbackAlipayAccount(employee);
-            if (StringUtils.hasText(fallbackAlipayAccount)) {
-                settlementAccount = fallbackAlipayAccount;
-                settlementType = SettlementAccountType.ALIPAY.getCode();
-            }
-        }
-
-        if (!StringUtils.hasText(settlementAccount)) {
-            return RecipientRouteResult.failed("ACCOUNT_MISSING", "缺少收款账号（结算账户/银行卡/手机号/邮箱）");
-        }
-
-        String accountType = StringUtils.hasText(settlementType) ? settlementType : SettlementAccountType.BANK_CARD.getCode();
-        String paymentMethod = resolvePaymentMethod(accountType);
-
-        if (EmploymentType.PART_TIME.getCode().equals(employmentType)) {
-            if (!SettlementAccountType.ALIPAY.getCode().equals(accountType)) {
-                return RecipientRouteResult.failed(
-                        accountType,
-                        settlementAccount,
-                        paymentMethod,
-                        "yunzhanghu",
-                        "ACCOUNT_TYPE_UNSUPPORTED",
-                        "灵活用工仅支持支付宝收款账户"
-                );
-            }
-            return RecipientRouteResult.supported(accountType, settlementAccount, "ALIPAY", "yunzhanghu");
-        }
-
-        if (EmploymentType.FULL_TIME.getCode().equals(employmentType)) {
-            String providerCode = resolveFullTimeProviderCode(accountType, employee, payrollBatch);
-            if (SettlementAccountType.ALIPAY.getCode().equals(accountType)) {
-                return RecipientRouteResult.supported(accountType, settlementAccount, "ALIPAY", providerCode);
-            }
-            if (SettlementAccountType.BANK_CARD.getCode().equals(accountType)) {
-                return RecipientRouteResult.supported(accountType, settlementAccount, "BANK_CARD", providerCode);
-            }
-            return RecipientRouteResult.failed(
-                    accountType,
-                    settlementAccount,
-                    paymentMethod,
-                    "alipay",
-                    "ACCOUNT_TYPE_UNSUPPORTED",
-                    "全职用工仅支持支付宝或银行卡收款账户"
-            );
-        }
-
-        return RecipientRouteResult.failed(
-                accountType,
-                settlementAccount,
-                paymentMethod,
-                "unknown",
-                "EMPLOYMENT_TYPE_UNSUPPORTED",
-                "不支持的用工类型: " + employmentType
+        SettlementRecipientRouteResolver.RouteResult route = SettlementRecipientRouteResolver.resolve(
+                payrollBatch, null, employee, encryptionService, routingService);
+        return new RecipientRouteResult(
+                route.accountType(),
+                route.recipientAccount(),
+                route.paymentMethod(),
+                route.providerCode(),
+                route.errorCode(),
+                route.errorMsg()
         );
-    }
-
-    private String resolveFullTimeProviderCode(String accountType, Employee employee, PayrollBatch payrollBatch) {
-        if (SettlementAccountType.BANK_CARD.getCode().equals(accountType)) {
-            return SettlementRouteProviderResolver.resolveFullTimeProvider(accountType, "alipay");
-        }
-        try {
-            String routedProvider = routingService.determineProvider(employee, payrollBatch);
-            return SettlementRouteProviderResolver.resolveFullTimeProvider(accountType, routedProvider);
-        } catch (Exception ex) {
-            log.warn("结算渠道路由失败，使用员工/批次配置兜底: employeeId={}, msg={}",
-                    employee != null ? employee.getId() : null, ex.getMessage());
-            return SettlementRouteProviderResolver.resolveFullTimeProvider(accountType, employee, payrollBatch);
-        }
-    }
-
-    private String resolveEmploymentType(PayrollBatch payrollBatch, Employee employee) {
-        String rawEmploymentType = employee != null ? employee.getEmploymentType() : null;
-        if (!StringUtils.hasText(rawEmploymentType) && payrollBatch != null) {
-            rawEmploymentType = payrollBatch.getType();
-        }
-        return normalizeEmploymentType(rawEmploymentType);
-    }
-
-    private String normalizeEmploymentType(String employmentType) {
-        if (!StringUtils.hasText(employmentType)) {
-            return null;
-        }
-        String normalized = employmentType.trim().toLowerCase();
-        return switch (normalized) {
-            case "fulltime", "full-time", "full_time" -> EmploymentType.FULL_TIME.getCode();
-            case "parttime", "part-time", "part_time" -> EmploymentType.PART_TIME.getCode();
-            default -> normalized;
-        };
-    }
-
-    private String resolveFallbackAlipayAccount(Employee employee) {
-        if (employee == null) {
-            return null;
-        }
-        if (StringUtils.hasText(employee.getPhone())) {
-            return employee.getPhone().trim();
-        }
-        if (StringUtils.hasText(employee.getEmail())) {
-            return employee.getEmail().trim();
-        }
-        return null;
-    }
-
-    private String inferSettlementType(String account) {
-        if (!StringUtils.hasText(account)) {
-            return SettlementAccountType.BANK_CARD.getCode();
-        }
-        if (ValidationUtils.isValidPhone(account) || ValidationUtils.isValidEmail(account)) {
-            return SettlementAccountType.ALIPAY.getCode();
-        }
-        return SettlementAccountType.BANK_CARD.getCode();
-    }
-
-    private String normalizeSettlementType(String type) {
-        if (!StringUtils.hasText(type)) {
-            return null;
-        }
-        String normalized = type.trim().toLowerCase();
-        return switch (normalized) {
-            case "bank", "bankcard", "bank_card" -> SettlementAccountType.BANK_CARD.getCode();
-            case "alipay" -> SettlementAccountType.ALIPAY.getCode();
-            case "wechat", "weixin", "wx" -> SettlementAccountType.WECHAT.getCode();
-            case "other" -> SettlementAccountType.OTHER.getCode();
-            default -> normalized;
-        };
-    }
-
-    private String resolvePaymentMethod(String accountType) {
-        return switch (accountType) {
-            case "alipay" -> "ALIPAY";
-            case "bank_card" -> "BANK_CARD";
-            case "wechat" -> "WECHAT";
-            case "other" -> "OTHER";
-            default -> "UNKNOWN";
-        };
-    }
-
-    private AccountResolution decryptAccount(String encryptedValue) {
-        if (!StringUtils.hasText(encryptedValue)) {
-            return AccountResolution.missing();
-        }
-        try {
-            String plainAccount = encryptionService.decrypt(encryptedValue);
-            if (StringUtils.hasText(plainAccount)) {
-                return AccountResolution.resolved(plainAccount.trim());
-            }
-            log.warn("解密收款账户结果为空，阻断支付路由刷新");
-            return AccountResolution.failed();
-        } catch (Exception ex) {
-            if (SettlementAccountPlaintextGuard.isRecognizedPlainAccount(encryptedValue)) {
-                log.warn("解密收款账户失败，按历史明文账号兼容处理: {}", ex.getMessage());
-                return AccountResolution.resolved(encryptedValue.trim());
-            }
-            log.warn("解密收款账户失败，且原始值不像合法明文账号，阻断支付路由刷新: {}", ex.getMessage());
-            return AccountResolution.failed();
-        }
     }
 
     private String resolveProviderCode(PaymentRecord record) {
@@ -1331,20 +1282,35 @@ public class SettlementServiceImpl implements SettlementService {
     }
 
     private void settleBatchStatus(PaymentBatch batch, BatchStatus previousStatus) {
+        if (batch == null || batch.getId() == null || !StringUtils.hasText(batch.getBatchNo())) {
+            return;
+        }
+        BatchStatus expectedStatus = batch.getStatus();
+        Integer expectedVersion = batch.getVersion();
         List<PaymentRecord> allRecords = paymentRecordService.getByBatchNo(batch.getBatchNo(), null);
-        if (allRecords.isEmpty()) {
+        if (allRecords == null || allRecords.isEmpty()) {
             batch.setSuccessCount(0);
             batch.setFailedCount(0);
             batch.setStatus(BatchStatus.FAILED);
             batch.setPaymentStatus(PaymentBatchProcessStatus.FAILED);
             batch.setProcessEndTime(LocalDateTime.now());
-            paymentBatchService.update(new UpdateWrapper<PaymentBatch>()
+            UpdateWrapper<PaymentBatch> updateWrapper = new UpdateWrapper<PaymentBatch>()
                     .eq("id", batch.getId())
+                    .eq(expectedStatus != null, "status", expectedStatus == null ? null : expectedStatus.getCode())
+                    .eq(expectedVersion != null, "version", expectedVersion)
                     .set("success_count", 0)
                     .set("failed_count", 0)
                     .set("status", BatchStatus.FAILED.getCode())
                     .set("payment_status", PaymentBatchProcessStatus.FAILED.getCode())
-                    .set("process_end_time", batch.getProcessEndTime()));
+                    .set("process_end_time", batch.getProcessEndTime());
+            if (expectedVersion != null) {
+                updateWrapper.setSql("version = COALESCE(version, 0) + 1");
+            }
+            boolean updated = paymentBatchService.update(updateWrapper);
+            if (!updated) {
+                log.info("支付批次状态已被其他任务更新，跳过旧快照同步: batchNo={}", batch.getBatchNo());
+                return;
+            }
             syncPayrollBatchStatus(batch);
             syncDistributionStatus(batch);
             if (previousStatus != BatchStatus.FAILED) {
@@ -1395,13 +1361,24 @@ public class SettlementServiceImpl implements SettlementService {
         batch.setFailedCount(failedCount);
         batch.setStatus(targetStatus);
         batch.setPaymentStatus(mapPaymentBatchProcessStatus(targetStatus, successCount > 0 && failedCount > 0));
-        paymentBatchService.update(new UpdateWrapper<PaymentBatch>()
+        UpdateWrapper<PaymentBatch> updateWrapper = new UpdateWrapper<PaymentBatch>()
                 .eq("id", batch.getId())
+                .eq(expectedStatus != null, "status", expectedStatus == null ? null : expectedStatus.getCode())
+                .eq(expectedVersion != null, "version", expectedVersion)
                 .set("success_count", successCount)
                 .set("failed_count", failedCount)
                 .set("status", targetStatus.getCode())
                 .set("payment_status", mapPaymentBatchProcessStatus(targetStatus, successCount > 0 && failedCount > 0).getCode())
-                .set("process_end_time", batch.getProcessEndTime()));
+                .set("process_end_time", batch.getProcessEndTime());
+        if (expectedVersion != null) {
+            updateWrapper.setSql("version = COALESCE(version, 0) + 1");
+        }
+        boolean updated = paymentBatchService.update(updateWrapper);
+        if (!updated) {
+            log.info("支付批次状态已被其他任务更新，跳过旧快照同步: batchNo={}, expectedStatus={}",
+                    batch.getBatchNo(), expectedStatus);
+            return;
+        }
 
         if (isTerminalStatus(targetStatus)) {
             syncPayrollBatchStatus(batch);
@@ -1552,8 +1529,20 @@ public class SettlementServiceImpl implements SettlementService {
         UpdateWrapper<PayrollBatch> wrapper = new UpdateWrapper<PayrollBatch>()
                 .eq("payment_batch_no", paymentBatch.getBatchNo())
                 .in("status", PayrollBatchStatus.PAY_PROCESSING.getCode(), PayrollBatchStatus.PAY_FAILED.getCode())
+                .set("payment_status", mapPaymentBatchProcessStatus(status, partialSuccess).getCode())
                 .set("status", status == BatchStatus.COMPLETED && !partialSuccess ? "paid" : "pay_failed");
         payrollBatchMapper.update(null, wrapper);
+        PayrollPaymentFailureService failureService = payrollPaymentFailureServiceProvider.getIfAvailable();
+        if (failureService != null) {
+            if (status == BatchStatus.COMPLETED && !partialSuccess) {
+                failureService.markResolvedByPaymentBatchNo(paymentBatch.getBatchNo());
+            } else {
+                failureService.markUnresolvedByPaymentBatchNo(
+                        paymentBatch.getBatchNo(),
+                        partialSuccess ? "支付批次部分成功，仍有失败记录" : "支付批次支付失败"
+                );
+            }
+        }
     }
 
     private void syncPayrollBatchProcessing(PaymentBatch paymentBatch) {
@@ -1563,7 +1552,8 @@ public class SettlementServiceImpl implements SettlementService {
         payrollBatchMapper.update(null, new UpdateWrapper<PayrollBatch>()
                 .eq("payment_batch_no", paymentBatch.getBatchNo())
                 .in("status", PayrollBatchStatus.PAY_FAILED.getCode(), PayrollBatchStatus.PAY_PROCESSING.getCode())
-                .set("status", PayrollBatchStatus.PAY_PROCESSING.getCode()));
+                .set("status", PayrollBatchStatus.PAY_PROCESSING.getCode())
+                .set("payment_status", PaymentBatchProcessStatus.PROCESSING.getCode()));
     }
 
     private boolean persistProviderResult(PaymentRecord record, String providerCode, SettlementResult result) {
@@ -1593,6 +1583,14 @@ public class SettlementServiceImpl implements SettlementService {
             PaymentRecordStatusTransitions.applyAllowedStatusGuard(wrapper, paymentStatus);
         }
         return paymentRecordService.update(wrapper);
+    }
+
+    private boolean shouldMarkRecordFailed(SettlementResult result) {
+        if (result == null) {
+            return true;
+        }
+        PaymentStatus status = mapSettlementStatus(result.getStatus());
+        return status == PaymentStatus.FAILED || status == PaymentStatus.CANCELLED;
     }
 
     private void markRecordFailedOnSubmitFailure(PaymentRecord record, SettlementResult result) {
@@ -1681,42 +1679,8 @@ public class SettlementServiceImpl implements SettlementService {
             String errorCode,
             String errorMsg
     ) {
-        private static RecipientRouteResult supported(String accountType,
-                                                      String recipientAccount,
-                                                      String paymentMethod,
-                                                      String providerCode) {
-            return new RecipientRouteResult(accountType, recipientAccount, paymentMethod, providerCode, null, null);
-        }
-
-        private static RecipientRouteResult failed(String errorCode, String errorMsg) {
-            return new RecipientRouteResult(null, null, "UNKNOWN", "unknown", errorCode, errorMsg);
-        }
-
-        private static RecipientRouteResult failed(String accountType,
-                                                   String recipientAccount,
-                                                   String paymentMethod,
-                                                   String providerCode,
-                                                   String errorCode,
-                                                   String errorMsg) {
-            return new RecipientRouteResult(accountType, recipientAccount, paymentMethod, providerCode, errorCode, errorMsg);
-        }
-
         private boolean supported() {
             return StringUtils.hasText(recipientAccount) && !StringUtils.hasText(errorCode);
-        }
-    }
-
-    private record AccountResolution(String value, boolean configured, boolean decryptFailed) {
-        private static AccountResolution missing() {
-            return new AccountResolution(null, false, false);
-        }
-
-        private static AccountResolution resolved(String value) {
-            return new AccountResolution(value, true, false);
-        }
-
-        private static AccountResolution failed() {
-            return new AccountResolution(null, true, true);
         }
     }
 

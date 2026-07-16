@@ -5,6 +5,9 @@ import com.yiyundao.compensation.modules.payroll.entity.PayrollApprovalProjectio
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollDistribution;
 
+import java.time.LocalDateTime;
+import java.util.List;
+
 public interface PayrollApprovalProjectionService extends IService<PayrollApprovalProjection> {
 
     PayrollApprovalProjection createOrUpdatePending(PayrollBatch batch,
@@ -15,6 +18,8 @@ public interface PayrollApprovalProjectionService extends IService<PayrollApprov
     PayrollApprovalProjection getByDistributionId(Long distributionId);
 
     PayrollApprovalProjection getByWorkflowId(Long workflowId);
+
+    List<PayrollApprovalProjection> listStalePendingDistributionApprovals(LocalDateTime cutoff, int limit);
 
     void markApproved(Long workflowId, Long currentApproverId);
 

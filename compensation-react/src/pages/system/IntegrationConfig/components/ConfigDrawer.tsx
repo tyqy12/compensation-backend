@@ -6,26 +6,17 @@
  */
 
 import React, { useEffect } from 'react';
-import {
-  Drawer,
-  Space,
-  Button,
-  Divider,
-  Steps,
-  Alert,
-  Typography,
-} from 'antd';
+import { Alert, Button, Drawer, Space, Steps, Typography } from 'antd';
 import { ProForm, ProFormSwitch } from '@ant-design/pro-components';
+import { CheckCircleOutlined, ExperimentOutlined, SaveOutlined } from '@ant-design/icons';
 import {
   useIntegrationConfigQuery,
   useSaveIntegrationConfigMutation,
   useTestIntegrationMutation,
 } from '../../../../services/queries/integration';
-import type {
-  Platform,
-  SaveConfigRequest,
-} from '../../../../types/api';
-import { PLATFORM_INFO, STYLES } from '../constants';
+import type { Platform, SaveConfigRequest } from '../../../../types/api';
+import { PLATFORM_INFO } from '../constants';
+import StatusTag from './StatusTag';
 
 // 平台表单组件
 import WechatForm from './platform-forms/WechatForm';
@@ -45,11 +36,7 @@ interface ConfigDrawerProps {
   onClose: () => void;
 }
 
-const ConfigDrawer: React.FC<ConfigDrawerProps> = ({
-  platform,
-  open,
-  onClose,
-}) => {
+const ConfigDrawer: React.FC<ConfigDrawerProps> = ({ platform, open, onClose }) => {
   const [form] = ProForm.useForm<SaveConfigRequest>();
   const [currentStep, setCurrentStep] = React.useState(0);
 
@@ -95,7 +82,7 @@ const ConfigDrawer: React.FC<ConfigDrawerProps> = ({
       case 'encryption':
         return <EncryptionForm form={form} />;
       default:
-        return <Alert message="不支持的平台类型" type="error" />;
+        return <Alert title="不支持的平台类型" type="error" />;
     }
   };
 
@@ -134,114 +121,147 @@ const ConfigDrawer: React.FC<ConfigDrawerProps> = ({
     : [];
 
   const platformInfo = platform ? PLATFORM_INFO[platform] : null;
+  const connectionStatus = configQuery.data?.connectionStatus ?? 'unknown';
 
   return (
     <Drawer
+      rootClassName="integration-config-drawer"
       title={
-        platformInfo ? (
-          <Space>
-            {platformInfo.icon}
-            <span>配置 {platformInfo.name}</span>
-          </Space>
-        ) : (
-          '配置平台'
-        )
+        <div className="integration-drawer-title">
+          <div className="integration-drawer-platform-icon">{platformInfo?.icon}</div>
+          <div className="integration-drawer-title-copy">
+            <Text className="integration-eyebrow">PLATFORM CONFIGURATION</Text>
+            <Typography.Title level={4} className="integration-drawer-title-text">
+              {platformInfo ? `配置 ${platformInfo.name}` : '配置平台'}
+            </Typography.Title>
+            <Text type="secondary">
+              {platformInfo?.description ?? '填写并保存该平台的接入信息'}
+            </Text>
+          </div>
+          {platformInfo && <StatusTag status={connectionStatus} />}
+        </div>
       }
       open={open}
       onClose={onClose}
-      width={800}
-      destroyOnClose
+      size={800}
+      destroyOnHidden
       footer={
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          <Button onClick={onClose}>取消</Button>
-          <Button
-            onClick={handleTest}
-            loading={testMutation.isPending}
-            disabled={!platform}
-          >
-            测试连接
-          </Button>
-          <Button
-            type="primary"
-            onClick={() => form.submit()}
-            loading={saveMutation.isPending}
-          >
-            保存配置
-          </Button>
+        <div className="integration-drawer-footer">
+          <Text type="secondary">保存前建议先测试连接，配置变更会记录审计日志。</Text>
+          <Space>
+            <Button onClick={onClose}>取消</Button>
+            <Button
+              icon={<ExperimentOutlined />}
+              onClick={handleTest}
+              loading={testMutation.isPending}
+              disabled={!platform}
+            >
+              测试连接
+            </Button>
+            <Button
+              type="primary"
+              icon={<SaveOutlined />}
+              onClick={() => form.submit()}
+              loading={saveMutation.isPending}
+            >
+              保存配置
+            </Button>
+          </Space>
         </div>
       }
     >
-      {configQuery.isError && (
-        <Alert
-          type="error"
-          message="加载配置失败"
-          description={
-            configQuery.error instanceof Error
-              ? configQuery.error.message
-              : '请稍后重试'
-          }
-          showIcon
-          style={{ marginBottom: 16 }}
-        />
-      )}
-
-      {/* 复杂配置显示步骤条 */}
-      {isComplexPlatform && steps.length > 0 && (
-        <Steps
-          current={currentStep}
-          items={steps}
-          onChange={setCurrentStep}
-          style={{ marginBottom: 24 }}
-        />
-      )}
-
-      <ProForm<SaveConfigRequest>
-        form={form}
-        layout="vertical"
-        onFinish={async (values) => {
-          await handleSave(values);
-          onClose();
-          return true;
-        }}
-        submitter={false}
-        loading={configQuery.isLoading}
-      >
-        {/* 启用开关 */}
-        <div style={STYLES.formSection}>
-          <ProFormSwitch
-            name="enabled"
-            label="启用此配置"
-            tooltip="是否启用此平台的集成功能"
-            fieldProps={{
-              onChange: () => {
-                if (platform === 'encryption') {
-                  form.validateFields([
-                    ['encryption', 'aesKey'],
-                    ['encryption', 'sm4Key'],
-                  ]);
-                }
-              },
-            }}
+      <div className="integration-drawer-content">
+        {configQuery.isError && (
+          <Alert
+            className="integration-drawer-alert"
+            type="error"
+            title="加载配置失败"
+            description={
+              configQuery.error instanceof Error ? configQuery.error.message : '请稍后重试'
+            }
+            showIcon
           />
-        </div>
+        )}
 
-        <Divider orientation="left" style={{ marginLeft: 0 }}>
-          配置信息
-        </Divider>
+        <ProForm<SaveConfigRequest>
+          form={form}
+          layout="vertical"
+          className="integration-drawer-form"
+          onFinish={async (values) => {
+            await handleSave(values);
+            onClose();
+            return true;
+          }}
+          submitter={false}
+          loading={configQuery.isLoading}
+        >
+          <section className="integration-drawer-status-card">
+            <div className="integration-drawer-status-copy">
+              <div className="integration-drawer-status-icon">
+                <CheckCircleOutlined />
+              </div>
+              <div>
+                <Text strong>运行设置</Text>
+                <Text type="secondary">启用后，系统会在对应业务流程中调用该平台。</Text>
+              </div>
+            </div>
+            <ProFormSwitch
+              name="enabled"
+              label="启用此配置"
+              tooltip="是否启用此平台的集成功能"
+              fieldProps={{
+                onChange: () => {
+                  if (platform === 'encryption') {
+                    form.validateFields([
+                      ['encryption', 'aesKey'],
+                      ['encryption', 'sm4Key'],
+                    ]);
+                  }
+                },
+              }}
+            />
+          </section>
 
-        {/* 平台专属表单 */}
-        {renderPlatformForm()}
+          {isComplexPlatform && steps.length > 0 && (
+            <section className="integration-drawer-steps-section">
+              <div className="integration-drawer-section-heading">
+                <div>
+                  <Text className="integration-eyebrow">CONFIGURATION FLOW</Text>
+                  <Typography.Title level={5}>配置流程</Typography.Title>
+                </div>
+                <Text type="secondary">
+                  {currentStep + 1}/{steps.length}
+                </Text>
+              </div>
+              <Steps current={currentStep} items={steps} onChange={setCurrentStep} responsive />
+            </section>
+          )}
 
-        {/* 配置帮助 */}
-        <div style={STYLES.helpSection}>
-          <Text strong>配置帮助</Text>
-          <ul style={{ margin: '8px 0 0 0', paddingLeft: 20, fontSize: 13 }}>
-            <li>所有敏感信息将加密存储</li>
-            <li>配置变更将记录审计日志</li>
-            <li>建议定期更新密钥和凭证</li>
-          </ul>
-        </div>
-      </ProForm>
+          <section className="integration-drawer-form-section">
+            <div className="integration-drawer-section-heading">
+              <div>
+                <Text className="integration-eyebrow">CONFIGURATION</Text>
+                <Typography.Title level={5}>配置信息</Typography.Title>
+              </div>
+              <Text type="secondary">带 * 的字段为必填项</Text>
+            </div>
+
+            <div className="integration-platform-form">{renderPlatformForm()}</div>
+          </section>
+
+          <section className="integration-drawer-help">
+            <div className="integration-drawer-help-icon">?</div>
+            <div>
+              <Text strong>配置帮助</Text>
+              <ul>
+                <li>所有敏感信息将加密存储</li>
+                <li>配置变更将记录审计日志</li>
+                <li>建议定期更新密钥和凭证</li>
+              </ul>
+            </div>
+          </section>
+        </ProForm>
+      </div>
     </Drawer>
   );
 };

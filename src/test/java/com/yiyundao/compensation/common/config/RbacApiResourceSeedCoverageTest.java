@@ -283,6 +283,7 @@ class RbacApiResourceSeedCoverageTest {
                 new RouteSample("GET", "/api/payroll/distributions/2001"),
                 new RouteSample("GET", "/api/payroll/distributions/2001/items"),
                 new RouteSample("GET", "/api/payroll/distributions/2001/reconciliation"),
+                new RouteSample("POST", "/api/payroll/distributions/2001/retry"),
                 new RouteSample("GET", "/api/payroll/reconciliations"),
                 new RouteSample("GET", "/api/payroll/reconciliations/9001"),
                 new RouteSample("GET", "/api/payroll/payslips"),

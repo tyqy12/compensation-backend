@@ -425,7 +425,6 @@ const UserBindingPage: React.FC = () => {
         onOk={submitBindModal}
         confirmLoading={bindUserMutation.isPending}
         destroyOnHidden
-        forceRender
       >
         <Form form={bindForm} layout="vertical">
           <Form.Item
@@ -460,7 +459,6 @@ const UserBindingPage: React.FC = () => {
         onOk={submitEmployeeModal}
         confirmLoading={bindEmployeeMutation.isPending}
         destroyOnHidden
-        forceRender
       >
         <Form form={employeeForm} layout="vertical">
           <Form.Item

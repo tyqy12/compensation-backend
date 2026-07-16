@@ -86,11 +86,11 @@ class PayrollApprovalHandlerTest {
                 eq("薪资批次支付处理失败"),
                 contains("未创建支付批次"),
                 eq("PAYROLL_FAILURE:7001"));
-        verify(payrollPaymentFailureService, never()).markResolved(eq(7001L), eq((String) null));
+        verify(payrollPaymentFailureService, never()).markRetrying(eq(7001L), eq((String) null));
     }
 
     @Test
-    void onApprovalCompletedShouldResolveFailureWhenPaymentBatchCreated() {
+    void onApprovalCompletedShouldKeepFailureRetryingWhenPaymentBatchCreated() {
         ApprovalWorkflow workflow = new ApprovalWorkflow();
         workflow.setId(7002L);
         workflow.setBusinessType("payroll");
@@ -115,7 +115,7 @@ class PayrollApprovalHandlerTest {
 
         handler.onApprovalCompleted(event);
 
-        verify(payrollPaymentFailureService).markResolved(7002L, "PB-9002");
+        verify(payrollPaymentFailureService).markRetrying(7002L, "PB-9002");
         verify(payrollPaymentFailureService, never()).recordFailure(eq(7002L), eq(9002L), eq("payroll_batch:9002"), contains("失败"));
     }
 }

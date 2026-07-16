@@ -1,19 +1,20 @@
 /**
  * PlatformCard 组件
  *
- * 平台卡片组件，展示单个平台的配置状态和操作按钮
- * 遵循单一职责原则，专注于卡片展示和交互
+ * 平台条目组件，展示单个平台的配置状态和操作按钮
+ * 遵循单一职责原则，专注于平台展示和交互
  */
 
 import React from 'react';
-import { Card, Space, Tag, Typography, Switch, Descriptions, Button } from 'antd';
+import { Button, Switch, Tag, Typography } from 'antd';
 import {
-  SettingOutlined,
   ExperimentOutlined,
   GlobalOutlined,
+  PoweroffOutlined,
+  SettingOutlined,
 } from '@ant-design/icons';
 import type { IntegrationConfigListItem, Platform } from '../../../../types/api';
-import { PLATFORM_INFO, STYLES } from '../constants';
+import { PLATFORM_INFO } from '../constants';
 import StatusTag from './StatusTag';
 
 const { Text } = Typography;
@@ -51,29 +52,58 @@ const PlatformCard: React.FC<PlatformCardProps> = ({
   };
 
   return (
-    <Card
-      size="small"
-      style={STYLES.platformCard}
-      title={
-        <Space>
-          {platformInfo.icon}
-          <span>{platformInfo.name}</span>
-        </Space>
-      }
-      extra={<StatusTag status={item.connectionStatus} />}
-      actions={[
+    <article
+      className={`integration-platform-card ${item.configured ? 'is-configured' : 'is-unconfigured'}`}
+    >
+      <div className="integration-platform-card-header">
+        <div className="integration-platform-identity">
+          <div className="integration-platform-icon">{platformInfo.icon}</div>
+          <div className="integration-platform-copy">
+            <Text strong className="integration-platform-name">
+              {platformInfo.name}
+            </Text>
+            <Text type="secondary" className="integration-platform-description">
+              {platformInfo.description}
+            </Text>
+          </div>
+        </div>
+        <StatusTag status={item.connectionStatus} />
+      </div>
+
+      <div className="integration-platform-status-grid">
+        <div className="integration-platform-status-item">
+          <Text type="secondary">配置状态</Text>
+          <Tag color={item.configured ? 'success' : 'default'}>
+            {item.configured ? '已配置' : '未配置'}
+          </Tag>
+        </div>
+        <div className="integration-platform-status-item">
+          <Text type="secondary">启用状态</Text>
+          <div className="integration-platform-enabled">
+            <Switch size="small" checked={item.enabled} disabled />
+            <Text type="secondary">{item.enabled ? '已启用' : '未启用'}</Text>
+          </div>
+        </div>
+      </div>
+
+      <div className="integration-platform-meta">
+        <Text type="secondary">
+          {item.lastModified
+            ? `最近更新 ${new Date(item.lastModified).toLocaleDateString('zh-CN')}`
+            : '尚未记录更新时间'}
+        </Text>
+      </div>
+
+      <div className="integration-platform-actions">
         <Button
-          key="config"
-          type="link"
+          type="primary"
           size="small"
           icon={<SettingOutlined />}
           onClick={() => onConfig(item.platformType)}
         >
           配置
-        </Button>,
+        </Button>
         <Button
-          key="test"
-          type="link"
           size="small"
           icon={<ExperimentOutlined />}
           loading={testLoading}
@@ -81,48 +111,19 @@ const PlatformCard: React.FC<PlatformCardProps> = ({
           onClick={() => onTest(item.platformType)}
         >
           测试
-        </Button>,
+        </Button>
         <Button
-          key="disable"
-          type="link"
+          type="text"
           size="small"
+          icon={<PoweroffOutlined />}
           danger={item.enabled}
           disabled={!item.configured}
           onClick={handleDisableClick}
         >
           {item.enabled ? '禁用' : '启用'}
-        </Button>,
-      ]}
-    >
-      <div style={{ marginBottom: 8 }}>
-        <Text type="secondary" style={{ fontSize: 13 }}>
-          {platformInfo.description}
-        </Text>
+        </Button>
       </div>
-
-      <Descriptions size="small" column={1}>
-        <Descriptions.Item label="配置状态">
-          <Tag color={item.configured ? 'success' : 'default'} size="small">
-            {item.configured ? '已配置' : '未配置'}
-          </Tag>
-        </Descriptions.Item>
-        <Descriptions.Item label="启用状态">
-          <Space size={4}>
-            <Switch size="small" checked={item.enabled} disabled />
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {item.enabled ? '已启用' : '未启用'}
-            </Text>
-          </Space>
-        </Descriptions.Item>
-        {item.lastModified && (
-          <Descriptions.Item label="更新时间">
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {new Date(item.lastModified).toLocaleDateString('zh-CN')}
-            </Text>
-          </Descriptions.Item>
-        )}
-      </Descriptions>
-    </Card>
+    </article>
   );
 };
 

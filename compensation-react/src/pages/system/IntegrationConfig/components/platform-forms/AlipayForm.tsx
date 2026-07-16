@@ -22,10 +22,12 @@ const AlipayForm: React.FC<AlipayFormProps> = ({ form }) => {
   return (
     <>
       <Alert
-        message="支付宝配置说明"
+        title="支付宝配置说明"
         description={
           <div>
-            <p><strong>重要提示：</strong>转账功能必须使用证书模式！</p>
+            <p>
+              <strong>重要提示：</strong>转账功能必须使用证书模式！
+            </p>
             <p>1. 在支付宝开放平台下载三个证书文件</p>
             <p>2. 上传证书到服务器并填写绝对路径</p>
             <p>3. 密钥模式仅支持基础功能，不支持转账</p>
@@ -50,10 +52,10 @@ const AlipayForm: React.FC<AlipayFormProps> = ({ form }) => {
           onChange: (value) => {
             if (value === 'cert') {
               form.setFieldsValue({
-                alipay: { publicKey: undefined }
+                alipay: { publicKey: undefined },
               });
             }
-          }
+          },
         }}
       />
 
@@ -80,7 +82,7 @@ const AlipayForm: React.FC<AlipayFormProps> = ({ form }) => {
               <>
                 <Divider orientation="left">证书上传（推荐）</Divider>
                 <Alert
-                  message="证书上传说明"
+                  title="证书上传说明"
                   description="请直接上传从支付宝开放平台下载的三个证书文件，系统将自动保存到服务器并填写路径。"
                   type="info"
                   showIcon
@@ -115,7 +117,9 @@ const AlipayForm: React.FC<AlipayFormProps> = ({ form }) => {
                       certType="alipayRootCert"
                       label="支付宝根证书"
                       value={alipayRootCertPath}
-                      onChange={(value) => form.setFieldValue(['alipay', 'alipayRootCertPath'], value)}
+                      onChange={(value) =>
+                        form.setFieldValue(['alipay', 'alipayRootCertPath'], value)
+                      }
                     />
                   )}
                 </ProFormDependency>

@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: optional:file:./application-local.yml
   main:
     allow-circular-references: true
   # 数据库配置
@@ -20,7 +22,8 @@ spring:
       host: localhost
       port: 6379
       database: 0
-      password: ${REDIS_PASSWORD:}
+      # 支持 Spring Boot 标准变量，并兼容现有的 REDIS_PASSWORD 配置。
+      password: ${SPRING_DATA_REDIS_PASSWORD:${REDIS_PASSWORD:}}
       timeout: 5000ms
       lettuce:
         pool:
@@ -43,51 +46,12 @@ jwt:
   expiration: 86400000
   refresh-expiration: 604800000
 
-# Alipay配置（开发环境 - 沙箱）
-alipay:
-  app-id: your_sandbox_app_id
-  server-url: https://openapi.alipaydev.com/gateway.do
-  private-key: your_private_key
-  public-key: your_public_key
-  charset: UTF-8
-  sign-type: RSA2
-  format: json
-  notify-url: "http://localhost:${server.port:8080}/api/alipay/notify"
-  return-url: "http://localhost:${server.port:8080}/api/alipay/return"
-
-# 企业微信配置
-wechat:
-  corp-id: ${WECHAT_CORP_ID:your_corp_id}
-  corp-secret: ${WECHAT_CORP_SECRET:your_corp_secret}
-  agent-id: ${WECHAT_AGENT_ID:1000003}
-
-# 钉钉配置
-dingtalk:
-  app-key: your_app_key
-  app-secret: your_app_secret
-
-# 飞书配置
-feishu:
-  app-id: your_app_id
-  app-secret: your_app_secret
-
-# 短信配置
-sms:
-  access-key-id: your_access_key_id
-  access-key-secret: your_access_key_secret
-  sign-name: 薪酬助手
-  template-code: SMS_123456789
-
 # 加密配置
 encryption:
   sm4:
     key: your_sm4_key_32_chars_long_here
   aes:
     key: your_aes_key_32_chars_long_here
-
-migration:
-  runner:
-    enabled: false
 
 external-api:
   jwt:
@@ -96,10 +60,6 @@ external-api:
   rate-limit:
     per-minute: 600
     alert-cooldown-seconds: 300
-
-# OAuth 信任重定向域名（开发环境）
-oauth:
-  trusted-redirect-hosts: localhost:5173,127.0.0.1:5173,localhost:3000,127.0.0.1:3000
 
 legacy:
   platform-field:

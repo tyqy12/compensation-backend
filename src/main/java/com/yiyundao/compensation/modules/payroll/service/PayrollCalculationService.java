@@ -12,7 +12,7 @@ public interface PayrollCalculationService {
     /** 计算落地：根据批次模板与数据生成工资行并保存 */
     boolean computeAndSave(Long batchId);
 
-    /** 从批次与员工维度重算（可用于局部修正） */
+    /** 以新的批次 revision 重算完整工资结果集；employeeId 仅用于兼容旧的单行重算入口。 */
     boolean recomputeLine(Long batchId, Long employeeId);
 
     /** 校验批次可计算性（周期/模板/数据就绪） */

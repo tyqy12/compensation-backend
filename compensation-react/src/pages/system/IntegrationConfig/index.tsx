@@ -2,24 +2,25 @@
  * IntegrationConfig 页面
  *
  * 集成配置管理主页面
- * 采用分组卡片布局，参考 RoleList 设计模式
+ * 采用分类工作区布局，按平台类型切换配置场景
  *
  * 优化点：
  * 1. 组件拆分 - 将单文件拆分为多个职责单一的组件
- * 2. 分组展示 - 按功能分组展示平台卡片
+ * 2. 分类工作区 - 按功能切换展示平台卡片
  * 3. Drawer替代Modal - 提供更宽的编辑区域
  * 4. 提取常量 - 集中管理平台信息和样式
  */
 
-import React, { useState } from 'react';
-import { Button, Space, Card, Typography, App as AntdApp } from 'antd';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Alert, Button, Empty, Tabs, Typography, App as AntdApp } from 'antd';
+import { PageContainer } from '@ant-design/pro-components';
 import {
-  PageContainer,
-} from '@ant-design/pro-components';
-import {
+  CheckCircleOutlined,
+  GlobalOutlined,
+  PoweroffOutlined,
   ReloadOutlined,
+  SettingOutlined,
   SafetyCertificateOutlined,
-  InfoCircleOutlined,
 } from '@ant-design/icons';
 import {
   useIntegrationListQuery,
@@ -28,9 +29,10 @@ import {
   useTestIntegrationMutation,
 } from '../../../services/queries/integration';
 import type { Platform } from '../../../types/api';
-import { PLATFORM_GROUPS, STYLES } from './constants';
+import { PLATFORM_GROUPS, PLATFORM_INFO } from './constants';
 import PlatformGroup from './components/PlatformGroup';
 import ConfigDrawer from './components/ConfigDrawer';
+import './IntegrationConfig.less';
 
 const { Text } = Typography;
 
@@ -109,17 +111,69 @@ const IntegrationConfigPage: React.FC = () => {
     }
   };
 
-  // 获取平台名称
-  const getPlatformName = (platform: Platform): string => {
-    for (const group of PLATFORM_GROUPS) {
-      if (group.platforms.includes(platform)) {
-        // 从 PLATFORM_INFO 中查找名称
-        const platformInfo = require('./constants').PLATFORM_INFO[platform];
-        return platformInfo?.name || platform;
-      }
+  const getPlatformName = (platform: Platform): string => PLATFORM_INFO[platform]?.name || platform;
+  const integrationItems = listQuery.data ?? [];
+  const [activeGroupKey, setActiveGroupKey] = useState(PLATFORM_GROUPS[0]?.key ?? '');
+  const availableGroups = useMemo(
+    () =>
+      PLATFORM_GROUPS.filter((group) =>
+        integrationItems.some((item) => group.platforms.includes(item.platformType)),
+      ),
+    [integrationItems],
+  );
+
+  useEffect(() => {
+    if (
+      availableGroups.length > 0 &&
+      !availableGroups.some((group) => group.key === activeGroupKey)
+    ) {
+      setActiveGroupKey(availableGroups[0].key);
     }
-    return platform;
-  };
+  }, [activeGroupKey, availableGroups]);
+
+  const configuredCount = integrationItems.filter((item) => item.configured).length;
+  const enabledCount = integrationItems.filter((item) => item.enabled).length;
+  const connectedCount = integrationItems.filter(
+    (item) => item.connectionStatus === 'connected',
+  ).length;
+  const summaryItems = [
+    {
+      key: 'total',
+      label: '接入平台',
+      value: integrationItems.length,
+      suffix: '个',
+      hint: '系统当前支持的服务',
+      icon: <GlobalOutlined />,
+      className: 'is-blue',
+    },
+    {
+      key: 'configured',
+      label: '已完成配置',
+      value: configuredCount,
+      suffix: '个',
+      hint: '已填写必要接入信息',
+      icon: <CheckCircleOutlined />,
+      className: 'is-green',
+    },
+    {
+      key: 'enabled',
+      label: '已启用服务',
+      value: enabledCount,
+      suffix: '个',
+      hint: '当前参与业务调用',
+      icon: <PoweroffOutlined />,
+      className: 'is-amber',
+    },
+    {
+      key: 'connected',
+      label: '连接正常',
+      value: connectedCount,
+      suffix: '个',
+      hint: '最近一次测试通过',
+      icon: <SettingOutlined />,
+      className: 'is-teal',
+    },
+  ];
 
   return (
     <PageContainer
@@ -139,65 +193,107 @@ const IntegrationConfigPage: React.FC = () => {
       }}
       loading={listQuery.isLoading}
     >
-      {/* 使用说明 */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          backgroundColor: '#e6f7ff',
-          borderRadius: 4,
-          padding: '12px 16px',
-          marginBottom: 16,
-        }}
-      >
-        <InfoCircleOutlined
-          style={{ fontSize: 16, color: '#1890ff', marginRight: 8 }}
-        />
-        <Text style={{ fontSize: 14, color: '#1890ff' }}>
-          集成配置说明：配置各种第三方平台的接入信息，包括企业通讯平台、支付接口、通知服务等。配置完成后请务必进行连接测试以确保正常工作。
-        </Text>
-      </div>
-
-      {/* 平台分组展示 */}
-      <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        {PLATFORM_GROUPS.map((group) => (
-          <PlatformGroup
-            key={group.key}
-            group={group}
-            items={listQuery.data || []}
-            onConfig={handleConfig}
-            onTest={handleTest}
-            onDisable={handleDisable}
-            onEnable={handleEnable}
-            testLoading={testMutation.isPending}
+      <main className="integration-config-page">
+        {listQuery.isError && (
+          <Alert
+            className="integration-page-alert"
+            type="error"
+            showIcon
+            title="集成配置加载失败"
+            description={listQuery.error instanceof Error ? listQuery.error.message : '请稍后重试'}
           />
-        ))}
+        )}
 
-        {/* 安全提示 */}
-        <Card
-          size="small"
-          title={
-            <Space>
-              <SafetyCertificateOutlined />
-              <span>安全提示</span>
-            </Space>
-          }
+        <section className="integration-summary-grid" aria-label="集成状态统计">
+          {summaryItems.map((item) => (
+            <div className={`integration-summary-item ${item.className}`} key={item.key}>
+              <div className="integration-summary-icon">{item.icon}</div>
+              <div className="integration-summary-content">
+                <Text className="integration-summary-label">{item.label}</Text>
+                <div className="integration-summary-value">
+                  <span>{item.value}</span>
+                  <Text type="secondary">{item.suffix}</Text>
+                </div>
+                <Text type="secondary" className="integration-summary-hint">
+                  {item.hint}
+                </Text>
+              </div>
+            </div>
+          ))}
+        </section>
+
+        {!listQuery.isLoading && (integrationItems.length === 0 || availableGroups.length === 0) ? (
+          <section className="integration-empty-state">
+            <Empty description="暂无可配置的集成平台" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            <Button icon={<ReloadOutlined />} onClick={() => listQuery.refetch()}>
+              重新加载
+            </Button>
+          </section>
+        ) : (
+          <div className="integration-workspace">
+            <Tabs
+              className="integration-group-tabs"
+              activeKey={activeGroupKey}
+              onChange={setActiveGroupKey}
+              items={availableGroups.map((group) => {
+                const groupItems = integrationItems.filter((item) =>
+                  group.platforms.includes(item.platformType),
+                );
+                const groupConfiguredCount = groupItems.filter((item) => item.configured).length;
+
+                return {
+                  key: group.key,
+                  label: (
+                    <div className="integration-group-tab-label">
+                      <span className="integration-group-tab-icon">{group.icon}</span>
+                      <span className="integration-group-tab-copy">
+                        <span>{group.name}</span>
+                        <small>
+                          {groupConfiguredCount}/{groupItems.length} 已配置
+                        </small>
+                      </span>
+                    </div>
+                  ),
+                  children: (
+                    <PlatformGroup
+                      group={group}
+                      items={integrationItems}
+                      onConfig={handleConfig}
+                      onTest={handleTest}
+                      onDisable={handleDisable}
+                      onEnable={handleEnable}
+                      testLoading={testMutation.isPending}
+                    />
+                  ),
+                };
+              })}
+            />
+          </div>
+        )}
+
+        <section
+          className="integration-security-strip"
+          aria-labelledby="integration-security-title"
         >
-          <ul style={{ margin: 0, paddingLeft: 20 }}>
-            <li>所有敏感配置信息在数据库中均已加密存储</li>
-            <li>配置操作会记录详细的审计日志</li>
-            <li>建议定期更换密钥和凭证</li>
-            <li>生产环境必须使用HTTPS传输</li>
+          <div className="integration-security-icon">
+            <SafetyCertificateOutlined />
+          </div>
+          <div className="integration-security-copy">
+            <Text strong id="integration-security-title">
+              安全基线
+            </Text>
+            <Text type="secondary">敏感信息会加密存储，所有配置变更都会进入审计日志。</Text>
+          </div>
+          <ul className="integration-security-list">
+            <li>定期更换密钥</li>
+            <li>生产环境使用 HTTPS</li>
+            <li>启用前先测试连接</li>
           </ul>
-        </Card>
-      </Space>
+        </section>
+      </main>
 
       {/* 配置抽屉 */}
-      <ConfigDrawer
-        platform={selectedPlatform}
-        open={drawerOpen}
-        onClose={handleCloseDrawer}
-      />
+      <ConfigDrawer platform={selectedPlatform} open={drawerOpen} onClose={handleCloseDrawer} />
     </PageContainer>
   );
 };

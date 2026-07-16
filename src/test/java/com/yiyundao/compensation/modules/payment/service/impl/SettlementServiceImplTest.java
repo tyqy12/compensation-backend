@@ -3,13 +3,17 @@ package com.yiyundao.compensation.modules.payment.service.impl;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.conditions.SharedString;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.yiyundao.compensation.enums.BatchStatus;
 import com.yiyundao.compensation.enums.PaymentBatchProcessStatus;
 import com.yiyundao.compensation.infrastructure.dao.EmployeeMapper;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
+import com.yiyundao.compensation.infrastructure.dao.PayrollDistributionItemMapper;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
+import com.yiyundao.compensation.modules.payment.dto.TransferValidationIssueDto;
 import com.yiyundao.compensation.modules.payment.provider.SettlementCallbackResult;
 import com.yiyundao.compensation.modules.payment.provider.SettlementProvider;
 import com.yiyundao.compensation.modules.payment.provider.SettlementRequest;
@@ -20,20 +24,26 @@ import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.modules.payment.service.SettlementProviderRoutingService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollDistribution;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollDistributionItem;
+import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentFailureService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollDistributionService;
 import com.yiyundao.compensation.enums.PaymentType;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.enums.PaymentStatus;
+import com.yiyundao.compensation.enums.PayrollDistributionItemStatus;
 import com.yiyundao.compensation.service.EncryptionService;
 import com.yiyundao.compensation.service.NotificationService;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.transaction.PlatformTransactionManager;
 
 import java.lang.reflect.Field;
 import java.math.BigDecimal;
@@ -69,13 +79,29 @@ class SettlementServiceImplTest {
     @Mock
     private PayrollBatchMapper payrollBatchMapper;
     @Mock
+    private PayrollDistributionItemMapper payrollDistributionItemMapper;
+    @Mock
     private SettlementProviderRoutingService routingService;
     @Mock
     private EncryptionService encryptionService;
     @Mock
     private ObjectProvider<PayrollDistributionService> payrollDistributionServiceProvider;
+    @Mock
+    private ObjectProvider<PayrollPaymentFailureService> payrollPaymentFailureServiceProvider;
+    @Mock
+    private PayrollPaymentFailureService payrollPaymentFailureService;
+    @Mock
+    private ObjectProvider<PlatformTransactionManager> transactionManagerProvider;
 
     private SettlementServiceImpl settlementService;
+
+    @BeforeAll
+    static void initMybatisPlusLambdaCache() {
+        MybatisConfiguration configuration = new MybatisConfiguration();
+        MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, PaymentRecord.class.getName());
+        assistant.setCurrentNamespace(PaymentRecord.class.getName());
+        TableInfoHelper.initTableInfo(assistant, PaymentRecord.class);
+    }
 
     @BeforeEach
     void setUp() {
@@ -89,9 +115,12 @@ class SettlementServiceImplTest {
                 notificationService,
                 employeeMapper,
                 payrollBatchMapper,
+                payrollDistributionItemMapper,
                 routingService,
                 encryptionService,
-                payrollDistributionServiceProvider
+                payrollDistributionServiceProvider,
+                payrollPaymentFailureServiceProvider,
+                transactionManagerProvider
         );
         settlementService.initProviderMap();
     }
@@ -123,11 +152,14 @@ class SettlementServiceImplTest {
     }
 
     @Test
-    @DisplayName("工资单笔转账前重算路由不会覆盖全职支付宝账户配置渠道")
-    void singleTransferShouldKeepConfiguredProviderWhenRefreshingFullTimeAlipayRoute() {
+    @DisplayName("工资单笔转账前重算路由会将全职支付宝账户固定到支付宝渠道")
+    void singleTransferShouldUseAlipayWhenRefreshingFullTimeAlipayRoute() {
         PaymentRecord record = salaryRecord(5L, null, PaymentStatus.PENDING);
         record.setEmployeeId(1001L);
         record.setProviderCode("yunzhanghu");
+        PaymentRecord refreshedRecord = salaryRecord(5L, null, PaymentStatus.PENDING);
+        refreshedRecord.setEmployeeId(1001L);
+        refreshedRecord.setProviderCode("alipay");
         Employee employee = new Employee();
         employee.setId(1001L);
         employee.setName("张三");
@@ -136,13 +168,13 @@ class SettlementServiceImplTest {
         employee.setSettlementAccountType("alipay");
         employee.setSettlementProviderCode("yunzhanghu");
 
-        when(paymentRecordService.getById(5L)).thenReturn(record);
+        when(paymentRecordService.getById(5L)).thenReturn(record, record, refreshedRecord, refreshedRecord);
         when(employeeMapper.selectById(1001L)).thenReturn(employee);
         when(routingService.determineProvider(any(Employee.class), any())).thenReturn("yunzhanghu");
         when(paymentRecordService.update(any())).thenReturn(true);
-        when(yunzhanghuProvider.singleTransfer(any())).thenReturn(SettlementResult.builder()
+        when(alipayProvider.singleTransfer(any())).thenReturn(SettlementResult.builder()
                 .success(true)
-                .providerOrderNo("YZH_ROUTE_5")
+                .providerOrderNo("ALI_ROUTE_5")
                 .providerTradeNo("TRADE_ROUTE_5")
                 .status(SettlementStatus.SUCCESS)
                 .build());
@@ -150,8 +182,8 @@ class SettlementServiceImplTest {
         SettlementResult result = settlementService.singleTransfer(5L);
 
         assertTrue(result.isSuccess());
-        verify(yunzhanghuProvider).singleTransfer(any(SettlementRequest.class));
-        verify(alipayProvider, never()).singleTransfer(any());
+        verify(alipayProvider).singleTransfer(any(SettlementRequest.class));
+        verify(yunzhanghuProvider, never()).singleTransfer(any());
         ArgumentCaptor<Wrapper<PaymentRecord>> updateCaptor = ArgumentCaptor.forClass(Wrapper.class);
         verify(paymentRecordService, atLeastOnce()).update(updateCaptor.capture());
         List<String> updatedValues = updateCaptor.getAllValues().stream()
@@ -160,8 +192,8 @@ class SettlementServiceImplTest {
                 .flatMap(value -> ((Map<?, ?>) value).values().stream())
                 .map(String::valueOf)
                 .toList();
-        assertThat(updatedValues).contains("yunzhanghu");
-        assertThat(updatedValues).doesNotContain("alipay");
+        assertThat(updatedValues).contains("alipay");
+        assertThat(updatedValues).doesNotContain("yunzhanghu");
     }
 
     @Test
@@ -497,6 +529,39 @@ class SettlementServiceImplTest {
     }
 
     @Test
+    @DisplayName("工资明细达到重试上限时拒绝记录级重试")
+    void retryFailedRecordShouldRejectDistributionItemAtRetryLimit() {
+        PaymentRecord failedRecord = salaryRecord(3702L, "BATCH_RETRY_LIMIT", PaymentStatus.FAILED);
+        PaymentBatch batch = payrollPaymentBatch("BATCH_RETRY_LIMIT", 3702L);
+        batch.setStatus(BatchStatus.FAILED);
+
+        PayrollDistributionService distributionService = org.mockito.Mockito.mock(PayrollDistributionService.class);
+        PayrollDistribution distribution = payrollDistribution(3702L, 37L, 1);
+        distribution.setRetryLimit(1);
+        PayrollDistributionItem item = new PayrollDistributionItem();
+        item.setId(3703L);
+        item.setDistributionId(3702L);
+        item.setPaymentRecordId(3702L);
+        item.setItemStatus(PayrollDistributionItemStatus.FAILED);
+        item.setRetryCount(1);
+
+        when(paymentRecordService.getById(3702L)).thenReturn(failedRecord);
+        when(paymentBatchService.getByBatchNo("BATCH_RETRY_LIMIT")).thenReturn(batch);
+        when(payrollDistributionServiceProvider.getIfAvailable()).thenReturn(distributionService);
+        when(distributionService.getById(3702L)).thenReturn(distribution);
+        when(distributionService.listActiveItems(3702L)).thenReturn(List.of(item));
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> settlementService.retryFailedRecord(3702L));
+
+        assertThat(ex.getMessage()).contains("达到最大重试次数: 1");
+        verify(payrollDistributionItemMapper, never()).update(any(), any());
+        verify(paymentRecordService, never()).update(org.mockito.ArgumentMatchers.<Wrapper<PaymentRecord>>any());
+        verify(alipayProvider, never()).singleTransfer(any());
+        verify(yunzhanghuProvider, never()).singleTransfer(any());
+    }
+
+    @Test
     @DisplayName("失败记录重试进入处理中时同步薪酬批次为支付处理中")
     void retryFailedRecord_shouldMarkPayrollBatchProcessingWhenProviderReturnsProcessing() {
         PaymentRecord failedRecord = retryableRecord(34L, "BATCH_RETRY_PROCESSING",
@@ -739,6 +804,33 @@ class SettlementServiceImplTest {
 
         assertThat(validation.getPass()).isTrue();
         assertThat(validation.getBlockedCount()).isZero();
+    }
+
+    @Test
+    @DisplayName("预检发现待处理记录已有渠道标识时禁止再次下单")
+    void validateBatchForTransferShouldBlockPendingRecordWithProviderOrder() {
+        PaymentBatch batch = new PaymentBatch();
+        batch.setId(4111L);
+        batch.setBatchNo("BATCH_VALIDATE_PROVIDER_ORDER");
+        batch.setPaymentType(PaymentType.BONUS);
+        batch.setStatus(BatchStatus.SUBMITTED);
+
+        PaymentRecord record = retryableRecord(4112L, "BATCH_VALIDATE_PROVIDER_ORDER", PaymentStatus.PENDING);
+        record.setProviderOrderNo("ALI_PENDING_ORDER_4112");
+
+        when(paymentBatchService.getByBatchNo("BATCH_VALIDATE_PROVIDER_ORDER")).thenReturn(batch);
+        when(paymentRecordService.getByBatchNo("BATCH_VALIDATE_PROVIDER_ORDER", PaymentStatus.PENDING))
+                .thenReturn(List.of(record));
+        when(paymentRecordService.getById(4112L)).thenReturn(record);
+
+        var validation = settlementService.validateBatchForTransfer("BATCH_VALIDATE_PROVIDER_ORDER", false);
+
+        assertThat(validation.getPass()).isFalse();
+        assertThat(validation.getBlockedRecords()).singleElement()
+                .extracting(TransferValidationIssueDto::getErrorCode)
+                .isEqualTo("PROVIDER_ORDER_EXISTS");
+        verify(alipayProvider, never()).singleTransfer(any());
+        verify(yunzhanghuProvider, never()).singleTransfer(any());
     }
 
     @Test
@@ -1399,10 +1491,47 @@ class SettlementServiceImplTest {
                 .build());
         when(paymentRecordService.update(any())).thenReturn(true);
         when(paymentRecordService.getByBatchNo("BATCH_FAIL_NOTIFY_1", null)).thenReturn(List.of(failedRecord));
+        when(payrollPaymentFailureServiceProvider.getIfAvailable()).thenReturn(payrollPaymentFailureService);
 
         settlementService.batchTransfer("BATCH_FAIL_NOTIFY_1");
 
         verify(notificationService).sendPaymentFailedNotification(any(PaymentRecord.class));
+        verify(payrollPaymentFailureService).markUnresolvedByPaymentBatchNo(
+                "BATCH_FAIL_NOTIFY_1", "支付批次支付失败");
+    }
+
+    @Test
+    @DisplayName("完整成功后才会将支付补偿记录标记为已解决")
+    void batchTransferShouldResolveCompensationOnlyAfterFullSuccess() {
+        PaymentBatch batch = new PaymentBatch();
+        batch.setId(14L);
+        batch.setBatchNo("BATCH_SUCCESS_COMPENSATION");
+        batch.setStatus(BatchStatus.SUBMITTED);
+
+        PaymentRecord pendingRecord = salaryRecord(1401L, "BATCH_SUCCESS_COMPENSATION", PaymentStatus.PENDING);
+        pendingRecord.setProviderCode("alipay");
+        PaymentRecord successRecord = salaryRecord(1401L, "BATCH_SUCCESS_COMPENSATION", PaymentStatus.SUCCESS);
+        successRecord.setProviderCode("alipay");
+
+        when(paymentBatchService.getByBatchNo("BATCH_SUCCESS_COMPENSATION")).thenReturn(batch);
+        when(paymentBatchService.update(org.mockito.ArgumentMatchers.<Wrapper<PaymentBatch>>any())).thenReturn(true);
+        when(paymentRecordService.getByBatchNo("BATCH_SUCCESS_COMPENSATION", PaymentStatus.PENDING))
+                .thenReturn(List.of(pendingRecord));
+        when(paymentRecordService.getById(1401L)).thenReturn(pendingRecord, pendingRecord);
+        when(alipayProvider.singleTransfer(any())).thenReturn(SettlementResult.builder()
+                .success(true)
+                .status(SettlementStatus.SUCCESS)
+                .providerOrderNo("ALI_SUCCESS_1401")
+                .providerTradeNo("ALI_TRADE_1401")
+                .build());
+        when(paymentRecordService.update(any())).thenReturn(true);
+        when(paymentRecordService.getByBatchNo("BATCH_SUCCESS_COMPENSATION", null))
+                .thenReturn(List.of(successRecord));
+        when(payrollPaymentFailureServiceProvider.getIfAvailable()).thenReturn(payrollPaymentFailureService);
+
+        settlementService.batchTransfer("BATCH_SUCCESS_COMPENSATION");
+
+        verify(payrollPaymentFailureService).markResolvedByPaymentBatchNo("BATCH_SUCCESS_COMPENSATION");
     }
 
     @Test
@@ -1459,7 +1588,7 @@ class SettlementServiceImplTest {
 
         settlementService.batchTransfer("BATCH_STALE_DISTRIBUTION");
 
-        verify(paymentBatchService, never()).update(org.mockito.ArgumentMatchers.<Wrapper<PaymentBatch>>any());
+        verify(paymentBatchService).update(org.mockito.ArgumentMatchers.<Wrapper<PaymentBatch>>any());
         verify(paymentRecordService, never()).getByBatchNo("BATCH_STALE_DISTRIBUTION", PaymentStatus.PENDING);
         verify(alipayProvider, never()).singleTransfer(any());
         verify(yunzhanghuProvider, never()).singleTransfer(any());

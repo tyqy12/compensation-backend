@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Modal, Steps, Button, Space, Typography, Card, List, Tag } from 'antd';
+import { Modal, Steps, Button, Space, Typography, Card, Tag } from 'antd';
 import {
   UserOutlined,
   SettingOutlined,
@@ -45,27 +45,21 @@ const NewUserGuide: React.FC<NewUserGuideProps> = ({ visible, onClose }) => {
         <div>
           <Title level={4}>首先进行系统配置</Title>
           <Paragraph>在开始使用之前，建议您先完成以下配置：</Paragraph>
-          <List
-            size="small"
-            dataSource={[
+          <div className="guide-checklist">
+            {[
               { title: '集成配置', desc: '配置微信等第三方平台接入', urgent: true },
               { title: '组织同步', desc: '同步公司组织架构和部门信息', urgent: true },
               { title: '用户绑定', desc: '管理员工与平台账号的绑定关系', urgent: false },
-            ]}
-            renderItem={(item) => (
-              <List.Item>
-                <List.Item.Meta
-                  title={
-                    <Space>
-                      <Text>{item.title}</Text>
-                      {item.urgent && <Tag color="orange">建议优先</Tag>}
-                    </Space>
-                  }
-                  description={item.desc}
-                />
-              </List.Item>
-            )}
-          />
+            ].map((item) => (
+              <div className="guide-checklist-item" key={item.title}>
+                <div>
+                  <Text>{item.title}</Text>
+                  {item.urgent && <Tag color="orange">建议优先</Tag>}
+                </div>
+                <Text type="secondary">{item.desc}</Text>
+              </div>
+            ))}
+          </div>
         </div>
       ),
     },
@@ -101,7 +95,7 @@ const NewUserGuide: React.FC<NewUserGuideProps> = ({ visible, onClose }) => {
           <Title level={4}>薪酬支付流程</Title>
           <Paragraph>系统支持批量薪酬支付，流程简单高效：</Paragraph>
           <Steps
-            direction="vertical"
+            orientation="vertical"
             size="small"
             current={-1}
             items={[
@@ -122,47 +116,38 @@ const NewUserGuide: React.FC<NewUserGuideProps> = ({ visible, onClose }) => {
           <Title level={4}>准备就绪！</Title>
           <Paragraph>现在您已经了解了系统的主要功能。以下是建议的第一步操作：</Paragraph>
           <Card>
-            <List
-              size="small"
-              dataSource={[
+            <div className="guide-action-list">
+              {[
                 { title: '1. 配置系统集成', action: '前往系统配置', priority: 'high' },
                 { title: '2. 同步组织架构', action: '开始同步', priority: 'high' },
                 { title: '3. 查看员工列表', action: '检查员工信息', priority: 'medium' },
                 { title: '4. 创建第一个支付批次', action: '尝试支付功能', priority: 'low' },
-              ]}
-              renderItem={(item) => (
-                <List.Item
-                  actions={[
-                    <Button type="link" size="small" key="action">
-                      {item.action}
-                    </Button>,
-                  ]}
-                >
-                  <List.Item.Meta
-                    title={
-                      <Space>
-                        <Text>{item.title}</Text>
-                        <Tag
-                          color={
-                            item.priority === 'high'
-                              ? 'red'
-                              : item.priority === 'medium'
-                                ? 'orange'
-                                : 'green'
-                          }
-                        >
-                          {item.priority === 'high'
-                            ? '优先'
-                            : item.priority === 'medium'
-                              ? '建议'
-                              : '可选'}
-                        </Tag>
-                      </Space>
-                    }
-                  />
-                </List.Item>
-              )}
-            />
+              ].map((item) => (
+                <div className="guide-action-item" key={item.title}>
+                  <div>
+                    <Text>{item.title}</Text>
+                    <Tag
+                      color={
+                        item.priority === 'high'
+                          ? 'red'
+                          : item.priority === 'medium'
+                            ? 'orange'
+                            : 'green'
+                      }
+                    >
+                      {item.priority === 'high'
+                        ? '优先'
+                        : item.priority === 'medium'
+                          ? '建议'
+                          : '可选'}
+                    </Tag>
+                  </div>
+                  <Button type="link" size="small">
+                    {item.action}
+                  </Button>
+                </div>
+              ))}
+            </div>
           </Card>
         </div>
       ),

@@ -1,0 +1,338 @@
+.rules-page {
+  .rules-page-alert {
+    margin-bottom: 16px;
+  }
+
+  .rules-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .rules-search {
+    width: min(320px, 100%);
+  }
+
+  .rules-status-filter {
+    width: 140px;
+  }
+
+  .rules-workbench {
+    display: grid;
+    grid-template-columns: minmax(270px, 330px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+
+  .rules-index-panel,
+  .rules-detail-panel {
+    min-width: 0;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface);
+    box-shadow: var(--shadow-soft);
+  }
+
+  .rules-index-panel {
+    position: sticky;
+    top: 16px;
+    max-height: calc(100vh - 150px);
+    overflow: hidden;
+  }
+
+  .rules-panel-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .rules-panel-heading > div {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  .rules-panel-heading .ant-typography-secondary {
+    font-size: 12px;
+  }
+
+  .rules-index-list {
+    max-height: calc(100vh - 215px);
+    overflow-y: auto;
+  }
+
+  .rules-loading {
+    display: flex;
+    min-height: 180px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .rules-index-row {
+    display: flex;
+    width: 100%;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 13px 14px;
+    border: 0;
+    border-bottom: 1px solid var(--border-subtle);
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    text-align: left;
+    transition: background 120ms ease, border-color 120ms ease;
+  }
+
+  .rules-index-row:hover,
+  .rules-index-row.is-selected {
+    background: var(--surface-subtle);
+  }
+
+  .rules-index-row.is-selected {
+    border-left: 3px solid var(--primary);
+    padding-left: 11px;
+  }
+
+  .rules-index-row .ant-tag {
+    flex: 0 0 auto;
+    margin-inline-end: 0;
+  }
+
+  .rules-index-row-main {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .rules-index-row-title {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .rules-index-row-title strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rules-index-row-meta {
+    color: var(--muted);
+    font-size: 12px;
+  }
+
+  .rules-detail-panel {
+    min-height: 620px;
+    padding: 22px;
+  }
+
+  .rules-detail-header,
+  .rules-editor-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 18px;
+  }
+
+  .rules-detail-identity {
+    display: flex;
+    min-width: 0;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .rules-detail-identity .ant-typography {
+    margin: 0;
+  }
+
+  .rules-detail-identity .ant-typography-secondary {
+    display: block;
+    margin-top: 7px;
+    font-size: 12px;
+  }
+
+  .rules-detail-icon {
+    display: flex;
+    width: 40px;
+    height: 40px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: var(--primary);
+    font-size: 20px;
+  }
+
+  .rules-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin: 24px 0 18px;
+  }
+
+  .rules-metric {
+    display: flex;
+    min-width: 0;
+    min-height: 92px;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 13px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    background: var(--surface-subtle);
+  }
+
+  .rules-metric strong {
+    color: var(--ink);
+    font-size: 21px;
+  }
+
+  .rules-metric span {
+    overflow: hidden;
+    color: var(--muted);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rules-descriptions {
+    margin-top: 18px;
+  }
+
+  .rules-readonly-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .rules-readonly-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 12px 14px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+  }
+
+  .rules-readonly-row > div:first-child {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .rules-readonly-row .ant-typography-secondary {
+    font-size: 12px;
+  }
+
+  .rules-editor {
+    padding-top: 6px;
+  }
+
+  .rules-editor-heading {
+    align-items: center;
+    margin-bottom: 18px;
+  }
+
+  .rules-editor-heading .ant-typography {
+    margin: 0;
+  }
+
+  .rules-editor-heading .ant-typography-secondary {
+    display: block;
+    margin-top: 5px;
+    font-size: 12px;
+  }
+
+  .rules-editor-form {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(180px, 1fr) minmax(150px, 0.8fr);
+    gap: 12px;
+  }
+
+  .rules-editor-form .ant-form-item {
+    margin-bottom: 14px;
+  }
+
+  @media (max-width: 1100px) {
+    .rules-workbench {
+      grid-template-columns: minmax(235px, 280px) minmax(0, 1fr);
+    }
+
+    .rules-metric-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 760px) {
+    .rules-workbench {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .rules-index-panel {
+      position: static;
+      width: 100%;
+      max-height: none;
+    }
+
+    .rules-index-list {
+      max-height: 260px;
+    }
+
+    .rules-detail-panel {
+      width: 100%;
+      padding: 16px;
+    }
+
+    .rules-detail-header,
+    .rules-editor-heading {
+      flex-direction: column;
+    }
+
+    .rules-detail-header .ant-space,
+    .rules-editor-heading .ant-space {
+      width: 100%;
+    }
+
+    .rules-detail-header .ant-btn,
+    .rules-editor-heading .ant-btn {
+      flex: 1;
+    }
+
+    .rules-editor-form {
+      display: block;
+    }
+
+    .rules-readonly-row {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .rules-toolbar .ant-segmented {
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    .rules-status-filter,
+    .rules-toolbar > .ant-btn {
+      width: 100%;
+    }
+
+    .rules-metric-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+}

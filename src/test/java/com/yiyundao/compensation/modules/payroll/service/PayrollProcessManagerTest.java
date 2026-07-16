@@ -431,9 +431,81 @@ class PayrollProcessManagerTest {
         verify(reconciliationTaskService).createOrRefresh(argThat(updated ->
                 updated.getId().equals(55L)
                         && updated.getDistributionStatus() == PayrollDistributionStatus.FAILED));
-        verify(payrollBatchMapper, never()).selectById(10L);
+        verify(payrollBatchMapper).update(eq(null), any(UpdateWrapper.class));
         verify(paymentBatchService, never()).save(any(PaymentBatch.class));
         verify(paymentRecordService, never()).save(any(PaymentRecord.class));
+    }
+
+    @Test
+    void retryFailedDistributionShouldResetFailedItemsAndCreateNewPaymentBatch() {
+        PayrollProcessManager manager = newManager();
+        PayrollDistribution distribution = distribution();
+        distribution.setDistributionStatus(PayrollDistributionStatus.FAILED);
+        distribution.setCurrentAttempt(1);
+        distribution.setRetryLimit(1);
+        PayrollDistributionItem item = distributionItem();
+        item.setItemStatus(PayrollDistributionItemStatus.FAILED);
+        item.setRetryCount(0);
+        item.setPaymentRecordId(9002L);
+        PaymentRecord previousRecord = new PaymentRecord();
+        previousRecord.setId(9002L);
+        previousRecord.setStatus(PaymentStatus.FAILED);
+        PayrollBatch batch = payrollBatch();
+        batch.setStatus(PayrollBatchStatus.PAY_FAILED);
+        PayrollApprovalProjection projection = new PayrollApprovalProjection();
+        projection.setBusinessStatus("APPROVED");
+
+        when(distributionService.getById(55L)).thenReturn(distribution);
+        when(approvalProjectionService.getByDistributionId(55L)).thenReturn(projection);
+        when(payrollBatchMapper.selectById(10L)).thenReturn(batch);
+        when(distributionService.listActiveItems(55L)).thenReturn(List.of(item));
+        when(paymentRecordService.getById(9002L)).thenReturn(previousRecord);
+        when(distributionService.update(any(UpdateWrapper.class))).thenReturn(true);
+        when(payrollBatchMapper.update(eq(null), any(UpdateWrapper.class))).thenReturn(1);
+        when(paymentBatchService.save(any(PaymentBatch.class))).thenReturn(true);
+        when(encryptionService.decrypt("encrypted-account")).thenReturn("payee@example.com");
+        when(paymentRecordService.save(any(PaymentRecord.class))).thenAnswer(invocation -> {
+            PaymentRecord record = invocation.getArgument(0);
+            record.setId(9102L);
+            return true;
+        });
+
+        PaymentBatch result = manager.retryFailedDistribution(55L);
+
+        assertThat(result).isNotNull();
+        assertThat(result.getBatchNo()).startsWith("PDS-55-A2-");
+        verify(distributionItemMapper, times(2)).updateById(any(PayrollDistributionItem.class));
+        verify(afterCommitExecutor).execute(any(Runnable.class));
+    }
+
+    @Test
+    void retryFailedDistributionShouldRejectItemsAtRetryLimit() {
+        PayrollProcessManager manager = newManager();
+        PayrollDistribution distribution = distribution();
+        distribution.setDistributionStatus(PayrollDistributionStatus.FAILED);
+        distribution.setCurrentAttempt(1);
+        distribution.setRetryLimit(1);
+        PayrollDistributionItem item = distributionItem();
+        item.setItemStatus(PayrollDistributionItemStatus.FAILED);
+        item.setRetryCount(1);
+
+        PayrollApprovalProjection projection = new PayrollApprovalProjection();
+        projection.setBusinessStatus("APPROVED");
+        PayrollBatch batch = payrollBatch();
+        batch.setStatus(PayrollBatchStatus.PAY_FAILED);
+
+        when(distributionService.getById(55L)).thenReturn(distribution);
+        when(distributionService.listActiveItems(55L)).thenReturn(List.of(item));
+        when(approvalProjectionService.getByDistributionId(55L)).thenReturn(projection);
+        when(payrollBatchMapper.selectById(10L)).thenReturn(batch);
+
+        assertThatThrownBy(() -> manager.retryFailedDistribution(55L))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("没有可重试的失败明细");
+
+        verify(distributionItemMapper, never()).updateById(any(PayrollDistributionItem.class));
+        verify(distributionService, never()).update(any(UpdateWrapper.class));
+        verify(paymentBatchService, never()).save(any(PaymentBatch.class));
     }
 
     @Test
@@ -465,6 +537,34 @@ class PayrollProcessManagerTest {
         verify(transactionOperations).execute(any());
         verify(paymentBatchService).save(any(PaymentBatch.class));
         verify(afterCommitExecutor).execute(any(Runnable.class));
+    }
+
+    @Test
+    void submitDueDistributionsShouldMarkSubmissionFailureForManualRetry() {
+        PayrollProcessManager manager = newManager();
+        PayrollDistribution distribution = distribution();
+        distribution.setScheduledDate(java.time.LocalDate.now());
+        PayrollApprovalProjection projection = new PayrollApprovalProjection();
+        projection.setBusinessStatus("APPROVED");
+
+        when(distributionService.list(org.mockito.ArgumentMatchers.<Wrapper<PayrollDistribution>>any()))
+                .thenReturn(List.of(distribution));
+        when(approvalProjectionService.getByDistributionId(55L)).thenReturn(projection);
+        when(distributionService.getById(55L)).thenReturn(distribution);
+        when(distributionService.listActiveItems(55L))
+                .thenThrow(new IllegalStateException("submission persistence failed"));
+        when(payrollBatchMapper.update(eq(null), any(UpdateWrapper.class))).thenReturn(1);
+        when(transactionOperations.execute(any())).thenAnswer(invocation -> {
+            TransactionCallback<?> callback = invocation.getArgument(0);
+            return callback.doInTransaction(org.mockito.Mockito.mock(TransactionStatus.class));
+        });
+
+        manager.submitDueDistributions();
+
+        assertThat(distribution.getDistributionStatus()).isEqualTo(PayrollDistributionStatus.FAILED);
+        verify(distributionService).updateById(distribution);
+        verify(reconciliationTaskService).createOrRefresh(distribution);
+        verify(transactionOperations, times(2)).execute(any());
     }
 
     @Test
@@ -507,7 +607,7 @@ class PayrollProcessManagerTest {
         verify(afterCommitExecutor).execute(runnableCaptor.capture());
 
         assertThatCode(runnableCaptor.getValue()::run).doesNotThrowAnyException();
-        verify(transactionOperations).execute(any());
+        verify(transactionOperations, times(2)).execute(any());
     }
 
     @Test

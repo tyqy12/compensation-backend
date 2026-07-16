@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Slf4j
 @Service
@@ -65,6 +66,11 @@ public class PayrollApprovalProjectionServiceImpl
         return getOne(new LambdaQueryWrapper<PayrollApprovalProjection>()
                 .eq(PayrollApprovalProjection::getWorkflowId, workflowId)
                 .last("limit 1"));
+    }
+
+    @Override
+    public List<PayrollApprovalProjection> listStalePendingDistributionApprovals(LocalDateTime cutoff, int limit) {
+        return baseMapper.selectStalePendingDistributionApprovals(cutoff, limit);
     }
 
     @Override

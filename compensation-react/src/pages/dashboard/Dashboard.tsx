@@ -1,18 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import {
-  Card,
-  Statistic,
-  Row,
-  Col,
-  Typography,
-  Avatar,
-  List,
-  Tag,
-  Button,
-  Space,
-  Alert,
-} from 'antd';
-import { Link } from 'react-router-dom';
+import { Card, Statistic, Typography, Avatar, Tag, Button, Alert, Progress } from 'antd';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   TeamOutlined,
   WalletOutlined,
@@ -29,6 +17,7 @@ import {
   RiseOutlined,
   ArrowUpOutlined,
   ArrowDownOutlined,
+  ArrowRightOutlined,
   QuestionCircleOutlined,
 } from '@ant-design/icons';
 import NewUserGuide from '@components/Dashboard/NewUserGuide';
@@ -38,6 +27,7 @@ import {
   useDashboardTodosQuery,
   useDashboardActivitiesQuery,
 } from '@services/queries/dashboard';
+import './Dashboard.less';
 
 const { Title, Text } = Typography;
 
@@ -111,6 +101,21 @@ const getStatusTagColor = (status: string) => {
   }
 };
 
+const getStatusProgressColor = (status: string) => {
+  switch (getStatusTagColor(status)) {
+    case 'green':
+      return 'var(--success)';
+    case 'blue':
+      return 'var(--primary)';
+    case 'orange':
+      return 'var(--warning)';
+    case 'red':
+      return 'var(--danger)';
+    default:
+      return 'var(--muted-light)';
+  }
+};
+
 const getOverallStatusType = (status: string | undefined) => {
   const normalized = status?.toLowerCase?.() ?? status;
   switch (normalized) {
@@ -130,8 +135,25 @@ const formatTodoDue = (due: string) => {
   return due.startsWith('截止') ? due : `截止时间: ${due}`;
 };
 
+const DashboardSectionHeader: React.FC<{
+  title: string;
+  subtitle?: string;
+  extra?: React.ReactNode;
+}> = ({ title, subtitle, extra }) => (
+  <div className="dashboard-panel-heading">
+    <div>
+      <Typography.Title level={4} className="dashboard-panel-title">
+        {title}
+      </Typography.Title>
+      {subtitle && <Typography.Text type="secondary">{subtitle}</Typography.Text>}
+    </div>
+    {extra && <div className="dashboard-panel-extra">{extra}</div>}
+  </div>
+);
+
 const Dashboard: React.FC = () => {
   const [showGuide, setShowGuide] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const hasCompletedGuide = localStorage.getItem('user_guide_completed');
@@ -157,12 +179,48 @@ const Dashboard: React.FC = () => {
   const todoCount = todos.length;
 
   const quickActions = [
-    { title: '新建支付批次', icon: <PlusOutlined />, href: '/payments/batches', color: '#1890ff' },
-    { title: '员工管理', icon: <TeamOutlined />, href: '/employees', color: '#52c41a' },
-    { title: '用户绑定', icon: <UserSwitchOutlined />, href: '/admin/user-binding', color: '#722ed1' },
-    { title: '系统配置', icon: <SettingOutlined />, href: '/system/integration', color: '#fa8c16' },
-    { title: '组织同步', icon: <SyncOutlined />, href: '/system/org-sync', color: '#13c2c2' },
-    { title: '查看报告', icon: <EyeOutlined />, href: '/reports', color: '#eb2f96' },
+    {
+      title: '新建支付批次',
+      description: '创建并跟踪发放流程',
+      icon: <PlusOutlined />,
+      href: '/payments/batches',
+      color: 'var(--primary)',
+    },
+    {
+      title: '员工管理',
+      description: '维护员工资料',
+      icon: <TeamOutlined />,
+      href: '/employees',
+      color: 'var(--success)',
+    },
+    {
+      title: '用户绑定',
+      description: '处理平台账号绑定',
+      icon: <UserSwitchOutlined />,
+      href: '/admin/user-binding',
+      color: 'var(--violet)',
+    },
+    {
+      title: '系统配置',
+      description: '管理第三方集成',
+      icon: <SettingOutlined />,
+      href: '/system/integration',
+      color: 'var(--warning)',
+    },
+    {
+      title: '组织同步',
+      description: '同步组织架构',
+      icon: <SyncOutlined />,
+      href: '/system/org-sync',
+      color: 'var(--teal)',
+    },
+    {
+      title: '查看报告',
+      description: '查看业务数据',
+      icon: <EyeOutlined />,
+      href: '/reports',
+      color: 'var(--danger)',
+    },
   ];
 
   const metricCards = [
@@ -171,9 +229,10 @@ const Dashboard: React.FC = () => {
       title: '员工总数',
       value: metrics?.employeeTotal ?? 0,
       suffix: '人',
-      prefix: <TeamOutlined style={{ color: '#1890ff' }} />,
+      prefix: <TeamOutlined />,
       precision: 0,
-      valueStyle: { color: '#1890ff' },
+      valueStyle: { color: 'var(--primary)' },
+      accent: 'var(--primary)',
       change: metrics?.employeeGrowthRate ?? 0,
     },
     {
@@ -181,9 +240,10 @@ const Dashboard: React.FC = () => {
       title: '本月支付',
       value: metrics?.monthlyPaymentAmount ?? 0,
       suffix: '元',
-      prefix: <WalletOutlined style={{ color: '#52c41a' }} />,
+      prefix: <WalletOutlined />,
       precision: 2,
-      valueStyle: { color: '#52c41a' },
+      valueStyle: { color: 'var(--teal)' },
+      accent: 'var(--teal)',
       change: metrics?.monthlyPaymentGrowthRate ?? 0,
     },
     {
@@ -191,9 +251,10 @@ const Dashboard: React.FC = () => {
       title: '待处理批次',
       value: metrics?.pendingBatchCount ?? 0,
       suffix: '个',
-      prefix: <ClockCircleOutlined style={{ color: '#faad14' }} />,
+      prefix: <ClockCircleOutlined />,
       precision: 0,
-      valueStyle: { color: '#faad14' },
+      valueStyle: { color: 'var(--warning)' },
+      accent: 'var(--warning)',
       change: metrics?.pendingBatchChangeRate ?? 0,
     },
     {
@@ -201,69 +262,62 @@ const Dashboard: React.FC = () => {
       title: '用户绑定率',
       value: metrics?.userBindingRate ?? 0,
       suffix: '%',
-      prefix: <UserSwitchOutlined style={{ color: '#722ed1' }} />,
+      prefix: <UserSwitchOutlined />,
       precision: 1,
-      valueStyle: { color: '#722ed1' },
+      valueStyle: { color: 'var(--violet)' },
+      accent: 'var(--violet)',
       change: metrics?.userBindingGrowthRate ?? 0,
     },
   ];
 
-  const smallScreen = typeof window !== 'undefined' && window.innerWidth < 576;
-  const mediumScreen = typeof window !== 'undefined' && window.innerWidth < 768;
-
   return (
-    <div
-      style={{
-        padding: mediumScreen ? '16px' : '24px',
-        backgroundColor: '#f5f5f5',
-        minHeight: '100vh',
-      }}
-    >
+    <main className="dashboard-page">
       {metricsQuery.isError && (
         <Alert
           type="error"
           showIcon
-          message="指标数据加载失败"
+          title="指标数据加载失败"
           description={getErrorMessage(metricsQuery.error)}
-          style={{ marginBottom: 16 }}
+          className="dashboard-page-alert"
         />
       )}
 
-      <div
-        style={{
-          marginBottom: '24px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-          flexDirection: smallScreen ? 'column' : 'row',
-          gap: smallScreen ? '12px' : '0',
-        }}
-      >
-        <div style={{ flex: 1 }}>
-          <Title level={smallScreen ? 3 : 2} style={{ margin: 0, marginBottom: '8px' }}>
-            早上好，管理员 👋
+      <section className="dashboard-hero" aria-labelledby="dashboard-title">
+        <div className="dashboard-hero-copy">
+          <Text className="dashboard-eyebrow">薪酬运营中心</Text>
+          <Title level={2} id="dashboard-title" className="dashboard-title">
+            早上好，管理员
           </Title>
-          <Text type="secondary" style={{ fontSize: smallScreen ? '14px' : '16px' }}>
-            今天是 {new Date().toLocaleDateString('zh-CN', {
+          <Text type="secondary" className="dashboard-subtitle">
+            今天是{' '}
+            {new Date().toLocaleDateString('zh-CN', {
               year: 'numeric',
               month: 'long',
               day: 'numeric',
               weekday: 'long',
-            })}，您有 {todoCount} 项待办事项需要处理
+            })}
+            ，当前有 <Text strong>{todoCount} 项待办</Text> 需要处理
           </Text>
         </div>
-        <Button
-          type="default"
-          icon={<QuestionCircleOutlined />}
-          onClick={() => setShowGuide(true)}
-          size={smallScreen ? 'small' : 'middle'}
-        >
-          新手引导
-        </Button>
-      </div>
+        <div className="dashboard-hero-actions">
+          <Button
+            type="primary"
+            icon={<WalletOutlined />}
+            onClick={() => navigate('/payments/batches')}
+          >
+            进入支付批次
+          </Button>
+          <Button
+            type="default"
+            icon={<QuestionCircleOutlined />}
+            onClick={() => setShowGuide(true)}
+          >
+            新手引导
+          </Button>
+        </div>
+      </section>
 
-      {/* 统计卡片 - 单行显示 */}
-      <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4, marginBottom: '24px' }}>
+      <section className="dashboard-metrics-grid" aria-label="核心业务指标">
         {metricCards.map((item) => {
           const change = item.change ?? 0;
           const isPositive = change > 0;
@@ -274,231 +328,220 @@ const Dashboard: React.FC = () => {
               : `较上月 ${isPositive ? '增长' : '下降'} ${formatDelta(change)}%`;
 
           return (
-            <Card key={item.key} style={{ flex: '0 0 auto', width: 180, height: '100%' }} loading={metricsQuery.isLoading}>
+            <Card
+              key={item.key}
+              className="dashboard-metric-card"
+              variant="borderless"
+              loading={metricsQuery.isLoading}
+            >
+              <div className="dashboard-metric-heading">
+                <span className="dashboard-metric-icon" style={{ color: item.accent }}>
+                  {item.prefix}
+                </span>
+                <Text type="secondary">{item.title}</Text>
+              </div>
               <Statistic
-                title={item.title}
                 value={item.value}
                 suffix={item.suffix}
-                prefix={item.prefix}
                 precision={item.precision}
-                valueStyle={item.valueStyle}
+                styles={{ content: item.valueStyle }}
               />
               {!metricsQuery.isLoading && (
-                <div style={{ marginTop: '8px', display: 'flex', alignItems: 'center' }}>
-                  {isPositive && <ArrowUpOutlined style={{ color: '#52c41a', marginRight: 4 }} />}
-                  {isNegative && <ArrowDownOutlined style={{ color: '#f5222d', marginRight: 4 }} />}
-                  {!isPositive && !isNegative && (
-                    <ArrowUpOutlined style={{ visibility: 'hidden', marginRight: 4 }} />
-                  )}
-                  <Text type="secondary" style={{ fontSize: '12px' }}>
-                    {trendText}
-                  </Text>
+                <div
+                  className={`dashboard-metric-trend${isNegative ? ' dashboard-metric-trend-negative' : ''}`}
+                >
+                  {isPositive && <ArrowUpOutlined />}
+                  {isNegative && <ArrowDownOutlined />}
+                  {!isPositive && !isNegative && <span className="dashboard-trend-placeholder" />}
+                  <Text type="secondary">{trendText}</Text>
                 </div>
               )}
             </Card>
           );
         })}
-      </div>
+      </section>
 
-      <Row gutter={[16, 16]}>
-        {/* 左侧区域 - 垂直排列 */}
-        <Col xs={24} lg={16}>
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Card title="快捷入口" size="small">
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                {quickActions.map((action, index) => (
-                  <Link key={index} to={action.href} style={{ flex: '0 0 auto', width: smallScreen ? 'calc(50% - 4px)' : 'calc(25% - 6px)' }}>
-                    <Card
-                      hoverable
-                      style={{ textAlign: 'center', border: '1px solid #f0f0f0' }}
-                      styles={{
-                        body: {
-                          padding: smallScreen ? '12px 4px' : '16px 8px',
-                        },
-                      }}
-                    >
-                      <div
-                        style={{
-                          fontSize: smallScreen ? '18px' : '24px',
-                          color: action.color,
-                          marginBottom: '8px',
-                        }}
-                      >
-                        {action.icon}
-                      </div>
-                      <Text
-                        style={{
-                          fontSize: smallScreen ? '10px' : '12px',
-                          display: 'block',
-                          lineHeight: 1.2,
-                        }}
-                      >
-                        {action.title}
-                      </Text>
-                    </Card>
-                  </Link>
-                ))}
-              </div>
-            </Card>
+      <div className="dashboard-workspace">
+        <div className="dashboard-main-column">
+          <Card className="dashboard-panel" variant="borderless">
+            <DashboardSectionHeader title="快捷入口" subtitle="高频任务一键进入" />
+            <div className="dashboard-quick-grid">
+              {quickActions.map((action) => (
+                <Link key={action.href} to={action.href} className="dashboard-quick-action">
+                  <span className="dashboard-quick-icon" style={{ color: action.color }}>
+                    {action.icon}
+                  </span>
+                  <span className="dashboard-quick-copy">
+                    <Text strong>{action.title}</Text>
+                    <Text type="secondary">{action.description}</Text>
+                  </span>
+                  <ArrowRightOutlined className="dashboard-quick-arrow" />
+                </Link>
+              ))}
+            </div>
+          </Card>
 
-            <Card
+          <Card className="dashboard-panel" variant="borderless" loading={todosQuery.isLoading}>
+            <DashboardSectionHeader
               title="待办清单"
-              size="small"
+              subtitle={`${todoCount} 项待处理事项`}
               extra={<Link to="/tasks">查看全部</Link>}
-              loading={todosQuery.isLoading}
-            >
-              {todosQuery.isError ? (
-                <Alert
-                  type="error"
-                  showIcon
-                  message="待办事项加载失败"
-                  description={getErrorMessage(todosQuery.error)}
-                />
-              ) : (
-                <List
-                  dataSource={todos}
-                  locale={{ emptyText: '暂无待办事项' }}
-                  renderItem={(item) => (
-                    <List.Item>
-                      <List.Item.Meta
-                        title={
-                          <Space>
-                            <Text>{item.title}</Text>
-                            <Tag color={getPriorityColor(item.priority)}>
-                              {getPriorityLabel(item.priority)}
-                            </Tag>
-                          </Space>
-                        }
-                        description={formatTodoDue(item.due)}
-                      />
-                      <Button type="link" size="small">
+            />
+            {todosQuery.isError ? (
+              <Alert
+                type="error"
+                showIcon
+                title="待办事项加载失败"
+                description={getErrorMessage(todosQuery.error)}
+              />
+            ) : (
+              <div className="dashboard-list">
+                {todos.length > 0 ? (
+                  todos.map((item) => (
+                    <div className="dashboard-list-item" key={`${item.title}-${item.due}`}>
+                      <div className="dashboard-list-meta">
+                        <div className="dashboard-list-title">
+                          <Text>{item.title}</Text>
+                          <Tag color={getPriorityColor(item.priority)}>
+                            {getPriorityLabel(item.priority)}
+                          </Tag>
+                        </div>
+                        <Text type="secondary">{formatTodoDue(item.due)}</Text>
+                      </div>
+                      <Button type="link" size="small" icon={<ArrowRightOutlined />}>
                         处理
                       </Button>
-                    </List.Item>
-                  )}
-                />
-              )}
-            </Card>
+                    </div>
+                  ))
+                ) : (
+                  <div className="dashboard-list-empty">暂无待办事项</div>
+                )}
+              </div>
+            )}
+          </Card>
 
-            <Card title="最近活动" size="small" loading={activitiesQuery.isLoading}>
-              {activitiesQuery.isError ? (
-                <Alert
-                  type="error"
-                  showIcon
-                  message="活动数据加载失败"
-                  description={getErrorMessage(activitiesQuery.error)}
-                />
-              ) : (
-                <List
-                  dataSource={activities}
-                  locale={{ emptyText: '暂无活动记录' }}
-                  renderItem={(item) => (
-                    <List.Item>
-                      <List.Item.Meta
-                        avatar={
-                          <Avatar style={{ backgroundColor: '#1890ff' }}>
-                            {item.initial || item.actor?.charAt(0) || '系'}
-                          </Avatar>
-                        }
-                        title={
-                          <Text>
-                            <Text strong>{item.actor || '系统'}</Text> {item.description}
-                          </Text>
-                        }
-                        description={item.timeAgo}
-                      />
-                    </List.Item>
-                  )}
-                />
-              )}
-            </Card>
-          </Space>
-        </Col>
+          <Card
+            className="dashboard-panel"
+            variant="borderless"
+            loading={activitiesQuery.isLoading}
+          >
+            <DashboardSectionHeader title="最近活动" subtitle="系统中的最新操作记录" />
+            {activitiesQuery.isError ? (
+              <Alert
+                type="error"
+                showIcon
+                title="活动数据加载失败"
+                description={getErrorMessage(activitiesQuery.error)}
+              />
+            ) : (
+              <div className="dashboard-list dashboard-activity-list">
+                {activities.length > 0 ? (
+                  activities.map((item) => (
+                    <div className="dashboard-list-item" key={`${item.actor}-${item.timeAgo}`}>
+                      <Avatar className="dashboard-activity-avatar">
+                        {item.initial || item.actor?.charAt(0) || '系'}
+                      </Avatar>
+                      <div className="dashboard-list-meta">
+                        <Text>
+                          <Text strong>{item.actor || '系统'}</Text> {item.description}
+                        </Text>
+                        <Text type="secondary">{item.timeAgo}</Text>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="dashboard-list-empty">暂无活动记录</div>
+                )}
+              </div>
+            )}
+          </Card>
+        </div>
 
-        {/* 右侧区域 - 垂直排列 */}
-        <Col xs={24} lg={8}>
-          <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-            <Card title="系统状态" size="small" loading={statusQuery.isLoading}>
-              {statusQuery.isError ? (
-                <Alert
-                  type="error"
-                  showIcon
-                  message="系统状态加载失败"
-                  description={getErrorMessage(statusQuery.error)}
-                />
-              ) : (
-                <Space direction="vertical" style={{ width: '100%' }}>
-                  {statusData?.overallStatus && (
-                    <Alert
-                      type={getOverallStatusType(statusData.overallStatus)}
-                      showIcon
-                      message={`系统总体状态：${statusData.overallStatus}`}
-                    />
-                  )}
+        <aside className="dashboard-side-column">
+          <Card className="dashboard-panel" variant="borderless" loading={statusQuery.isLoading}>
+            <DashboardSectionHeader title="系统状态" subtitle="关键服务运行概览" />
+            {statusQuery.isError ? (
+              <Alert
+                type="error"
+                showIcon
+                title="系统状态加载失败"
+                description={getErrorMessage(statusQuery.error)}
+              />
+            ) : (
+              <div className="dashboard-status-content">
+                {statusData?.overallStatus && (
+                  <Alert
+                    type={getOverallStatusType(statusData.overallStatus)}
+                    showIcon
+                    title={`系统总体状态：${statusData.overallStatus}`}
+                  />
+                )}
+                <div className="dashboard-status-list">
                   {systemComponents.map((component, index) => (
-                    <div
-                      key={`${component.name}-${index}`}
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Space>
-                        <Tag color={getStatusTagColor(component.status)}>
-                          {component.status}
-                        </Tag>
+                    <div className="dashboard-status-row" key={`${component.name}-${index}`}>
+                      <div className="dashboard-status-name">
+                        <span
+                          className={`dashboard-status-dot dashboard-status-dot-${getStatusTagColor(component.status)}`}
+                        />
                         <Text>{component.name}</Text>
-                      </Space>
-                      <Text type="secondary" style={{ fontSize: '12px' }}>
-                        运行率 {formatRunRate(component.runRate)}
-                      </Text>
+                        <Tag color={getStatusTagColor(component.status)}>{component.status}</Tag>
+                      </div>
+                      <div className="dashboard-status-rate">
+                        <Text type="secondary">运行率 {formatRunRate(component.runRate)}</Text>
+                        <Progress
+                          percent={component.runRate}
+                          showInfo={false}
+                          size="small"
+                          strokeColor={getStatusProgressColor(component.status)}
+                        />
+                      </div>
                     </div>
                   ))}
-                  {systemComponents.length === 0 && !statusQuery.isLoading && (
-                    <Alert type="info" message="暂无系统状态数据" showIcon />
-                  )}
-                </Space>
-              )}
-            </Card>
+                </div>
+                {systemComponents.length === 0 && !statusQuery.isLoading && (
+                  <Alert type="info" title="暂无系统状态数据" showIcon />
+                )}
+              </div>
+            )}
+          </Card>
 
-            <Card title="使用帮助" size="small">
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Button type="link" icon={<BookOutlined />} style={{ padding: 0, height: 'auto', textAlign: 'left' }}>
-                  查看用户手册
-                </Button>
-                <Button type="link" icon={<BellOutlined />} style={{ padding: 0, height: 'auto', textAlign: 'left' }}>
-                  常见问题解答
-                </Button>
-                <Button type="link" icon={<GlobalOutlined />} style={{ padding: 0, height: 'auto', textAlign: 'left' }}>
-                  联系技术支持
-                </Button>
-              </Space>
-            </Card>
+          <Card className="dashboard-panel" variant="borderless">
+            <DashboardSectionHeader title="使用帮助" subtitle="快速找到支持资源" />
+            <div className="dashboard-help-links">
+              <Button type="link" icon={<BookOutlined />}>
+                查看用户手册
+              </Button>
+              <Button type="link" icon={<BellOutlined />}>
+                常见问题解答
+              </Button>
+              <Button type="link" icon={<GlobalOutlined />}>
+                联系技术支持
+              </Button>
+            </div>
+          </Card>
 
-            <Card title="产品动态" size="small">
-              <Space direction="vertical" style={{ width: '100%' }}>
-                <Alert
-                  message="新功能上线"
-                  description="批量支付功能已上线，支持一键处理多个批次，提升工作效率。"
-                  type="info"
-                  icon={<TrophyOutlined />}
-                  style={{ marginBottom: '12px' }}
-                />
-                <Alert
-                  message="系统优化"
-                  description="支付处理速度提升50%，用户体验显著改善。"
-                  type="success"
-                  icon={<RiseOutlined />}
-                />
-              </Space>
-            </Card>
-          </Space>
-        </Col>
-      </Row>
+          <Card className="dashboard-panel" variant="borderless">
+            <DashboardSectionHeader title="产品动态" subtitle="了解近期变化" />
+            <div className="dashboard-updates">
+              <Alert
+                title="新功能上线"
+                description="批量支付功能已上线，支持一键处理多个批次，提升工作效率。"
+                type="info"
+                icon={<TrophyOutlined />}
+              />
+              <Alert
+                title="系统优化"
+                description="支付处理速度提升50%，用户体验显著改善。"
+                type="success"
+                icon={<RiseOutlined />}
+              />
+            </div>
+          </Card>
+        </aside>
+      </div>
 
       <NewUserGuide visible={showGuide} onClose={() => setShowGuide(false)} />
-    </div>
+    </main>
   );
 };
 

@@ -244,7 +244,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
             batch.setConfirmationMode(PayrollConfirmationMode.GROUP.getCode());
             batch.setConfirmationCompletedTime(null);
             if (batch.getStatus() == PayrollBatchStatus.CONFIRMED) {
-                batch.setStatus(PayrollBatchStatus.CONFIRMING);
+                transitionBatchStatus(batch, PayrollBatchStatus.CONFIRMING);
             }
             payrollBatchService.updateById(batch);
         }
@@ -411,7 +411,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
 
         if (Boolean.FALSE.equals(batch.getConfirmationRequired())) {
             if (canMarkConfirmationSkipped(batch.getStatus())) {
-                batch.setStatus(PayrollBatchStatus.CONFIRMED);
+                transitionBatchStatus(batch, PayrollBatchStatus.CONFIRMED);
                 if (batch.getConfirmationCompletedTime() == null) {
                     batch.setConfirmationCompletedTime(LocalDateTime.now());
                 }
@@ -445,7 +445,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
             completedTime = LocalDateTime.now();
         }
 
-        batch.setStatus(targetStatus);
+        transitionBatchStatus(batch, targetStatus);
         batch.setConfirmationCompletedTime(completedTime);
         payrollBatchService.updateById(batch);
 
@@ -460,6 +460,21 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
                 || status == PayrollBatchStatus.CONFIRMING
                 || status == PayrollBatchStatus.DISPUTE_PROCESSING
                 || status == PayrollBatchStatus.CONFIRMED;
+    }
+
+    private void transitionBatchStatus(PayrollBatch batch, PayrollBatchStatus targetStatus) {
+        if (batch == null || targetStatus == null || batch.getStatus() == targetStatus) {
+            return;
+        }
+        if (batch.getStatus() == null || !batch.getStatus().canTransitionTo(targetStatus)) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_STATUS,
+                    "不允许的薪资批次状态转移: "
+                            + (batch.getStatus() == null ? "null" : batch.getStatus().getCode())
+                            + " -> " + targetStatus.getCode()
+            );
+        }
+        batch.setStatus(targetStatus);
     }
 
     private boolean canRefreshConfirmationStatus(PayrollBatchStatus status) {

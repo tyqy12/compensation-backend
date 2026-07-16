@@ -9,12 +9,9 @@ interface BackTopProps {
 export const BackTop: React.FC<BackTopProps> = ({ target, visibilityHeight = 400 }) => {
   return (
     <FloatButton.BackTop
+      className="app-back-top"
       target={target}
       visibilityHeight={visibilityHeight}
-      style={{
-        right: 24,
-        bottom: 80,
-      }}
     />
   );
 };

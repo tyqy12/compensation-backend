@@ -34,11 +34,7 @@ import {
   Switch,
 } from 'antd';
 import type { DataNode } from 'antd/es/tree';
-import {
-  ArrowLeftOutlined,
-  SaveOutlined,
-  ReloadOutlined,
-} from '@ant-design/icons';
+import { ArrowLeftOutlined, SaveOutlined, ReloadOutlined } from '@ant-design/icons';
 import { useResourcesQuery } from '@services/queries/resources';
 import {
   useUserAggregateSearchQuery,
@@ -167,9 +163,7 @@ const UserPermissionConfig: React.FC = () => {
 
   const personalizedResourceIdSet = useMemo(() => {
     const resources = userResourcesQuery.data || [];
-    return new Set(
-      resources.map((r) => r.resourceId).filter((id): id is number => id != null),
-    );
+    return new Set(resources.map((r) => r.resourceId).filter((id): id is number => id != null));
   }, [userResourcesQuery.data]);
 
   const inheritedResourceIds = useMemo(() => {
@@ -204,9 +198,9 @@ const UserPermissionConfig: React.FC = () => {
       if (onlySelected && !checkedKeySet.has(r.id)) return false;
       if (!keyword) return true;
       return (
-        (r.name || '').toLowerCase().includes(keyword)
-        || (r.code || '').toLowerCase().includes(keyword)
-        || (r.path || '').toLowerCase().includes(keyword)
+        (r.name || '').toLowerCase().includes(keyword) ||
+        (r.code || '').toLowerCase().includes(keyword) ||
+        (r.path || '').toLowerCase().includes(keyword)
       );
     };
 
@@ -246,13 +240,22 @@ const UserPermissionConfig: React.FC = () => {
         key: r.id,
         title: (
           <Space size={4} wrap>
-            <Text strong style={{ fontSize: 13 }}>{r.name}</Text>
-            <Text type="secondary" style={{ fontSize: 11 }}>({r.code})</Text>
-            <Tag color={RESOURCE_TYPE_COLOR[r.type] || 'default'} style={{ margin: 0, fontSize: 10 }}>
+            <Text strong style={{ fontSize: 13 }}>
+              {r.name}
+            </Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              ({r.code})
+            </Text>
+            <Tag
+              color={RESOURCE_TYPE_COLOR[r.type] || 'default'}
+              style={{ margin: 0, fontSize: 10 }}
+            >
               {RESOURCE_TYPE_LABEL[r.type] || r.type}
             </Tag>
             {inheritedResourceIdSet.has(r.id) && (
-              <Tag color="cyan" style={{ margin: 0, fontSize: 10 }}>继承</Tag>
+              <Tag color="cyan" style={{ margin: 0, fontSize: 10 }}>
+                继承
+              </Tag>
             )}
             {r.path && (
               <Text type="secondary" style={{ fontSize: 11 }}>
@@ -262,8 +265,9 @@ const UserPermissionConfig: React.FC = () => {
           </Space>
         ),
         children: [],
-        disableCheckbox: inheritedResourceIdSet.has(r.id)
-          || (leafOnlyCheckable && nonLeafIdSet.has(r.id) && !checkedKeySet.has(r.id)),
+        disableCheckbox:
+          inheritedResourceIdSet.has(r.id) ||
+          (leafOnlyCheckable && nonLeafIdSet.has(r.id) && !checkedKeySet.has(r.id)),
       });
     });
 
@@ -323,12 +327,11 @@ const UserPermissionConfig: React.FC = () => {
   }, [selectedResources, inheritedResourceIdSet]);
 
   // Tree 勾选变化
-  const handleCheck = (checked: React.Key[] | { checked: React.Key[]; halfChecked: React.Key[] }) => {
+  const handleCheck = (
+    checked: React.Key[] | { checked: React.Key[]; halfChecked: React.Key[] },
+  ) => {
     const keys = Array.isArray(checked) ? checked : checked.checked;
-    const merged = Array.from(new Set([
-      ...keys.map((k) => Number(k)),
-      ...inheritedResourceIds,
-    ]));
+    const merged = Array.from(new Set([...keys.map((k) => Number(k)), ...inheritedResourceIds]));
     setCheckedKeys(merged);
 
     // 移除未勾选资源的操作配置
@@ -355,7 +358,11 @@ const UserPermissionConfig: React.FC = () => {
 
   const handleSelectAllVisible = () => {
     const visibleIds = filteredResources.map((r) => r.id);
-    const merged = new Set<number>([...checkedKeys.map((k) => Number(k)), ...visibleIds, ...inheritedResourceIds]);
+    const merged = new Set<number>([
+      ...checkedKeys.map((k) => Number(k)),
+      ...visibleIds,
+      ...inheritedResourceIds,
+    ]);
     setCheckedKeys(Array.from(merged));
   };
 
@@ -393,7 +400,9 @@ const UserPermissionConfig: React.FC = () => {
       });
       return next;
     });
-    message.success(`已将 ${bulkActions.length} 个操作应用到 ${editableSelectedResources.length} 项资源`);
+    message.success(
+      `已将 ${bulkActions.length} 个操作应用到 ${editableSelectedResources.length} 项资源`,
+    );
   }, [editableSelectedResources, bulkActions]);
 
   const clearActionsForSelected = useCallback(() => {
@@ -415,9 +424,7 @@ const UserPermissionConfig: React.FC = () => {
   // 保存权限配置
   const handleSave = async () => {
     try {
-      const resourceIds = checkedKeys
-        .map(Number)
-        .filter((id) => !inheritedResourceIdSet.has(id));
+      const resourceIds = checkedKeys.map(Number).filter((id) => !inheritedResourceIdSet.has(id));
 
       const actions: Record<string, string[]> = {};
       Object.entries(actionConfigs).forEach(([key, value]) => {
@@ -465,15 +472,15 @@ const UserPermissionConfig: React.FC = () => {
   }, [checkedKeys, resourceMap]);
 
   if (
-    resourcesQuery.isLoading
-    || userQuery.isLoading
-    || userResourcesQuery.isLoading
-    || userAggregateResourcesQuery.isLoading
+    resourcesQuery.isLoading ||
+    userQuery.isLoading ||
+    userResourcesQuery.isLoading ||
+    userAggregateResourcesQuery.isLoading
   ) {
     return (
       <PageContainer>
         <Card>
-          <Spin tip="加载中..." />
+          <Spin description="加载中..." />
         </Card>
       </PageContainer>
     );
@@ -483,12 +490,7 @@ const UserPermissionConfig: React.FC = () => {
     return (
       <PageContainer>
         <Card>
-          <Alert
-            message="用户不存在"
-            description="未找到指定的用户信息"
-            type="error"
-            showIcon
-          />
+          <Alert title="用户不存在" description="未找到指定的用户信息" type="error" showIcon />
         </Card>
       </PageContainer>
     );
@@ -510,7 +512,7 @@ const UserPermissionConfig: React.FC = () => {
         onBack: () => navigate('/admin/auth-center/users'),
       }}
     >
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         {/* 用户信息 */}
         <Card title="用户信息" size="small">
           <Descriptions column={2} size="small">
@@ -518,9 +520,14 @@ const UserPermissionConfig: React.FC = () => {
             <Descriptions.Item label="当前角色">
               <Space size={[0, 4]} wrap>
                 {currentUser.roles ? (
-                  currentUser.roles.split(',').filter(Boolean).map((role: string, index: number) => (
-                    <Tag key={index} color="blue">{getRoleDisplayName(role)}</Tag>
-                  ))
+                  currentUser.roles
+                    .split(',')
+                    .filter(Boolean)
+                    .map((role: string, index: number) => (
+                      <Tag key={index} color="blue">
+                        {getRoleDisplayName(role)}
+                      </Tag>
+                    ))
                 ) : (
                   <Text type="secondary">-</Text>
                 )}
@@ -530,7 +537,7 @@ const UserPermissionConfig: React.FC = () => {
         </Card>
 
         <Alert
-          message="个性化授权说明"
+          title="个性化授权说明"
           description={`当前有 ${inheritedResourceIds.length} 项权限来自角色继承（标记为“继承”且不可取消/编辑），提交时仅会保存个性化权限。`}
           type="info"
           showIcon
@@ -540,7 +547,7 @@ const UserPermissionConfig: React.FC = () => {
           <Col xs={24} lg={14}>
             <Card
               title="资源选择"
-              extra={(
+              extra={
                 <Space>
                   <Text type="secondary">已选 {checkedKeys.length} 项</Text>
                   <Button
@@ -550,12 +557,14 @@ const UserPermissionConfig: React.FC = () => {
                       userResourcesQuery.refetch();
                       userAggregateResourcesQuery.refetch();
                     }}
-                    loading={userResourcesQuery.isFetching || userAggregateResourcesQuery.isFetching}
+                    loading={
+                      userResourcesQuery.isFetching || userAggregateResourcesQuery.isFetching
+                    }
                   >
                     刷新
                   </Button>
                 </Space>
-              )}
+              }
             >
               <Space wrap style={{ marginBottom: 12 }}>
                 <Input.Search
@@ -586,10 +595,18 @@ const UserPermissionConfig: React.FC = () => {
                   />
                 </Space>
                 <Divider type="vertical" />
-                <Button size="small" onClick={handleSelectAllVisible} disabled={filteredResources.length === 0}>
+                <Button
+                  size="small"
+                  onClick={handleSelectAllVisible}
+                  disabled={filteredResources.length === 0}
+                >
                   全选当前结果
                 </Button>
-                <Button size="small" onClick={handleClearSelected} disabled={checkedKeys.length === inheritedResourceIds.length}>
+                <Button
+                  size="small"
+                  onClick={handleClearSelected}
+                  disabled={checkedKeys.length === inheritedResourceIds.length}
+                >
                   清空个性化已选
                 </Button>
                 <Button size="small" onClick={handleExpandAll} disabled={treeData.length === 0}>
@@ -600,7 +617,14 @@ const UserPermissionConfig: React.FC = () => {
                 </Button>
               </Space>
 
-              <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 12, minHeight: 520 }}>
+              <div
+                style={{
+                  border: '1px solid #f0f0f0',
+                  borderRadius: 4,
+                  padding: 12,
+                  minHeight: 520,
+                }}
+              >
                 {treeData.length > 0 ? (
                   <Tree
                     checkable
@@ -620,20 +644,27 @@ const UserPermissionConfig: React.FC = () => {
           </Col>
 
           <Col xs={24} lg={10}>
-            <Card title="操作权限配置" extra={<Text type="secondary">资源 {selectedResources.length} 项</Text>}>
+            <Card
+              title="操作权限配置"
+              extra={<Text type="secondary">资源 {selectedResources.length} 项</Text>}
+            >
               {selectedResources.length === 0 ? (
                 <Empty description="请先在左侧选择资源" />
               ) : (
                 <>
                   <Alert
-                    message="为个性化资源配置操作"
+                    title="为个性化资源配置操作"
                     description={`可编辑资源 ${editableSelectedResources.length} 项，继承资源仅展示不可编辑。`}
                     type="info"
                     showIcon
                     style={{ marginBottom: 12 }}
                   />
 
-                  <Space direction="vertical" size={8} style={{ width: '100%', marginBottom: 12 }}>
+                  <Space
+                    orientation="vertical"
+                    size={8}
+                    style={{ width: '100%', marginBottom: 12 }}
+                  >
                     <Text type="secondary">批量设置操作（仅作用于可编辑资源）</Text>
                     <Checkbox.Group
                       options={ACTION_OPTIONS}
@@ -691,7 +722,9 @@ const UserPermissionConfig: React.FC = () => {
                               options={ACTION_OPTIONS}
                               value={actions}
                               disabled={isInheritedOnly}
-                              onChange={(checkedValues) => updateActionConfig(res.id, checkedValues as string[])}
+                              onChange={(checkedValues) =>
+                                updateActionConfig(res.id, checkedValues as string[])
+                              }
                             />
                           ),
                         };
@@ -745,4 +778,3 @@ const UserPermissionConfig: React.FC = () => {
 };
 
 export default UserPermissionConfig;
-

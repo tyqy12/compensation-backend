@@ -3,6 +3,8 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.yiyundao.compensation.common.exception.BusinessException;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.enums.BatchStatus;
 import com.yiyundao.compensation.enums.PaymentBatchProcessStatus;
 import com.yiyundao.compensation.enums.PaymentStatus;
@@ -83,6 +85,7 @@ public class PayrollDistributionServiceImpl
 
         List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, batch.getId())
+                .eq(PayrollLine::getBatchRevision, batchRevision)
                 .orderByAsc(PayrollLine::getId));
         PayrollPaymentEligibilitySupport.requireAllLinesFinalForPayment(batch, lines);
         distribution.setTotalCount(lines.size());
@@ -127,8 +130,16 @@ public class PayrollDistributionServiceImpl
             return List.of();
         }
         PayrollBatch batch = payrollBatchMapper.selectById(distribution.getBatchId());
+        if (batch == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "薪资批次不存在");
+        }
+        int batchRevision = normalizeRevision(batch.getBatchRevision());
+        if (normalizeRevision(distribution.getBatchRevision()) != batchRevision) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "发放单已过期，请重新生成当前批次版本的发放单");
+        }
         List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, distribution.getBatchId())
+                .eq(PayrollLine::getBatchRevision, batchRevision)
                 .orderByAsc(PayrollLine::getId));
         if (CollectionUtils.isEmpty(lines)) {
             return List.of();

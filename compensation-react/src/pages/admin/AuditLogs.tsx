@@ -130,18 +130,14 @@ const AuditLogs: React.FC = () => {
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null);
 
   // 数据查询
-  const {
-    data: auditData,
-    isLoading,
-    refetch,
-  } = useAuditLogsQuery(queryParams);
+  const { data: auditData, isLoading, refetch } = useAuditLogsQuery(queryParams);
 
-  const {
-    data: detailData,
-    isLoading: detailLoading,
-  } = useAuditLogDetailQuery(selectedLogId || 0, {
-    enabled: !!selectedLogId && drawerVisible,
-  });
+  const { data: detailData, isLoading: detailLoading } = useAuditLogDetailQuery(
+    selectedLogId || 0,
+    {
+      enabled: !!selectedLogId && drawerVisible,
+    },
+  );
 
   // 统计查询
   const { data: todayLoginStats } = useTodayLoginStatsQuery();
@@ -150,19 +146,22 @@ const AuditLogs: React.FC = () => {
   const clearFailureMutation = useClearLoginFailureCountMutation();
 
   // ==================== URL 同步 ====================
-  const updateUrlParams = useCallback((params: AuditLogQueryParams) => {
-    const next = new URLSearchParams();
-    if (params.page) next.set('page', String(params.page));
-    if (params.pageSize) next.set('size', String(params.pageSize));
-    if (params.username) next.set('username', params.username);
-    if (params.operation) next.set('operation', params.operation);
-    if (params.businessType) next.set('businessType', params.businessType);
-    if (params.responseResult) next.set('responseResult', params.responseResult);
-    if (params.startTime) next.set('startTime', params.startTime);
-    if (params.endTime) next.set('endTime', params.endTime);
-    if (params.keyword) next.set('keyword', params.keyword);
-    setSearchParams(next);
-  }, [setSearchParams]);
+  const updateUrlParams = useCallback(
+    (params: AuditLogQueryParams) => {
+      const next = new URLSearchParams();
+      if (params.page) next.set('page', String(params.page));
+      if (params.pageSize) next.set('size', String(params.pageSize));
+      if (params.username) next.set('username', params.username);
+      if (params.operation) next.set('operation', params.operation);
+      if (params.businessType) next.set('businessType', params.businessType);
+      if (params.responseResult) next.set('responseResult', params.responseResult);
+      if (params.startTime) next.set('startTime', params.startTime);
+      if (params.endTime) next.set('endTime', params.endTime);
+      if (params.keyword) next.set('keyword', params.keyword);
+      setSearchParams(next);
+    },
+    [setSearchParams],
+  );
 
   const records = useMemo(() => getPagedRecords(auditData), [auditData]);
 
@@ -177,22 +176,25 @@ const AuditLogs: React.FC = () => {
     actionRef.current?.reloadAndRest?.();
   }, [refetch]);
 
-  const handleClearFailure = useCallback((username: string) => {
-    modal.confirm({
-      title: '确认清除',
-      content: `确定要清除用户 "${username}" 的登录失败计数吗？`,
-      onOk: () => {
-        clearFailureMutation.mutate(username, {
-          onSuccess: () => {
-            antdMessage.success('已清除登录失败计数');
-          },
-          onError: () => {
-            antdMessage.error('清除失败');
-          },
-        });
-      },
-    });
-  }, [clearFailureMutation, modal, antdMessage]);
+  const handleClearFailure = useCallback(
+    (username: string) => {
+      modal.confirm({
+        title: '确认清除',
+        content: `确定要清除用户 "${username}" 的登录失败计数吗？`,
+        onOk: () => {
+          clearFailureMutation.mutate(username, {
+            onSuccess: () => {
+              antdMessage.success('已清除登录失败计数');
+            },
+            onError: () => {
+              antdMessage.error('清除失败');
+            },
+          });
+        },
+      });
+    },
+    [clearFailureMutation, modal, antdMessage],
+  );
 
   // ==================== 统计面板 ====================
   const renderStatsPanel = () => (
@@ -205,7 +207,7 @@ const AuditLogs: React.FC = () => {
               <Statistic
                 title="成功"
                 value={todayLoginStats?.successCount || 0}
-                valueStyle={{ color: '#52c41a' }}
+                styles={{ content: { color: '#52c41a' } }}
                 prefix={<CheckCircleOutlined />}
               />
             </Col>
@@ -213,13 +215,19 @@ const AuditLogs: React.FC = () => {
               <Statistic
                 title="失败"
                 value={todayLoginStats?.failedCount || 0}
-                valueStyle={{ color: '#ff4d4f' }}
+                styles={{ content: { color: '#ff4d4f' } }}
                 prefix={<CloseCircleOutlined />}
               />
             </Col>
           </Row>
           <div style={{ marginTop: 8, textAlign: 'center' }}>
-            <Tag color={Number(todayLoginStats?.successRate?.replace('%', '') || 0) >= 90 ? 'green' : 'orange'}>
+            <Tag
+              color={
+                Number(todayLoginStats?.successRate?.replace('%', '') || 0) >= 90
+                  ? 'green'
+                  : 'orange'
+              }
+            >
               成功率: {todayLoginStats?.successRate || '0%'}
             </Tag>
           </div>
@@ -250,17 +258,16 @@ const AuditLogs: React.FC = () => {
               <WarningOutlined style={{ color: '#faad14' }} />
               <span>登录失败监控</span>
               {loginFailures && Object.keys(loginFailures).length > 0 && (
-                <Badge count={Object.keys(loginFailures).length} style={{ backgroundColor: '#faad14' }} />
+                <Badge
+                  count={Object.keys(loginFailures).length}
+                  style={{ backgroundColor: '#faad14' }}
+                />
               )}
             </Space>
           }
           extra={
             Object.keys(loginFailures || {}).length > 0 && (
-              <Button
-                type="link"
-                size="small"
-                onClick={handleRefresh}
-              >
+              <Button type="link" size="small" onClick={handleRefresh}>
                 刷新
               </Button>
             )
@@ -277,7 +284,10 @@ const AuditLogs: React.FC = () => {
                   dataIndex: 'count',
                   key: 'count',
                   render: (count: number) => (
-                    <Badge count={count} style={{ backgroundColor: count >= 5 ? '#ff4d4f' : '#faad14' }} />
+                    <Badge
+                      count={count}
+                      style={{ backgroundColor: count >= 5 ? '#ff4d4f' : '#faad14' }}
+                    />
                   ),
                 },
                 {
@@ -357,9 +367,7 @@ const AuditLogs: React.FC = () => {
       title: '请求方法',
       dataIndex: 'method',
       width: 90,
-      render: (_, record) => (
-        <Tag color={getMethodColor(record.method)}>{record.method}</Tag>
-      ),
+      render: (_, record) => <Tag color={getMethodColor(record.method)}>{record.method}</Tag>,
     },
     {
       title: '请求地址',
@@ -408,9 +416,11 @@ const AuditLogs: React.FC = () => {
         style={{ width: 180 }}
         allowClear
         value={queryParams.keyword}
-        onChange={(e) => setQueryParams(prev => ({ ...prev, keyword: e.target.value || undefined }))}
+        onChange={(e) =>
+          setQueryParams((prev) => ({ ...prev, keyword: e.target.value || undefined }))
+        }
         onSearch={(keyword) => {
-          setQueryParams(prev => ({ ...prev, page: 1 }));
+          setQueryParams((prev) => ({ ...prev, page: 1 }));
           updateUrlParams({ ...queryParams, keyword, page: 1 });
         }}
       />
@@ -419,9 +429,11 @@ const AuditLogs: React.FC = () => {
         style={{ width: 120 }}
         allowClear
         value={queryParams.username}
-        onChange={(e) => setQueryParams(prev => ({ ...prev, username: e.target.value || undefined }))}
+        onChange={(e) =>
+          setQueryParams((prev) => ({ ...prev, username: e.target.value || undefined }))
+        }
         onSearch={(username) => {
-          setQueryParams(prev => ({ ...prev, page: 1 }));
+          setQueryParams((prev) => ({ ...prev, page: 1 }));
           updateUrlParams({ ...queryParams, username, page: 1 });
         }}
       />
@@ -431,7 +443,7 @@ const AuditLogs: React.FC = () => {
         allowClear
         value={queryParams.operation}
         onChange={(val) => {
-          setQueryParams(prev => ({ ...prev, page: 1 }));
+          setQueryParams((prev) => ({ ...prev, page: 1 }));
           updateUrlParams({ ...queryParams, operation: val, page: 1 });
         }}
         options={Object.entries(operationEnum).map(([k, v]) => ({ label: v.text, value: k }))}
@@ -442,7 +454,7 @@ const AuditLogs: React.FC = () => {
         allowClear
         value={queryParams.responseResult}
         onChange={(val) => {
-          setQueryParams(prev => ({ ...prev, page: 1 }));
+          setQueryParams((prev) => ({ ...prev, page: 1 }));
           updateUrlParams({ ...queryParams, responseResult: val, page: 1 });
         }}
         options={resultEnum}
@@ -453,7 +465,7 @@ const AuditLogs: React.FC = () => {
         allowClear
         value={queryParams.businessType}
         onChange={(val) => {
-          setQueryParams(prev => ({ ...prev, page: 1 }));
+          setQueryParams((prev) => ({ ...prev, page: 1 }));
           updateUrlParams({ ...queryParams, businessType: val, page: 1 });
         }}
         options={[
@@ -473,7 +485,7 @@ const AuditLogs: React.FC = () => {
             : undefined
         }
         onChange={(dates, dateStrings) => {
-          setQueryParams(prev => ({
+          setQueryParams((prev) => ({
             ...prev,
             page: 1,
             startTime: dateStrings[0] || undefined,
@@ -491,7 +503,7 @@ const AuditLogs: React.FC = () => {
       <Button
         icon={<ReloadOutlined />}
         onClick={() => {
-          setQueryParams(prev => ({
+          setQueryParams((prev) => ({
             ...prev,
             page: 1,
             username: undefined,
@@ -535,9 +547,15 @@ const AuditLogs: React.FC = () => {
           const page = pagination.current || 1;
           const pageSize = pagination.pageSize || 10;
           const sortBy = Array.isArray(sorter) ? sorter[0]?.field : sorter.field;
-          const order = Array.isArray(sorter) ? (sorter[0]?.order === 'ascend' ? 'asc' : 'desc') : (sorter.order === 'ascend' ? 'asc' : 'desc');
+          const order = Array.isArray(sorter)
+            ? sorter[0]?.order === 'ascend'
+              ? 'asc'
+              : 'desc'
+            : sorter.order === 'ascend'
+              ? 'asc'
+              : 'desc';
 
-          setQueryParams(prev => ({ ...prev, page, pageSize, sortBy, order }));
+          setQueryParams((prev) => ({ ...prev, page, pageSize, sortBy, order }));
           updateUrlParams({ ...queryParams, page, pageSize, sortBy, order });
         }}
         toolBarRender={() => [
@@ -577,18 +595,35 @@ const AuditLogs: React.FC = () => {
                 <ProDescriptions.Item label="业务类型">
                   {getBusinessTypeInfo(detailData.businessType).text}
                 </ProDescriptions.Item>
-                <ProDescriptions.Item label="业务标识">{detailData.businessKey}</ProDescriptions.Item>
+                <ProDescriptions.Item label="业务标识">
+                  {detailData.businessKey}
+                </ProDescriptions.Item>
                 <ProDescriptions.Item label="请求IP">{detailData.requestIp}</ProDescriptions.Item>
-                <ProDescriptions.Item label="执行时间">{formatExecutionTime(detailData.executionTime)}</ProDescriptions.Item>
-                <ProDescriptions.Item label="创建时间">{formatDateTime(detailData.createTime)}</ProDescriptions.Item>
+                <ProDescriptions.Item label="执行时间">
+                  {formatExecutionTime(detailData.executionTime)}
+                </ProDescriptions.Item>
+                <ProDescriptions.Item label="创建时间">
+                  {formatDateTime(detailData.createTime)}
+                </ProDescriptions.Item>
               </ProDescriptions>
             </Card>
 
             <Card size="small" title="请求信息" style={{ marginBottom: 16 }}>
               <ProDescriptions column={1} size="small">
-                <ProDescriptions.Item label="请求地址">{detailData.requestUrl}</ProDescriptions.Item>
+                <ProDescriptions.Item label="请求地址">
+                  {detailData.requestUrl}
+                </ProDescriptions.Item>
                 <ProDescriptions.Item label="请求参数">
-                  <pre style={{ maxHeight: 200, overflow: 'auto', margin: 0, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                  <pre
+                    style={{
+                      maxHeight: 200,
+                      overflow: 'auto',
+                      margin: 0,
+                      padding: 8,
+                      background: '#f5f5f5',
+                      borderRadius: 4,
+                    }}
+                  >
                     {detailData.requestParams || '无'}
                   </pre>
                 </ProDescriptions.Item>
@@ -597,7 +632,16 @@ const AuditLogs: React.FC = () => {
 
             {detailData.responseResult && (
               <Card size="small" title="响应结果" style={{ marginBottom: 16 }}>
-                <pre style={{ maxHeight: 200, overflow: 'auto', margin: 0, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                <pre
+                  style={{
+                    maxHeight: 200,
+                    overflow: 'auto',
+                    margin: 0,
+                    padding: 8,
+                    background: '#f5f5f5',
+                    borderRadius: 4,
+                  }}
+                >
                   {detailData.responseResult.length > 2000
                     ? detailData.responseResult.substring(0, 2000) + '...'
                     : detailData.responseResult}
@@ -607,7 +651,17 @@ const AuditLogs: React.FC = () => {
 
             {detailData.errorMsg && (
               <Card size="small" title="错误信息" style={{ marginBottom: 16 }}>
-                <pre style={{ maxHeight: 200, overflow: 'auto', margin: 0, padding: 8, background: '#fff2f0', borderRadius: 4, color: '#ff4d4f' }}>
+                <pre
+                  style={{
+                    maxHeight: 200,
+                    overflow: 'auto',
+                    margin: 0,
+                    padding: 8,
+                    background: '#fff2f0',
+                    borderRadius: 4,
+                    color: '#ff4d4f',
+                  }}
+                >
                   {detailData.errorMsg}
                 </pre>
               </Card>
@@ -615,7 +669,9 @@ const AuditLogs: React.FC = () => {
 
             <Card size="small" title="客户端信息">
               <ProDescriptions column={1} size="small">
-                <ProDescriptions.Item label="User-Agent">{detailData.userAgent || '未知'}</ProDescriptions.Item>
+                <ProDescriptions.Item label="User-Agent">
+                  {detailData.userAgent || '未知'}
+                </ProDescriptions.Item>
               </ProDescriptions>
             </Card>
           </div>

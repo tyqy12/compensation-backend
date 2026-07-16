@@ -29,7 +29,7 @@ const Forbidden: React.FC = () => {
           title="403 - 访问被拒绝"
           subTitle="抱歉，您暂时没有权限访问此页面。这可能是由于权限不足或会话已过期导致的。"
           extra={
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
               <Space wrap size="middle" style={{ justifyContent: 'center' }}>
                 <Button type="primary" icon={<HomeOutlined />}>
                   <Link to="/">返回首页</Link>
@@ -53,4 +53,3 @@ const Forbidden: React.FC = () => {
 };
 
 export default Forbidden;
-

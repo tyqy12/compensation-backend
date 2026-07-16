@@ -38,7 +38,11 @@ import {
   ApiOutlined,
   PlayCircleOutlined,
 } from '@ant-design/icons';
-import { useResourcesQuery, useCreateResourceMutation, useUpdateResourceMutation } from '@services/queries/resources';
+import {
+  useResourcesQuery,
+  useCreateResourceMutation,
+  useUpdateResourceMutation,
+} from '@services/queries/resources';
 import type { SysResource } from '@types/api';
 
 const { TextArea } = Input;
@@ -48,10 +52,34 @@ const { TreeNode } = TreeSelect;
 
 // 资源类型选项
 const resourceTypeOptions = [
-  { value: 'MENU', label: '菜单资源', icon: <FolderOutlined />, color: 'blue', description: '系统导航菜单' },
-  { value: 'VIEW', label: '页面资源', icon: <FileOutlined />, color: 'green', description: '页面访问权限' },
-  { value: 'ACTION', label: '操作资源', icon: <PlayCircleOutlined />, color: 'orange', description: '按钮级权限' },
-  { value: 'API', label: 'API资源', icon: <ApiOutlined />, color: 'purple', description: '接口访问权限' },
+  {
+    value: 'MENU',
+    label: '菜单资源',
+    icon: <FolderOutlined />,
+    color: 'blue',
+    description: '系统导航菜单',
+  },
+  {
+    value: 'VIEW',
+    label: '页面资源',
+    icon: <FileOutlined />,
+    color: 'green',
+    description: '页面访问权限',
+  },
+  {
+    value: 'ACTION',
+    label: '操作资源',
+    icon: <PlayCircleOutlined />,
+    color: 'orange',
+    description: '按钮级权限',
+  },
+  {
+    value: 'API',
+    label: 'API资源',
+    icon: <ApiOutlined />,
+    color: 'purple',
+    description: '接口访问权限',
+  },
 ];
 
 interface ResourceFormData {
@@ -175,12 +203,7 @@ const ResourceEdit: React.FC = () => {
           onBack: () => navigate('/admin/auth-center/resources'),
         }}
       >
-        <Alert
-          message="资源不存在"
-          description="未找到指定的资源信息"
-          type="error"
-          showIcon
-        />
+        <Alert title="资源不存在" description="未找到指定的资源信息" type="error" showIcon />
       </PageContainer>
     );
   }
@@ -204,7 +227,7 @@ const ResourceEdit: React.FC = () => {
       <Card style={{ maxWidth: 800 }}>
         {isEditMode && (
           <Alert
-            message="编辑提示"
+            title="编辑提示"
             description="修改资源信息会影响所有引用该资源的角色和用户权限，请谨慎操作。"
             type="info"
             showIcon
@@ -212,12 +235,7 @@ const ResourceEdit: React.FC = () => {
           />
         )}
 
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleSubmit}
-          autoComplete="off"
-        >
+        <Form form={form} layout="vertical" onFinish={handleSubmit} autoComplete="off">
           {/* 资源类型选择 */}
           <Form.Item
             name="type"
@@ -257,7 +275,10 @@ const ResourceEdit: React.FC = () => {
             label="资源编码"
             rules={[
               { required: true, message: '请输入资源编码' },
-              { pattern: /^[a-zA-Z][a-zA-Z0-9_:.]*$/, message: '资源编码必须以字母开头，只能包含字母、数字、下划线和冒号' },
+              {
+                pattern: /^[a-zA-Z][a-zA-Z0-9_:.]*$/,
+                message: '资源编码必须以字母开头，只能包含字母、数字、下划线和冒号',
+              },
               { min: 2, max: 100, message: '资源编码长度必须在2-100个字符之间' },
             ]}
             extra="资源编码用于系统内部识别，创建后不可修改。建议格式：module:feature:action"
@@ -278,18 +299,11 @@ const ResourceEdit: React.FC = () => {
               { min: 2, max: 50, message: '资源名称长度必须在2-50个字符之间' },
             ]}
           >
-            <Input
-              placeholder="请输入资源名称，如：创建用户"
-              maxLength={50}
-            />
+            <Input placeholder="请输入资源名称，如：创建用户" maxLength={50} />
           </Form.Item>
 
           {/* 父级资源 */}
-          <Form.Item
-            name="parentId"
-            label="父级资源"
-            extra="选择父级资源以构建资源树结构"
-          >
+          <Form.Item name="parentId" label="父级资源" extra="选择父级资源以构建资源树结构">
             <Select
               placeholder="请选择父级资源（可选）"
               allowClear
@@ -310,10 +324,7 @@ const ResourceEdit: React.FC = () => {
               rules={[{ max: 200, message: '路由路径不能超过200个字符' }]}
               extra="前端路由路径，如：/system/users"
             >
-              <Input
-                placeholder="请输入路由路径"
-                maxLength={200}
-              />
+              <Input placeholder="请输入路由路径" maxLength={200} />
             </Form.Item>
           )}
 
@@ -325,20 +336,12 @@ const ResourceEdit: React.FC = () => {
               rules={[{ max: 50, message: '图标名称不能超过50个字符' }]}
               extra="Ant Design 图标名称，如：UserOutlined"
             >
-              <Input
-                placeholder="请输入图标名称"
-                maxLength={50}
-              />
+              <Input placeholder="请输入图标名称" maxLength={50} />
             </Form.Item>
           )}
 
           {/* 排序号 */}
-          <Form.Item
-            name="sortOrder"
-            label="排序号"
-            initialValue={0}
-            extra="数字越小排序越靠前"
-          >
+          <Form.Item name="sortOrder" label="排序号" initialValue={0} extra="数字越小排序越靠前">
             <Input type="number" placeholder="请输入排序号" />
           </Form.Item>
 
@@ -361,21 +364,12 @@ const ResourceEdit: React.FC = () => {
             label="描述"
             rules={[{ max: 500, message: '描述不能超过500个字符' }]}
           >
-            <TextArea
-              placeholder="请输入资源描述"
-              rows={4}
-              maxLength={500}
-              showCount
-            />
+            <TextArea placeholder="请输入资源描述" rows={4} maxLength={500} showCount />
           </Form.Item>
 
           <Form.Item style={{ marginTop: 24 }}>
             <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button
-                onClick={() => navigate('/admin/auth-center/resources')}
-              >
-                取消
-              </Button>
+              <Button onClick={() => navigate('/admin/auth-center/resources')}>取消</Button>
               <Button
                 type="primary"
                 htmlType="submit"

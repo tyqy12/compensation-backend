@@ -33,7 +33,7 @@ const NotFound: React.FC = () => {
           title="404 - 页面未找到"
           subTitle="抱歉，您访问的页面不存在。页面可能已被删除、移动或您输入的网址有误。"
           extra={
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
               <Space wrap size="middle" style={{ justifyContent: 'center' }}>
                 <Button type="primary" icon={<HomeOutlined />}>
                   <Link to="/">返回首页</Link>

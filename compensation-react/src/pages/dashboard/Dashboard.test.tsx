@@ -177,15 +177,13 @@ describe('Dashboard 工作台', () => {
       </TestWrapper>,
     );
 
-    // 等待引导弹窗出现
+    // Dashboard 延迟打开引导，直接等待弹窗正文，避免只命中页面上的触发按钮。
     await waitFor(
       () => {
-        expect(screen.getByText('新手引导')).toBeInTheDocument();
+        expect(screen.getByText('欢迎来到薪酬管理系统！')).toBeInTheDocument();
       },
-      { timeout: 2000 },
+      { timeout: 4000 },
     );
-
-    expect(screen.getByText('欢迎使用薪酬管理系统！')).toBeInTheDocument();
   });
 
   it('已完成引导的用户不应该自动显示引导', () => {
@@ -199,7 +197,7 @@ describe('Dashboard 工作台', () => {
     );
 
     // 引导弹窗不应该自动出现
-    expect(screen.queryByText('欢迎使用薪酬管理系统！')).not.toBeInTheDocument();
+    expect(screen.queryByText('欢迎来到薪酬管理系统！')).not.toBeInTheDocument();
   });
 
   it('应该能手动触发新手引导', async () => {
@@ -217,7 +215,7 @@ describe('Dashboard 工作台', () => {
 
     // 引导弹窗应该出现
     await waitFor(() => {
-      expect(screen.getByText('欢迎使用薪酬管理系统！')).toBeInTheDocument();
+      expect(screen.getByText('欢迎来到薪酬管理系统！')).toBeInTheDocument();
     });
   });
 
@@ -230,9 +228,15 @@ describe('Dashboard 工作台', () => {
 
     // 验证统计数字
     expect(screen.getByText('1,234')).toBeInTheDocument(); // 员工总数
-    expect(screen.getByText('2,680,000.00')).toBeInTheDocument(); // 本月支付
+    expect(screen.getByText(/2,680,000/)).toBeInTheDocument(); // 本月支付
     expect(screen.getByText('5')).toBeInTheDocument(); // 待处理批次
-    expect(screen.getByText('89.6')).toBeInTheDocument(); // 用户绑定率
+    expect(
+      screen.getByText(
+        (_, element) =>
+          element?.classList.contains('ant-statistic-content-value') &&
+          Boolean(element.textContent?.includes('89.6')),
+      ),
+    ).toBeInTheDocument(); // 用户绑定率
 
     // 验证趋势指示器
     expect(screen.getAllByText(/较上月/)).toHaveLength(4);
@@ -299,6 +303,17 @@ describe('Dashboard 工作台', () => {
     quickActions.forEach((action) => {
       expect(screen.getByText(action)).toBeInTheDocument();
     });
+  });
+
+  it('快捷入口使用扁平操作项而不是嵌套卡片', () => {
+    render(
+      <TestWrapper>
+        <Dashboard />
+      </TestWrapper>,
+    );
+
+    expect(document.querySelectorAll('.dashboard-quick-action')).toHaveLength(6);
+    expect(document.querySelector('.dashboard-quick-action .ant-card')).not.toBeInTheDocument();
   });
 
   it('应该显示最近活动记录', () => {

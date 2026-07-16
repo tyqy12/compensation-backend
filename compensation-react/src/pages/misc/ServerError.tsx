@@ -33,7 +33,7 @@ const ServerError: React.FC = () => {
           title="500 - 服务器错误"
           subTitle="抱歉，服务器出现了一些问题，暂时无法处理您的请求。我们的技术团队已经收到通知，正在紧急修复中。"
           extra={
-            <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+            <Space orientation="vertical" size="middle" style={{ width: '100%' }}>
               <Space wrap size="middle" style={{ justifyContent: 'center' }}>
                 <Button type="primary" icon={<HomeOutlined />}>
                   <Link to="/">返回首页</Link>

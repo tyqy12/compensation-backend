@@ -117,16 +117,7 @@ export const AppBreadcrumb: React.FC<AppBreadcrumbProps> = ({ style }) => {
     return null;
   }
 
-  return (
-    <Breadcrumb
-      style={{
-        padding: '12px 0',
-        fontSize: '14px',
-        ...style,
-      }}
-      items={breadcrumbItems}
-    />
-  );
+  return <Breadcrumb className="app-breadcrumb" style={style} items={breadcrumbItems} />;
 };
 
 export default AppBreadcrumb;

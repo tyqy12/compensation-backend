@@ -41,7 +41,8 @@ public class SettlementCallbackController {
         try {
             SettlementCallbackResult result = settlementService.handleCallback(providerCode, allParams);
             if (result.isSuccess()) {
-                return ResponseEntity.ok("SUCCESS");
+                String ack = "yunzhanghu".equalsIgnoreCase(providerCode) ? "success" : "SUCCESS";
+                return ResponseEntity.ok(ack);
             }
             log.warn("渠道回调处理失败: provider={}", providerCode);
             return ResponseEntity.internalServerError().body("FAIL");

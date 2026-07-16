@@ -222,6 +222,10 @@ export interface PayrollPreviewLineDto {
 
 interface PayrollSummaryBase {
   batchId?: number;
+  batchRevision?: number;
+  inputSnapshotHash?: string;
+  ruleSnapshotHash?: string;
+  calculationEngineVersion?: string;
   status?: string;
   periodLabel?: string;
   currency?: string;
@@ -260,7 +264,22 @@ export interface PayrollManagerReviewDto extends PayrollSummaryBase {
 export interface PayrollBatchSummaryDto {
   batchId?: number;
   batchNo?: string;
-  payCycle?: string;
+  payCycleId?: number;
+  ruleTemplateId?: number;
+  ruleTemplateVersion?: number;
+  payCycle?:
+    | string
+    | {
+        id?: number;
+        type?: string;
+        ruleTemplateId?: number;
+        ruleTemplateVersion?: number;
+        periodLabel?: string;
+        cycleCode?: string;
+        cycleName?: string;
+        cycleType?: string;
+        status?: string;
+      };
   cycleType?: string;
   payrollType?: string;
   periodLabel?: string;
@@ -272,6 +291,9 @@ export interface PayrollBatchSummaryDto {
   paymentStatus?: string;
   paymentBatchNo?: string;
   batchRevision?: number;
+  inputSnapshotHash?: string;
+  ruleSnapshotHash?: string;
+  calculationEngineVersion?: string;
   confirmationRequired?: boolean;
   confirmationMode?: string;
   confirmationCompletedTime?: string;
@@ -409,6 +431,8 @@ export interface PayrollTemplateDetailDto extends PayrollTemplateDto {
 export interface PayrollCycleDto {
   id?: number;
   type?: string;
+  ruleTemplateId?: number;
+  ruleTemplateVersion?: number;
   cycleCode?: string;
   cycleName?: string;
   payrollType?: string;
@@ -499,8 +523,8 @@ export interface AppRegistryDto {
   description?: string | null;
   ipWhitelist?: string[] | null;
   webhookUrl?: string | null;
-  createTime?: string;  // 与后端字段名保持一致
-  updateTime?: string;  // 与后端字段名保持一致
+  createTime?: string; // 与后端字段名保持一致
+  updateTime?: string; // 与后端字段名保持一致
   lastUsedAt?: string | null;
 }
 

@@ -12,18 +12,7 @@
 import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageContainer } from '@ant-design/pro-components';
-import {
-  Card,
-  Table,
-  Input,
-  Button,
-  Space,
-  Dropdown,
-  Typography,
-  Form,
-  Tag,
-  Badge,
-} from 'antd';
+import { Card, Table, Input, Button, Space, Dropdown, Typography, Form, Tag, Badge } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import {
   SearchOutlined,
@@ -92,11 +81,9 @@ const UserList: React.FC = () => {
     return roleNameMap[roleCode.trim()] || roleCode;
   };
 
-  const getRecordProvider = (record: UserRecord) =>
-    normalizeProvider(record.provider);
+  const getRecordProvider = (record: UserRecord) => normalizeProvider(record.provider);
 
-  const getRecordSubjectId = (record: UserRecord) =>
-    record.subjectId ?? null;
+  const getRecordSubjectId = (record: UserRecord) => record.subjectId ?? null;
 
   // 搜索处理
   const handleSearch = (values: any) => {
@@ -158,7 +145,7 @@ const UserList: React.FC = () => {
       key: 'username',
       width: 180,
       render: (text, record) => (
-        <Space direction="vertical" size={0}>
+        <Space orientation="vertical" size={0}>
           <Text strong>{text}</Text>
           {record.realName && (
             <Text type="secondary" style={{ fontSize: 12 }}>
@@ -173,10 +160,8 @@ const UserList: React.FC = () => {
       key: 'employee',
       width: 200,
       render: (_, record) => (
-        <Space direction="vertical" size={0}>
-          {record.employeeName && (
-            <Text style={{ fontSize: 12 }}>{record.employeeName}</Text>
-          )}
+        <Space orientation="vertical" size={0}>
+          {record.employeeName && <Text style={{ fontSize: 12 }}>{record.employeeName}</Text>}
           {record.employeeNo && (
             <Text type="secondary" style={{ fontSize: 12 }}>
               工号: {record.employeeNo}
@@ -216,7 +201,7 @@ const UserList: React.FC = () => {
         }
         const subjectId = getRecordSubjectId(record);
         return (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Badge status="success" text={PLATFORM_NAME_MAP[provider] ?? provider} />
             {subjectId ? (
               <Text type="secondary" style={{ fontSize: 12 }}>
@@ -271,12 +256,7 @@ const UserList: React.FC = () => {
     >
       <Card>
         {/* 搜索区域 */}
-        <Form
-          form={form}
-          layout="inline"
-          onFinish={handleSearch}
-          style={{ marginBottom: 16 }}
-        >
+        <Form form={form} layout="inline" onFinish={handleSearch} style={{ marginBottom: 16 }}>
           <Form.Item name="searchText" style={{ width: 400 }}>
             <Input
               placeholder="搜索用户、员工姓名、工号..."

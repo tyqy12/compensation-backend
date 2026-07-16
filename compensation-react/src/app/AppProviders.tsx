@@ -23,8 +23,16 @@ const queryClient = new QueryClient({
 const ThemedConfig: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const mode = useUIStore((s) => s.theme);
   const algorithm = mode === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm;
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = mode;
+  }, [mode]);
+
   return (
-    <ConfigProvider locale={zhCN} theme={{ token: appTheme.tokens, algorithm }}>
+    <ConfigProvider
+      locale={zhCN}
+      theme={{ token: appTheme.tokens, components: appTheme.components, algorithm }}
+    >
       {children}
     </ConfigProvider>
   );

@@ -9,9 +9,13 @@ public interface PayrollPaymentFailureService extends IService<PayrollPaymentFai
 
     PayrollPaymentFailure recordFailure(Long workflowId, Long payrollBatchId, String businessKey, String errorMessage);
 
-    void markResolved(Long workflowId, String paymentBatchNo);
+    void markRetrying(Long workflowId, String paymentBatchNo);
 
-    void markResolvedByPayrollBatchId(Long payrollBatchId, String paymentBatchNo);
+    void markRetryingByPayrollBatchId(Long payrollBatchId, String paymentBatchNo);
+
+    void markResolvedByPaymentBatchNo(String paymentBatchNo);
+
+    void markUnresolvedByPaymentBatchNo(String paymentBatchNo, String errorMessage);
 
     PayrollPaymentFailure retry(Long failureId, boolean triggerTransfer);
 

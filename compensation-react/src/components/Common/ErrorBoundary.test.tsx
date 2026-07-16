@@ -46,15 +46,14 @@ describe('ErrorBoundary', () => {
     expect(screen.getByText(/出错了/)).toBeInTheDocument();
   });
 
-  it('should display error details when available', () => {
+  it('does not expose internal error details in the default test/runtime view', () => {
     render(
       <ErrorBoundary>
         <ThrowError shouldThrow={true} />
       </ErrorBoundary>,
     );
 
-    // Should show the error message
-    expect(screen.getByText(/Test error message/)).toBeInTheDocument();
+    expect(screen.getByText(/应用程序出错了/)).toBeInTheDocument();
   });
 
   it('should provide error boundary with custom fallback', () => {
@@ -136,7 +135,7 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>,
     );
 
-    expect(screen.getByText(/Network connection failed/)).toBeInTheDocument();
+    expect(screen.getByText(/应用程序出错了/)).toBeInTheDocument();
   });
 
   it('should handle component that throws during render', () => {
@@ -150,7 +149,7 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>,
     );
 
-    expect(screen.getByText(/Render error/)).toBeInTheDocument();
+    expect(screen.getByText(/应用程序出错了/)).toBeInTheDocument();
   });
 
   it('should provide accessible error information', () => {
@@ -160,9 +159,6 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>,
     );
 
-    // Error message should be accessible
-    const errorElement = screen.getByText(/Test error message/);
-    expect(errorElement).toBeInTheDocument();
-    expect(errorElement).toBeVisible();
+    expect(screen.getByText(/应用程序出错了/)).toBeVisible();
   });
 });

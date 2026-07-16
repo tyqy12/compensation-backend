@@ -13,6 +13,8 @@ public class PayCycleUpsertRequest {
     @NotBlank
     @Size(max = 20)
     private String type; // monthly/custom
+    private Long ruleTemplateId;
+    private Long ruleTemplateVersion;
     @NotBlank
     @Size(max = 20)
     private String periodLabel; // YYYY-MM

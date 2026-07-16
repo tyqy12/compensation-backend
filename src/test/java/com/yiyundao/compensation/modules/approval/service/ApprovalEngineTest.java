@@ -4,12 +4,17 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.yiyundao.compensation.common.util.TransactionAfterCommitExecutor;
 import com.yiyundao.compensation.enums.ApprovalStatus;
+import com.yiyundao.compensation.enums.EmployeeStatus;
 import com.yiyundao.compensation.enums.UserStatus;
 import com.yiyundao.compensation.enums.WorkflowType;
+import com.yiyundao.compensation.infrastructure.dao.EmployeeMapper;
+import com.yiyundao.compensation.infrastructure.dao.PayrollLineMapper;
 import com.yiyundao.compensation.modules.approval.config.ApprovalFlowConfigManager;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalStep;
 import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.event.ApprovalCompletedEvent;
+import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.system.service.SysConfigService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
@@ -30,6 +35,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.never;
@@ -44,6 +50,10 @@ class ApprovalEngineTest {
     private ApprovalStepService approvalStepService;
     @Mock
     private SysUserService sysUserService;
+    @Mock
+    private PayrollLineMapper payrollLineMapper;
+    @Mock
+    private EmployeeMapper employeeMapper;
     @Mock
     private SysConfigService sysConfigService;
     @Mock
@@ -470,10 +480,85 @@ class ApprovalEngineTest {
                 workflow.getEmployeeId() != null && workflow.getEmployeeId().equals(2002L)));
     }
 
+    @Test
+    void payrollDistributionShouldResolveAllBatchManagersFromEmployeeRelations() {
+        ApprovalEngine engine = spy(newEngine());
+        ApprovalFlowConfigManager.ApprovalStepConfig managerStep = ApprovalFlowConfigManager.ApprovalStepConfig.builder()
+                .stepNo(1)
+                .stepName("部门负责人审批")
+                .role("ROLE_MANAGER")
+                .optional(false)
+                .build();
+        when(sysConfigService.getString(any(), any())).thenReturn(null);
+        when(approvalFlowConfigManager.getDefaultSteps(WorkflowType.PAYROLL_DISTRIBUTION))
+                .thenReturn(List.of(managerStep));
+        when(payrollLineMapper.selectList(any())).thenReturn(List.of(
+                payrollLine(11L), payrollLine(12L), payrollLine(13L)));
+        when(employeeMapper.selectBatchIds(anyCollection()))
+                .thenReturn(List.of(
+                        employee(11L, 101L), employee(12L, 102L), employee(13L, 101L)))
+                .thenReturn(List.of(employee(101L, null), employee(102L, null)));
+        when(sysUserService.findByEmployeeId(101L)).thenReturn(user(201L, "manager-a", UserStatus.ACTIVE));
+        when(sysUserService.findByEmployeeId(102L)).thenReturn(user(202L, "manager-b", UserStatus.ACTIVE));
+        doAnswer(invocation -> {
+            ApprovalWorkflow workflow = invocation.getArgument(0);
+            workflow.setId(9002L);
+            return true;
+        }).when(engine).save(any(ApprovalWorkflow.class));
+        when(approvalStepService.save(any(ApprovalStep.class))).thenReturn(true);
+
+        engine.startWorkflow(
+                WorkflowType.PAYROLL_DISTRIBUTION,
+                "payroll_distribution:10",
+                "payroll_distribution",
+                100L,
+                Map.of("batchId", 42L, "distributionId", 10L));
+
+        var captor = org.mockito.ArgumentCaptor.forClass(ApprovalStep.class);
+        verify(approvalStepService, org.mockito.Mockito.times(2)).save(captor.capture());
+        assertThat(captor.getAllValues())
+                .extracting(ApprovalStep::getApproverId)
+                .containsExactly(201L, 202L);
+        verify(sysUserService, never()).findFirstByRoleExcluding(any(), any());
+    }
+
+    @Test
+    void payrollDistributionShouldFailWhenEmployeeHasNoManager() {
+        ApprovalEngine engine = spy(newEngine());
+        ApprovalFlowConfigManager.ApprovalStepConfig managerStep = ApprovalFlowConfigManager.ApprovalStepConfig.builder()
+                .stepNo(1)
+                .stepName("部门负责人审批")
+                .role("ROLE_MANAGER")
+                .optional(false)
+                .build();
+        when(sysConfigService.getString(any(), any())).thenReturn(null);
+        when(approvalFlowConfigManager.getDefaultSteps(WorkflowType.PAYROLL_DISTRIBUTION))
+                .thenReturn(List.of(managerStep));
+        when(payrollLineMapper.selectList(any())).thenReturn(List.of(payrollLine(11L)));
+        when(employeeMapper.selectBatchIds(anyCollection())).thenReturn(List.of(employee(11L, null)));
+
+        assertThatThrownBy(() -> engine.startWorkflow(
+                WorkflowType.PAYROLL_DISTRIBUTION,
+                "payroll_distribution:10",
+                "payroll_distribution",
+                100L,
+                Map.of("batchId", 42L)))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("启动审批流程失败")
+                .hasRootCauseInstanceOf(IllegalStateException.class)
+                .rootCause()
+                .hasMessageContaining("未配置直属负责人");
+
+        verify(engine, never()).save(any(ApprovalWorkflow.class));
+        verify(approvalStepService, never()).save(any(ApprovalStep.class));
+    }
+
     private ApprovalEngine newEngine() {
         return new ApprovalEngine(
                 approvalStepService,
                 sysUserService,
+                payrollLineMapper,
+                employeeMapper,
                 emptyProvider(),
                 new ObjectMapper(),
                 sysConfigService,
@@ -517,6 +602,21 @@ class ApprovalEngineTest {
         user.setRealName(username);
         user.setStatus(status);
         return user;
+    }
+
+    private PayrollLine payrollLine(Long employeeId) {
+        PayrollLine line = new PayrollLine();
+        line.setEmployeeId(employeeId);
+        line.setBatchId(42L);
+        return line;
+    }
+
+    private Employee employee(Long id, Long managerId) {
+        Employee employee = new Employee();
+        employee.setId(id);
+        employee.setManagerId(managerId);
+        employee.setStatus(EmployeeStatus.ACTIVE.getCode());
+        return employee;
     }
 
     private ObjectProvider<OrganizationSyncService> emptyProvider() {

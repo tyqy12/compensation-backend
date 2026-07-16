@@ -18,6 +18,7 @@ import com.yiyundao.compensation.modules.payroll.entity.SalaryTemplate;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.SalaryItemService;
 import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateService;
+import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateVersionService;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
@@ -69,6 +70,8 @@ class PayrollCalculationServiceImplTest {
     private SalaryItemService salaryItemService;
     @Mock
     private SalaryTemplateService salaryTemplateService;
+    @Mock
+    private SalaryTemplateVersionService salaryTemplateVersionService;
     @Mock
     private PayrollLineService payrollLineService;
     @Mock
@@ -183,6 +186,7 @@ class PayrollCalculationServiceImplTest {
                 importItemMapper,
                 salaryItemService,
                 salaryTemplateService,
+                salaryTemplateVersionService,
                 payrollLineService,
                 employeeMapper,
                 new com.fasterxml.jackson.databind.ObjectMapper(),

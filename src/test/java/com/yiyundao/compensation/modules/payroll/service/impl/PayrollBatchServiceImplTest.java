@@ -134,6 +134,40 @@ class PayrollBatchServiceImplTest {
     }
 
     @Test
+    void updateStatus_shouldRejectIllegalTransition() {
+        PayrollBatchServiceImpl service = newService();
+        PayrollBatch batch = new PayrollBatch();
+        batch.setId(11L);
+        batch.setStatus(PayrollBatchStatus.DRAFT);
+        doReturn(batch).when(service).getById(11L);
+
+        assertThatThrownBy(() -> service.updateStatus(11L, PayrollBatchStatus.PAID.getCode()))
+                .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("不允许的薪资批次状态转移");
+
+        verify(service, never()).update(org.mockito.ArgumentMatchers.any(LambdaUpdateWrapper.class));
+    }
+
+    @Test
+    void updateStatus_shouldGuardExpectedStatusAndVersion() {
+        PayrollBatchServiceImpl service = newService();
+        PayrollBatch batch = new PayrollBatch();
+        batch.setId(12L);
+        batch.setStatus(PayrollBatchStatus.DRAFT);
+        batch.setVersion(3);
+        doReturn(batch).when(service).getById(12L);
+        doAnswer(invocation -> {
+            LambdaUpdateWrapper<PayrollBatch> wrapper = invocation.getArgument(0);
+            assertThat(wrapper.getSqlSegment()).contains("id =").contains("status =").contains("version =");
+            assertThat(wrapper.getParamNameValuePairs().values())
+                    .contains(PayrollBatchStatus.DRAFT, PayrollBatchStatus.LOCKED, 3, 4);
+            return true;
+        }).when(service).update(org.mockito.ArgumentMatchers.any(LambdaUpdateWrapper.class));
+
+        assertThat(service.updateStatus(12L, PayrollBatchStatus.LOCKED.getCode())).isTrue();
+    }
+
+    @Test
     void submitForApproval_shouldThrowWhenWorkflowStartFailsAfterConfirmationsClosed() {
         PayrollBatchServiceImpl service = newService();
 

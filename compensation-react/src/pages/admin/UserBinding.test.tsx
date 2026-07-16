@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Provider } from 'react-redux';
@@ -116,13 +116,43 @@ describe('UserBindingPage', () => {
       expect(screen.getByText('张三')).toBeInTheDocument();
       expect(screen.getByText('#1001')).toBeInTheDocument();
       expect(screen.getByText('bob')).toBeInTheDocument();
-      expect(screen.getByText('未绑定')).toBeInTheDocument();
+      expect(screen.getAllByText('未绑定')).toHaveLength(2);
     });
   });
 
   it('opens platform binding modal', async () => {
     const bindMutation = vi.fn().mockResolvedValue(undefined);
     mockUseBindUserMutation.mockReturnValue({ mutateAsync: bindMutation, isPending: false });
+    const bindingData = {
+      records: [
+        {
+          id: 1,
+          username: 'alice',
+          provider: 'wechat',
+          subjectId: 'wx_001',
+          bound: true,
+          employeeId: 1001,
+          employeeName: '张三',
+        },
+        {
+          id: 2,
+          username: 'bob',
+          provider: 'wechat',
+          subjectId: null,
+          bound: false,
+          employeeId: null,
+          employeeName: null,
+        },
+      ],
+      total: 2,
+    };
+    mockUseUserBindingsQuery.mockReturnValue({
+      data: bindingData,
+      isLoading: false,
+      isError: false,
+      error: null,
+      refetch: vi.fn().mockResolvedValue({ data: bindingData }),
+    });
 
     render(
       <TestWrapper>
@@ -130,15 +160,16 @@ describe('UserBindingPage', () => {
       </TestWrapper>,
     );
 
-    const bindButton = await screen.findAllByText('绑定');
-    fireEvent.click(bindButton[0]);
+    const bobCell = await screen.findByText('bob');
+    const bobRow = bobCell.closest('tr') as HTMLElement;
+    const bindButton = await within(bobRow).findByRole('button', { name: /绑定/ });
+    fireEvent.click(bindButton);
 
-    const select = await screen.findByRole('combobox');
-    fireEvent.mouseDown(select);
-    fireEvent.click(await screen.findByTitle('企业微信'));
-    const accountInput = await screen.findByPlaceholderText('请输入平台用户标识');
+    const bindDialog = await screen.findByRole('dialog');
+    expect(within(bindDialog).getByText(/绑定平台/)).toBeInTheDocument();
+    const accountInput = within(bindDialog).getByPlaceholderText('请输入平台用户标识');
     fireEvent.change(accountInput, { target: { value: 'wx_999' } });
-    fireEvent.click(screen.getByText('确定'));
+    fireEvent.click(within(bindDialog).getByRole('button', { name: /确\s*定/ }));
 
     await waitFor(() => {
       expect(bindMutation).toHaveBeenCalledWith({
@@ -162,8 +193,14 @@ describe('UserBindingPage', () => {
     const unbindButton = await screen.findByText('解绑');
     fireEvent.click(unbindButton);
 
-    const confirmButton = await screen.findByText('确定');
-    fireEvent.click(confirmButton);
+    const confirmTitles = await screen.findAllByText('确认解绑');
+    const confirmTitle =
+      confirmTitles.find((element) => {
+        const dialog = element.closest('[role="dialog"]');
+        return dialog && window.getComputedStyle(dialog).display !== 'none';
+      }) ?? confirmTitles[confirmTitles.length - 1];
+    const confirmDialog = confirmTitle.closest('[role="dialog"]') as HTMLElement;
+    fireEvent.click(within(confirmDialog).getByRole('button', { name: 'OK' }));
 
     await waitFor(() => {
       expect(unbindMutation).toHaveBeenCalledWith(1);
@@ -183,12 +220,14 @@ describe('UserBindingPage', () => {
       </TestWrapper>,
     );
 
-    const linkButtons = await screen.findAllByText('指定员工');
+    const linkButtons = await screen.findAllByRole('button', { name: '指定员工' });
     fireEvent.click(linkButtons[0]);
 
     const input = await screen.findByPlaceholderText('请输入员工ID');
     fireEvent.change(input, { target: { value: '2001' } });
-    fireEvent.click(screen.getByText('确定'));
+    const employeeTitle = await screen.findByText('指定员工 - alice');
+    const employeeDialog = employeeTitle.closest('[role="dialog"]') as HTMLElement;
+    fireEvent.click(within(employeeDialog).getByRole('button', { name: /确\s*定/ }));
 
     await waitFor(() => {
       expect(bindEmployeeMutation).toHaveBeenCalledWith({ id: 1, employeeId: 2001 });

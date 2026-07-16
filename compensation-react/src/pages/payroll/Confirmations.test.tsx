@@ -170,7 +170,8 @@ describe('PayrollConfirmations 确认工作台', () => {
     fireEvent.change(screen.getByPlaceholderText('可选，补充说明'), {
       target: { value: '确认无误' },
     });
-    const confirmDialog = await screen.findByRole('dialog', { name: /签字确认/ });
+    const confirmDialog = await screen.findByRole('dialog');
+    expect(within(confirmDialog).getByText(/签字确认/)).toBeInTheDocument();
     fireEvent.click(within(confirmDialog).getByRole('button', { name: /OK/i }));
 
     await waitFor(() => {
@@ -204,7 +205,8 @@ describe('PayrollConfirmations 确认工作台', () => {
     fireEvent.change(screen.getByPlaceholderText('可选，补充材料或说明'), {
       target: { value: '请按新政策复核' },
     });
-    const objectDialog = await screen.findByRole('dialog', { name: /发起异议/ });
+    const objectDialog = await screen.findByRole('dialog');
+    expect(within(objectDialog).getByText(/发起异议/)).toBeInTheDocument();
     fireEvent.click(within(objectDialog).getByRole('button', { name: /OK/i }));
 
     await waitFor(() => {
@@ -236,7 +238,8 @@ describe('PayrollConfirmations 确认工作台', () => {
     fireEvent.change(screen.getByPlaceholderText('可选，批量确认备注'), {
       target: { value: '按制度批量确认' },
     });
-    const batchDialog = await screen.findByRole('dialog', { name: /批量签字确认/ });
+    const batchDialog = await screen.findByRole('dialog');
+    expect(within(batchDialog).getByText('批量签字确认', { exact: true })).toBeInTheDocument();
     fireEvent.click(within(batchDialog).getByRole('button', { name: /OK/i }));
 
     await waitFor(() => {

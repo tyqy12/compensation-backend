@@ -39,11 +39,15 @@ Only use it with a brand-new DB/volume. For any existing database, run increment
 ## 4) Environment and Secrets
 The app service uses environment variables in `docker-compose.yml` to configure:
 - Database: `SPRING_DATASOURCE_URL/USERNAME/PASSWORD`
-- Redis: `SPRING_DATA_REDIS_HOST/PORT`
+- Redis: `SPRING_DATA_REDIS_HOST/PORT/PASSWORD`
 - JWT: `JWT_SECRET`, `JWT_EXPIRATION`, `JWT_REFRESH_EXPIRATION`
 - Encryption: `ENCRYPTION_SM4_KEY`, `ENCRYPTION_AES_KEY`
 
 Change default values before production. For extra safety, place them in a `.env` file and reference from compose.
+When `REDIS_PASSWORD` is set, Compose enables Redis authentication and passes the same value to the app:
+```bash
+REDIS_PASSWORD='your-redis-password' docker compose up -d --build
+```
 
 ## 5) Useful Commands
 ```bash

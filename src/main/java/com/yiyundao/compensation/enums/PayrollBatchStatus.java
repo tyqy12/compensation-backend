@@ -55,4 +55,30 @@ public enum PayrollBatchStatus {
                 || this == DISPUTE_PROCESSING
                 || this == REJECTED;
     }
+
+    /**
+     * 判断批次是否允许从当前状态进入目标状态。
+     * <p>
+     * 同状态转移用于幂等调用；支付失败重新发起支付属于显式的恢复路径。
+     * </p>
+     */
+    public boolean canTransitionTo(PayrollBatchStatus target) {
+        if (target == null || target == this) {
+            return target == this;
+        }
+        return switch (this) {
+            case DRAFT -> target == LOCKED;
+            case LOCKED -> target == CONFIRMING || target == CONFIRMED || target == SUBMITTED;
+            case CONFIRMING -> target == DISPUTE_PROCESSING || target == CONFIRMED;
+            case DISPUTE_PROCESSING -> target == CONFIRMING || target == CONFIRMED;
+            case CONFIRMED -> target == SUBMITTED || target == CONFIRMING;
+            case SUBMITTED -> target == APPROVED || target == REJECTED || target == CONFIRMED;
+            case APPROVED -> target == PAY_PROCESSING || target == PAY_FAILED;
+            case REJECTED -> target == LOCKED || target == CONFIRMING;
+            case PAY_PROCESSING -> target == PAY_FAILED || target == PAID;
+            case PAY_FAILED -> target == PAY_PROCESSING;
+            case PAID -> target == ARCHIVED;
+            case ARCHIVED -> false;
+        };
+    }
 }

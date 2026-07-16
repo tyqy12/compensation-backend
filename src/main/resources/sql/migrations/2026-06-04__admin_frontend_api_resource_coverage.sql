@@ -6,9 +6,17 @@
 SET NAMES utf8mb4;
 START TRANSACTION;
 SET @now := NOW();
-SET @admin_users_parent_id := (SELECT id FROM sys_resource WHERE code='admin.users' LIMIT 1);
+SET @admin_users_parent_id := COALESCE(
+    (SELECT id FROM sys_resource WHERE code='admin.auth-center' LIMIT 1),
+    (SELECT id FROM sys_resource WHERE code='admin.users' LIMIT 1),
+    (SELECT id FROM sys_resource WHERE code='admin' LIMIT 1)
+);
 SET @admin_roles_parent_id := (SELECT id FROM sys_resource WHERE code='admin.roles' LIMIT 1);
-SET @admin_resources_parent_id := (SELECT id FROM sys_resource WHERE code='admin.resources' LIMIT 1);
+SET @admin_resources_parent_id := COALESCE(
+    (SELECT id FROM sys_resource WHERE code='admin.resources.v2' LIMIT 1),
+    (SELECT id FROM sys_resource WHERE code='admin.resources' LIMIT 1),
+    (SELECT id FROM sys_resource WHERE code='admin' LIMIT 1)
+);
 SET @admin_audit_parent_id := (SELECT id FROM sys_resource WHERE code='admin.audit' LIMIT 1);
 SET @system_integration_parent_id := (SELECT id FROM sys_resource WHERE code='system.integration' LIMIT 1);
 SET @employees_parent_id := (SELECT id FROM sys_resource WHERE code='employees' LIMIT 1);

@@ -121,14 +121,8 @@ function ForbiddenPage() {
   return (
     <div style={{ textAlign: 'center', padding: '100px 0' }}>
       <h1 style={{ fontSize: 72, margin: 0, color: '#ff4d4f' }}>403</h1>
-      <p style={{ fontSize: 18, color: '#999', marginTop: 16 }}>
-        抱歉，您没有权限访问此页面
-      </p>
-      <Button
-        type="primary"
-        onClick={() => window.history.back()}
-        style={{ marginTop: 24 }}
-      >
+      <p style={{ fontSize: 18, color: '#999', marginTop: 16 }}>抱歉，您没有权限访问此页面</p>
+      <Button type="primary" onClick={() => window.history.back()} style={{ marginTop: 24 }}>
         返回上一页
       </Button>
     </div>
@@ -208,7 +202,7 @@ export function ButtonGuard({
 export function PageGuard({
   permissions,
   redirectTo = '/403',
-  loadingFallback = <Spin size="large" tip="正在检查权限..." />,
+  loadingFallback = <Spin size="large" description="正在检查权限..." />,
   children,
 }: PageGuardProps & { children: React.ReactNode }) {
   const { hasAllPermissions, isLoading } = usePermission();

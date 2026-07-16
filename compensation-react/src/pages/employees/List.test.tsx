@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { BrowserRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Provider } from 'react-redux';
@@ -81,9 +81,18 @@ describe('EmployeesList - Create Employee', () => {
     fireEvent.change(await screen.findByPlaceholderText('请输入员工姓名'), {
       target: { value: '张飞' },
     });
+    fireEvent.change(await screen.findByPlaceholderText('请输入银行卡号'), {
+      target: { value: '6222020202020202020' },
+    });
+    fireEvent.change(await screen.findByPlaceholderText('请输入开户银行'), {
+      target: { value: '中国银行' },
+    });
+    fireEvent.change(await screen.findByPlaceholderText('请输入开户支行'), {
+      target: { value: '总行' },
+    });
 
     // employmentType select -> choose 兼职 (part_time)
-    const typeSelect = (await screen.findAllByRole('combobox'))[0];
+    const typeSelect = document.getElementById('employmentType') as HTMLInputElement;
     fireEvent.mouseDown(typeSelect);
     fireEvent.click(await screen.findByTitle('兼职'));
 
@@ -93,7 +102,9 @@ describe('EmployeesList - Create Employee', () => {
     });
 
     // submit
-    fireEvent.click(screen.getByText('确定'));
+    const dialogs = await screen.findAllByRole('dialog', { name: /新增员工/ });
+    const dialog = dialogs.find((item) => window.getComputedStyle(item).display !== 'none') ?? dialogs[0];
+    fireEvent.click(within(dialog).getByRole('button', { name: /确\s*定/ }));
 
     await waitFor(() => {
       expect(createMutation).toHaveBeenCalled();

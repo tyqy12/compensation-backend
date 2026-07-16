@@ -6,6 +6,7 @@ SET @now := NOW();
 SET @system_parent_id := (SELECT id FROM sys_resource WHERE code = 'system' LIMIT 1);
 SET @admin_parent_id := (SELECT id FROM sys_resource WHERE code = 'admin' LIMIT 1);
 SET @admin_users_parent_id := COALESCE(
+    (SELECT id FROM sys_resource WHERE code = 'admin.auth-center' LIMIT 1),
     (SELECT id FROM sys_resource WHERE code = 'admin.users' LIMIT 1),
     @admin_parent_id
 );

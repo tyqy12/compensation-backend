@@ -450,7 +450,7 @@ public class SettlementCallbackController {
             SettlementCallbackResult result = settlementService.handleCallback(providerCode, allParams);
 
             if (result.isSuccess()) {
-                return ResponseEntity.ok("SUCCESS");
+                return ResponseEntity.ok("success");
             } else {
                 return ResponseEntity.status(500).body("FAIL: " + result.getErrorMsg());
             }

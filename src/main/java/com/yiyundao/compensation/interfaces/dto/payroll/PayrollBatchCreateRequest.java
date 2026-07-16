@@ -1,10 +1,12 @@
 package com.yiyundao.compensation.interfaces.dto.payroll;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 
 @Data
 public class PayrollBatchCreateRequest {
+    @NotNull(message = "必须选择发薪日历")
     private Long payCycleId;
     private String periodLabel; // 可冗余传入
     @NotBlank

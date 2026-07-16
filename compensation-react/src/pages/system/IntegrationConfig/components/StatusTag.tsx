@@ -12,7 +12,7 @@ import {
   DisconnectOutlined,
   ExclamationCircleOutlined,
 } from '@ant-design/icons';
-import { CONNECTION_STATUS_MAP, STYLES } from '../constants';
+import { CONNECTION_STATUS_MAP } from '../constants';
 
 interface StatusTagProps {
   status: string;
@@ -45,12 +45,7 @@ const StatusTag: React.FC<StatusTagProps> = ({ status }) => {
   const display = getStatusDisplay();
 
   return (
-    <Tag
-      icon={display.icon}
-      color={display.color}
-      style={STYLES.statusTag}
-      size="small"
-    >
+    <Tag icon={display.icon} color={display.color} className="integration-status-tag" size="small">
       {display.text}
     </Tag>
   );

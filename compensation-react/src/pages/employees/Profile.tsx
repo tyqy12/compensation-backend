@@ -61,7 +61,12 @@ function normalizeSettlementAccountType(value?: string | null): SettlementAccoun
   if (!normalized) {
     return undefined;
   }
-  if (normalized === 'bank_card' || normalized === 'alipay' || normalized === 'wechat' || normalized === 'other') {
+  if (
+    normalized === 'bank_card' ||
+    normalized === 'alipay' ||
+    normalized === 'wechat' ||
+    normalized === 'other'
+  ) {
     return normalized;
   }
   return undefined;
@@ -110,7 +115,9 @@ const EmployeeProfile: React.FC = () => {
   const [contactForm] = Form.useForm<EmployeeSelfContactUpdateData>();
   const [sensitiveForm] = Form.useForm<EmployeeSelfSensitiveChangeData>();
   const sensitiveSettlementType = Form.useWatch('settlementAccountType', sensitiveForm);
-  const resolvedSensitiveSettlementType = normalizeSettlementAccountType(String(sensitiveSettlementType ?? ''));
+  const resolvedSensitiveSettlementType = normalizeSettlementAccountType(
+    String(sensitiveSettlementType ?? ''),
+  );
 
   const currentUserQuery = useCurrentUserSummaryQuery();
   const hasEmployeeProfile = Boolean(
@@ -126,7 +133,10 @@ const EmployeeProfile: React.FC = () => {
   const submitChangeRequestMutation = useSubmitMyEmployeeChangeRequestMutation();
 
   const employee = profileQuery.data;
-  const requestRecords = useMemo(() => getPagedRecords(changeRequestsQuery.data), [changeRequestsQuery.data]);
+  const requestRecords = useMemo(
+    () => getPagedRecords(changeRequestsQuery.data),
+    [changeRequestsQuery.data],
+  );
 
   useEffect(() => {
     if (!employee) {
@@ -192,7 +202,10 @@ const EmployeeProfile: React.FC = () => {
     }
 
     const nextSettlementAccountName = normalizeTextValue(values.settlementAccountName);
-    if (nextSettlementAccountName && nextSettlementAccountName !== normalizeTextValue(employee?.settlementAccountName)) {
+    if (
+      nextSettlementAccountName &&
+      nextSettlementAccountName !== normalizeTextValue(employee?.settlementAccountName)
+    ) {
       payload.settlementAccountName = nextSettlementAccountName;
     }
 
@@ -216,7 +229,9 @@ const EmployeeProfile: React.FC = () => {
       payload.reason = reason;
     }
 
-    if (isBankCardType(payload.settlementAccountType ?? nextType ?? employee?.settlementAccountType)) {
+    if (
+      isBankCardType(payload.settlementAccountType ?? nextType ?? employee?.settlementAccountType)
+    ) {
       const resolvedBankAccount = payload.bankAccount ?? payload.settlementAccount;
       if (resolvedBankAccount) {
         payload.bankAccount = resolvedBankAccount;
@@ -225,14 +240,14 @@ const EmployeeProfile: React.FC = () => {
     }
 
     const hasSensitiveChanges = Boolean(
-      payload.name
-        || payload.idCard
-        || payload.settlementAccountType
-        || payload.settlementAccount
-        || payload.settlementAccountName
-        || payload.bankAccount
-        || payload.bankName
-        || payload.bankBranchName,
+      payload.name ||
+      payload.idCard ||
+      payload.settlementAccountType ||
+      payload.settlementAccount ||
+      payload.settlementAccountName ||
+      payload.bankAccount ||
+      payload.bankName ||
+      payload.bankBranchName,
     );
 
     if (!hasSensitiveChanges) {
@@ -339,7 +354,7 @@ const EmployeeProfile: React.FC = () => {
         <Alert
           type="error"
           showIcon
-          message="获取当前账号信息失败"
+          title="获取当前账号信息失败"
           description="请刷新页面后重试；若问题持续存在，请联系管理员排查账号状态。"
         />
       </PageContainer>
@@ -360,7 +375,7 @@ const EmployeeProfile: React.FC = () => {
         <Alert
           type="warning"
           showIcon
-          message="当前账号未绑定员工档案"
+          title="当前账号未绑定员工档案"
           description="该页面仅适用于已绑定员工档案的账号。请先在用户绑定中关联员工后，再使用个人资料维护。"
         />
       </PageContainer>
@@ -376,17 +391,19 @@ const EmployeeProfile: React.FC = () => {
           key="refresh"
           icon={<ReloadOutlined />}
           onClick={handleRefresh}
-          loading={currentUserQuery.isFetching || profileQuery.isFetching || changeRequestsQuery.isFetching}
+          loading={
+            currentUserQuery.isFetching || profileQuery.isFetching || changeRequestsQuery.isFetching
+          }
         >
           刷新
         </Button>,
       ]}
     >
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         <Alert
           type="info"
           showIcon
-          message="维护规则"
+          title="维护规则"
           description="手机号/邮箱修改后即时生效；姓名、身份证、收款账户信息会进入审批流程，审批通过后才会回写员工档案。"
         />
 
@@ -394,7 +411,9 @@ const EmployeeProfile: React.FC = () => {
           <Descriptions column={2} bordered size="small">
             <Descriptions.Item label="员工ID">{employee?.employeeId || '-'}</Descriptions.Item>
             <Descriptions.Item label="姓名">{employee?.name || '-'}</Descriptions.Item>
-            <Descriptions.Item label="手机号（脱敏）">{employee?.phoneMasked || '-'}</Descriptions.Item>
+            <Descriptions.Item label="手机号（脱敏）">
+              {employee?.phoneMasked || '-'}
+            </Descriptions.Item>
             <Descriptions.Item label="邮箱">{employee?.email || '-'}</Descriptions.Item>
             <Descriptions.Item label="部门">{employee?.department || '-'}</Descriptions.Item>
             <Descriptions.Item label="岗位">{employee?.position || '-'}</Descriptions.Item>
@@ -407,11 +426,19 @@ const EmployeeProfile: React.FC = () => {
             <Descriptions.Item label="收款类型">
               {employee?.settlementAccountTypeName || employee?.settlementAccountType || '-'}
             </Descriptions.Item>
-            <Descriptions.Item label="收款户名">{employee?.settlementAccountName || '-'}</Descriptions.Item>
-            <Descriptions.Item label="收款账号（脱敏）">{employee?.settlementAccountMasked || '-'}</Descriptions.Item>
-            <Descriptions.Item label="银行卡（脱敏）">{employee?.bankAccountMasked || '-'}</Descriptions.Item>
+            <Descriptions.Item label="收款户名">
+              {employee?.settlementAccountName || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="收款账号（脱敏）">
+              {employee?.settlementAccountMasked || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="银行卡（脱敏）">
+              {employee?.bankAccountMasked || '-'}
+            </Descriptions.Item>
             <Descriptions.Item label="开户银行">{employee?.bankName || '-'}</Descriptions.Item>
-            <Descriptions.Item label="开户支行">{employee?.bankBranchName || '-'}</Descriptions.Item>
+            <Descriptions.Item label="开户支行">
+              {employee?.bankBranchName || '-'}
+            </Descriptions.Item>
           </Descriptions>
         </Card>
 
@@ -439,7 +466,11 @@ const EmployeeProfile: React.FC = () => {
                   <Input placeholder="请输入邮箱地址" allowClear />
                 </Form.Item>
                 <Space>
-                  <Button type="primary" htmlType="submit" loading={updateContactMutation.isPending}>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    loading={updateContactMutation.isPending}
+                  >
                     保存联系方式
                   </Button>
                   <Button
@@ -465,7 +496,11 @@ const EmployeeProfile: React.FC = () => {
                 onFinish={handleSensitiveSubmit}
                 disabled={submitChangeRequestMutation.isPending}
               >
-                <Form.Item label="姓名" name="name" rules={[{ max: 100, message: '姓名不能超过100字符' }]}>
+                <Form.Item
+                  label="姓名"
+                  name="name"
+                  rules={[{ max: 100, message: '姓名不能超过100字符' }]}
+                >
                   <Input placeholder={`当前：${employee?.name || '未设置'}`} allowClear />
                 </Form.Item>
 
@@ -496,7 +531,10 @@ const EmployeeProfile: React.FC = () => {
                         if (!text) {
                           return;
                         }
-                        if (isBankCardType(resolvedSensitiveSettlementType) && !BANK_ACCOUNT_PATTERN.test(text)) {
+                        if (
+                          isBankCardType(resolvedSensitiveSettlementType) &&
+                          !BANK_ACCOUNT_PATTERN.test(text)
+                        ) {
                           throw new Error('银行卡账号需为8-30位数字');
                         }
                       },
@@ -514,7 +552,10 @@ const EmployeeProfile: React.FC = () => {
                   name="settlementAccountName"
                   rules={[{ max: 100, message: '收款账户实名不能超过100字符' }]}
                 >
-                  <Input placeholder={`当前：${employee?.settlementAccountName || '未设置'}`} allowClear />
+                  <Input
+                    placeholder={`当前：${employee?.settlementAccountName || '未设置'}`}
+                    allowClear
+                  />
                 </Form.Item>
 
                 {isBankCardType(resolvedSensitiveSettlementType) && (
@@ -522,9 +563,7 @@ const EmployeeProfile: React.FC = () => {
                     <Form.Item
                       label="银行卡号"
                       name="bankAccount"
-                      rules={[
-                        { pattern: BANK_ACCOUNT_PATTERN, message: '银行卡号需为8-30位数字' },
-                      ]}
+                      rules={[{ pattern: BANK_ACCOUNT_PATTERN, message: '银行卡号需为8-30位数字' }]}
                     >
                       <Input placeholder="请输入银行卡号" allowClear />
                     </Form.Item>
@@ -542,22 +581,31 @@ const EmployeeProfile: React.FC = () => {
                       name="bankBranchName"
                       rules={[{ max: 120, message: '开户支行不能超过120字符' }]}
                     >
-                      <Input placeholder={`当前：${employee?.bankBranchName || '未设置'}`} allowClear />
+                      <Input
+                        placeholder={`当前：${employee?.bankBranchName || '未设置'}`}
+                        allowClear
+                      />
                     </Form.Item>
                   </>
                 )}
 
-                <Form.Item label="变更原因（选填）" name="reason" rules={[{ max: 500, message: '原因不能超过500字符' }]}>
+                <Form.Item
+                  label="变更原因（选填）"
+                  name="reason"
+                  rules={[{ max: 500, message: '原因不能超过500字符' }]}
+                >
                   <TextArea rows={3} placeholder="请填写变更原因，便于审批人理解" />
                 </Form.Item>
 
                 <Space>
-                  <Button type="primary" htmlType="submit" loading={submitChangeRequestMutation.isPending}>
+                  <Button
+                    type="primary"
+                    htmlType="submit"
+                    loading={submitChangeRequestMutation.isPending}
+                  >
                     提交审批申请
                   </Button>
-                  <Button onClick={() => sensitiveForm.resetFields()}>
-                    重置
-                  </Button>
+                  <Button onClick={() => sensitiveForm.resetFields()}>重置</Button>
                 </Space>
               </Form>
             </Card>

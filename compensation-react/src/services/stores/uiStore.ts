@@ -6,13 +6,19 @@ type UIState = {
   theme: ThemeMode;
   collapsed: boolean;
   setTheme: (t: ThemeMode) => void;
+  setCollapsed: (collapsed: boolean) => void;
   toggleTheme: () => void;
   toggleCollapsed: () => void;
 };
 
 const readTheme = (): ThemeMode => {
-  const t = localStorage.getItem('theme');
-  return (t === 'dark' || t === 'light') ? t : 'light';
+  try {
+    if (typeof localStorage?.getItem !== 'function') return 'light';
+    const t = localStorage.getItem('theme');
+    return (t === 'dark' || t === 'light') ? t : 'light';
+  } catch {
+    return 'light';
+  }
 };
 
 export const useUIStore = create<UIState>((set, get) => ({
@@ -22,6 +28,7 @@ export const useUIStore = create<UIState>((set, get) => ({
     try { localStorage.setItem('theme', t); } catch {}
     set({ theme: t });
   },
+  setCollapsed: (collapsed) => set({ collapsed }),
   toggleTheme: () => {
     const next = get().theme === 'dark' ? 'light' : 'dark';
     try { localStorage.setItem('theme', next); } catch {}
@@ -29,4 +36,3 @@ export const useUIStore = create<UIState>((set, get) => ({
   },
   toggleCollapsed: () => set((s) => ({ collapsed: !s.collapsed })),
 }));
-

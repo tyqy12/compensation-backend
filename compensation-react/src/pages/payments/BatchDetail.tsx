@@ -92,7 +92,8 @@ const BatchDetail: React.FC = () => {
         <div>
           <p>确定要重试这笔失败的支付吗？</p>
           <div style={{ marginTop: 8 }}>
-            <Text type="secondary">支付金额：{formatAmount(record.amount)}</Text><br />
+            <Text type="secondary">支付金额：{formatAmount(record.amount)}</Text>
+            <br />
             <Text type="secondary">失败原因：{record.errorMsg || '未知错误'}</Text>
           </div>
         </div>
@@ -114,7 +115,7 @@ const BatchDetail: React.FC = () => {
 
   // 批量重试失败的记录
   const handleBatchRetry = async () => {
-    const failedRecords = recordsQuery.data?.filter(r => r.status === 'failed') || [];
+    const failedRecords = recordsQuery.data?.filter((r) => r.status === 'failed') || [];
 
     if (failedRecords.length === 0) {
       message.info('没有失败的记录需要重试');
@@ -127,7 +128,7 @@ const BatchDetail: React.FC = () => {
         <div>
           <p>确定要重试 {failedRecords.length} 笔失败的支付记录吗？</p>
           <Alert
-            message="批量重试将逐一处理每笔失败记录，请耐心等待"
+            title="批量重试将逐一处理每笔失败记录，请耐心等待"
             type="info"
             showIcon
             style={{ marginTop: 8 }}
@@ -138,7 +139,7 @@ const BatchDetail: React.FC = () => {
       onOk: async () => {
         // 并发重试所有失败的记录，保留每笔业务失败原因用于提示。
         const results = await Promise.allSettled(
-          failedRecords.map(record => retryMutation.mutateAsync(record.id)),
+          failedRecords.map((record) => retryMutation.mutateAsync(record.id)),
         );
         const rejectedResults = results.filter(
           (result): result is PromiseRejectedResult => result.status === 'rejected',
@@ -166,8 +167,8 @@ const BatchDetail: React.FC = () => {
     if (batch.submitTime) {
       items.push({
         color: 'blue',
-        dot: <CheckCircleOutlined style={{ fontSize: '16px' }} />,
-        children: (
+        icon: <CheckCircleOutlined style={{ fontSize: '16px' }} />,
+        content: (
           <div>
             <Text strong>批次已提交</Text>
             <div style={{ marginTop: 4 }}>
@@ -182,8 +183,8 @@ const BatchDetail: React.FC = () => {
     if (batch.approveTime) {
       items.push({
         color: 'green',
-        dot: <CheckCircleOutlined style={{ fontSize: '16px' }} />,
-        children: (
+        icon: <CheckCircleOutlined style={{ fontSize: '16px' }} />,
+        content: (
           <div>
             <Text strong>批次已审批</Text>
             <div style={{ marginTop: 4 }}>
@@ -198,14 +199,19 @@ const BatchDetail: React.FC = () => {
     if (batch.processStartTime) {
       items.push({
         color: batch.status === 'processing' ? 'blue' : 'green',
-        dot: batch.status === 'processing' ?
-          <SyncOutlined spin style={{ fontSize: '16px' }} /> :
-          <PlayCircleOutlined style={{ fontSize: '16px' }} />,
-        children: (
+        icon:
+          batch.status === 'processing' ? (
+            <SyncOutlined spin style={{ fontSize: '16px' }} />
+          ) : (
+            <PlayCircleOutlined style={{ fontSize: '16px' }} />
+          ),
+        content: (
           <div>
             <Text strong>开始处理转账</Text>
             <div style={{ marginTop: 4 }}>
-              <Text type="secondary">{dayjs(batch.processStartTime).format('YYYY-MM-DD HH:mm:ss')}</Text>
+              <Text type="secondary">
+                {dayjs(batch.processStartTime).format('YYYY-MM-DD HH:mm:ss')}
+              </Text>
             </div>
           </div>
         ),
@@ -217,14 +223,18 @@ const BatchDetail: React.FC = () => {
       const isSuccess = batch.status === 'completed';
       items.push({
         color: isSuccess ? 'green' : 'red',
-        dot: isSuccess ?
-          <CheckCircleOutlined style={{ fontSize: '16px' }} /> :
-          <CloseCircleOutlined style={{ fontSize: '16px' }} />,
-        children: (
+        icon: isSuccess ? (
+          <CheckCircleOutlined style={{ fontSize: '16px' }} />
+        ) : (
+          <CloseCircleOutlined style={{ fontSize: '16px' }} />
+        ),
+        content: (
           <div>
             <Text strong>{isSuccess ? '处理完成' : '处理失败'}</Text>
             <div style={{ marginTop: 4 }}>
-              <Text type="secondary">{dayjs(batch.processEndTime).format('YYYY-MM-DD HH:mm:ss')}</Text>
+              <Text type="secondary">
+                {dayjs(batch.processEndTime).format('YYYY-MM-DD HH:mm:ss')}
+              </Text>
             </div>
           </div>
         ),
@@ -235,12 +245,14 @@ const BatchDetail: React.FC = () => {
     if (batch.status === 'processing' && !batch.processEndTime) {
       items.push({
         color: 'blue',
-        dot: <ClockCircleOutlined style={{ fontSize: '16px' }} />,
-        children: (
+        icon: <ClockCircleOutlined style={{ fontSize: '16px' }} />,
+        content: (
           <div>
             <Text strong>正在处理中...</Text>
             <div style={{ marginTop: 4 }}>
-              <Text type="secondary">已处理 {batch.successCount + batch.failedCount} / {batch.totalCount} 笔</Text>
+              <Text type="secondary">
+                已处理 {batch.successCount + batch.failedCount} / {batch.totalCount} 笔
+              </Text>
             </div>
           </div>
         ),
@@ -299,7 +311,7 @@ const BatchDetail: React.FC = () => {
         <Statistic
           value={record.amount}
           formatter={(value) => formatAmount(Number(value))}
-          valueStyle={{ fontSize: '14px' }}
+          styles={{ content: { fontSize: '14px' } }}
         />
       ),
     },
@@ -347,11 +359,12 @@ const BatchDetail: React.FC = () => {
       copyable: true,
       ellipsis: true,
       search: false,
-      render: (_, record) => (record.providerTradeNo || record.alipayTradeNo) ? (
-        <Text code>{record.providerTradeNo || record.alipayTradeNo}</Text>
-      ) : (
-        <Text type="secondary">-</Text>
-      ),
+      render: (_, record) =>
+        record.providerTradeNo || record.alipayTradeNo ? (
+          <Text code>{record.providerTradeNo || record.alipayTradeNo}</Text>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
     },
     {
       title: '错误信息',
@@ -364,7 +377,8 @@ const BatchDetail: React.FC = () => {
           return (
             <Tooltip title={record.errorMsg}>
               <Text type="danger" ellipsis>
-                {record.errorCode ? `[${record.errorCode}] ` : ''}{record.errorMsg}
+                {record.errorCode ? `[${record.errorCode}] ` : ''}
+                {record.errorMsg}
               </Text>
             </Tooltip>
           );
@@ -377,42 +391,45 @@ const BatchDetail: React.FC = () => {
       dataIndex: 'createTime',
       width: 160,
       search: false,
-      render: (_, record) => record.createTime ? (
-        <Text>{dayjs(record.createTime).format('MM-DD HH:mm:ss')}</Text>
-      ) : (
-        <Text type="secondary">-</Text>
-      ),
+      render: (_, record) =>
+        record.createTime ? (
+          <Text>{dayjs(record.createTime).format('MM-DD HH:mm:ss')}</Text>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
     },
     {
       title: '支付时间',
       dataIndex: 'paymentTime',
       width: 160,
       search: false,
-      render: (_, record) => record.paymentTime ? (
-        <Text>{dayjs(record.paymentTime).format('MM-DD HH:mm:ss')}</Text>
-      ) : (
-        <Text type="secondary">-</Text>
-      ),
+      render: (_, record) =>
+        record.paymentTime ? (
+          <Text>{dayjs(record.paymentTime).format('MM-DD HH:mm:ss')}</Text>
+        ) : (
+          <Text type="secondary">-</Text>
+        ),
     },
     {
       title: '操作',
       valueType: 'option',
       width: 120,
-      render: (_, record) => [
-        record.status === 'failed' && (
-          <Tooltip key="retry" title="重试支付">
-            <Button
-              type="link"
-              size="small"
-              icon={<RedoOutlined />}
-              onClick={() => handleRetryRecord(record)}
-              loading={retryMutation.isPending}
-            >
-              重试
-            </Button>
-          </Tooltip>
-        ),
-      ].filter(Boolean),
+      render: (_, record) =>
+        [
+          record.status === 'failed' && (
+            <Tooltip key="retry" title="重试支付">
+              <Button
+                type="link"
+                size="small"
+                icon={<RedoOutlined />}
+                onClick={() => handleRetryRecord(record)}
+                loading={retryMutation.isPending}
+              >
+                重试
+              </Button>
+            </Tooltip>
+          ),
+        ].filter(Boolean),
     },
   ];
 
@@ -439,17 +456,10 @@ const BatchDetail: React.FC = () => {
             {toMessage(batchQuery.error) || '网络错误，请检查网络连接'}
           </div>
           <Space>
-            <Button
-              type="primary"
-              icon={<ReloadOutlined />}
-              onClick={() => batchQuery.refetch()}
-            >
+            <Button type="primary" icon={<ReloadOutlined />} onClick={() => batchQuery.refetch()}>
               重新加载
             </Button>
-            <Button
-              icon={<ArrowLeftOutlined />}
-              onClick={handleBackToList}
-            >
+            <Button icon={<ArrowLeftOutlined />} onClick={handleBackToList}>
               返回列表
             </Button>
           </Space>
@@ -461,7 +471,7 @@ const BatchDetail: React.FC = () => {
   const statusInfo = getBatchStatusInfo(batch.status);
   const progress = calculateBatchProgress(batch);
   const successRate = calculateBatchSuccessRate(batch);
-  const failedCount = recordsQuery.data?.filter(r => r.status === 'failed').length || 0;
+  const failedCount = recordsQuery.data?.filter((r) => r.status === 'failed').length || 0;
 
   return (
     <PageContainer
@@ -492,13 +502,15 @@ const BatchDetail: React.FC = () => {
       }}
     >
       {/* 统计卡片 - 单行显示 */}
-      <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4, marginBottom: 16 }}>
+      <div
+        style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4, marginBottom: 16 }}
+      >
         <Card size="small" style={{ flex: '0 0 auto', width: 140 }}>
           <Statistic
             title="支付总额"
             value={batch.totalAmount}
             formatter={(value) => formatAmount(Number(value))}
-            valueStyle={{ fontSize: '18px' }}
+            styles={{ content: { fontSize: '18px' } }}
           />
         </Card>
         <Card size="small" style={{ flex: '0 0 auto', width: 140 }}>
@@ -506,21 +518,21 @@ const BatchDetail: React.FC = () => {
             title="支付笔数"
             value={batch.totalCount}
             suffix="笔"
-            valueStyle={{ fontSize: '18px' }}
+            styles={{ content: { fontSize: '18px' } }}
           />
         </Card>
         <Card size="small" style={{ flex: '0 0 auto', width: 140 }}>
           <Statistic
             title="成功笔数"
             value={batch.successCount}
-            valueStyle={{ color: '#52c41a', fontSize: '18px' }}
+            styles={{ content: { color: '#52c41a', fontSize: '18px' } }}
           />
         </Card>
         <Card size="small" style={{ flex: '0 0 auto', width: 140 }}>
           <Statistic
             title="失败笔数"
             value={batch.failedCount}
-            valueStyle={{ color: '#ff4d4f', fontSize: '18px' }}
+            styles={{ content: { color: '#ff4d4f', fontSize: '18px' } }}
           />
         </Card>
       </div>
@@ -532,12 +544,19 @@ const BatchDetail: React.FC = () => {
             <div style={{ padding: '16px 0' }}>
               <Progress
                 percent={progress}
-                status={batch.status === 'failed' ? 'exception' :
-                       batch.status === 'completed' ? 'success' : 'active'}
-                strokeWidth={8}
+                status={
+                  batch.status === 'failed'
+                    ? 'exception'
+                    : batch.status === 'completed'
+                      ? 'success'
+                      : 'active'
+                }
+                size={{ height: 8 }}
               />
               <div style={{ marginTop: 8, fontSize: '14px' }}>
-                <Text>已处理：{batch.successCount + batch.failedCount} / {batch.totalCount} 笔</Text>
+                <Text>
+                  已处理：{batch.successCount + batch.failedCount} / {batch.totalCount} 笔
+                </Text>
                 {progress > 0 && (
                   <div style={{ marginTop: 4 }}>
                     <Text type="secondary">成功率：{successRate}%</Text>
@@ -549,10 +568,7 @@ const BatchDetail: React.FC = () => {
         </Col>
         <Col xs={24} md={12}>
           <ProCard title="处理时间线" size="small">
-            <Timeline
-              items={getTimelineItems()}
-              style={{ marginTop: 16 }}
-            />
+            <Timeline items={getTimelineItems()} style={{ marginTop: 16 }} />
           </ProCard>
         </Col>
       </Row>
@@ -596,26 +612,30 @@ const BatchDetail: React.FC = () => {
             {
               title: '提交时间',
               dataIndex: 'submitTime',
-              render: () => batch.submitTime ?
-                dayjs(batch.submitTime).format('YYYY-MM-DD HH:mm:ss') : '-',
+              render: () =>
+                batch.submitTime ? dayjs(batch.submitTime).format('YYYY-MM-DD HH:mm:ss') : '-',
             },
             {
               title: '审批时间',
               dataIndex: 'approveTime',
-              render: () => batch.approveTime ?
-                dayjs(batch.approveTime).format('YYYY-MM-DD HH:mm:ss') : '-',
+              render: () =>
+                batch.approveTime ? dayjs(batch.approveTime).format('YYYY-MM-DD HH:mm:ss') : '-',
             },
             {
               title: '开始处理时间',
               dataIndex: 'processStartTime',
-              render: () => batch.processStartTime ?
-                dayjs(batch.processStartTime).format('YYYY-MM-DD HH:mm:ss') : '-',
+              render: () =>
+                batch.processStartTime
+                  ? dayjs(batch.processStartTime).format('YYYY-MM-DD HH:mm:ss')
+                  : '-',
             },
             {
               title: '处理完成时间',
               dataIndex: 'processEndTime',
-              render: () => batch.processEndTime ?
-                dayjs(batch.processEndTime).format('YYYY-MM-DD HH:mm:ss') : '-',
+              render: () =>
+                batch.processEndTime
+                  ? dayjs(batch.processEndTime).format('YYYY-MM-DD HH:mm:ss')
+                  : '-',
             },
             {
               title: '备注',
@@ -674,20 +694,22 @@ const BatchDetail: React.FC = () => {
             collapsed: false,
             collapseRender: false,
           }}
-	          pagination={{
-	            pageSize: 20,
-	            showSizeChanger: true,
-	            showQuickJumper: true,
-	            showTotal: (total = 0, range) => {
-	              const [start, end] = range ?? [0, 0];
-	              return `第 ${start}-${end} 条/共 ${total} 条`;
-	            },
-	          }}
+          pagination={{
+            pageSize: 20,
+            showSizeChanger: true,
+            showQuickJumper: true,
+            showTotal: (total = 0, range) => {
+              const [start, end] = range ?? [0, 0];
+              return `第 ${start}-${end} 条/共 ${total} 条`;
+            },
+          }}
           loading={recordsQuery.isLoading || retryMutation.isPending}
           locale={{
             emptyText: recordsQuery.isError ? (
               <div style={{ textAlign: 'center', padding: '40px 20px' }}>
-                <ExclamationCircleOutlined style={{ fontSize: 48, color: '#ff4d4f', marginBottom: 16 }} />
+                <ExclamationCircleOutlined
+                  style={{ fontSize: 48, color: '#ff4d4f', marginBottom: 16 }}
+                />
                 <div style={{ fontSize: 16, marginBottom: 8 }}>数据加载失败</div>
                 <div style={{ color: '#8c8c8c', marginBottom: 16 }}>
                   {toMessage(recordsQuery.error) || '网络错误，请检查网络连接'}
@@ -704,7 +726,9 @@ const BatchDetail: React.FC = () => {
               <div style={{ textAlign: 'center', padding: '40px 20px' }}>
                 <div style={{ fontSize: 16, marginBottom: 8 }}>暂无支付记录</div>
                 <div style={{ color: '#8c8c8c' }}>
-                  {selectedStatus ? `没有状态为"${selectedStatus}"的支付记录` : '该批次还没有支付记录'}
+                  {selectedStatus
+                    ? `没有状态为"${selectedStatus}"的支付记录`
+                    : '该批次还没有支付记录'}
                 </div>
               </div>
             ),

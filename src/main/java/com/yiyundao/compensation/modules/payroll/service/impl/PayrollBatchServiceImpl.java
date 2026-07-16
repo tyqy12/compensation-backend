@@ -9,6 +9,7 @@ import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.enums.PayrollConfirmationStatus;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.modules.approval.service.ApprovalEngine;
+import com.yiyundao.compensation.enums.BatchStatus;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollApprovalProjection;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
@@ -59,14 +60,16 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
         log.info("Lock payroll batch: {}", batchId);
         PayrollBatch b = getById(batchId);
         if (b == null) return false;
-        if (b.getStatus() != PayrollBatchStatus.DRAFT) return false;
+        if (b.getStatus() == null || !b.getStatus().canTransitionTo(PayrollBatchStatus.LOCKED)) return false;
         int batchRevision = b.getBatchRevision() == null || b.getBatchRevision() < 1 ? 1 : b.getBatchRevision();
-        return update(new LambdaUpdateWrapper<PayrollBatch>()
+        LambdaUpdateWrapper<PayrollBatch> wrapper = new LambdaUpdateWrapper<PayrollBatch>()
                 .eq(PayrollBatch::getId, batchId)
-                .eq(PayrollBatch::getStatus, PayrollBatchStatus.DRAFT)
+                .eq(PayrollBatch::getStatus, b.getStatus())
                 .set(PayrollBatch::getStatus, PayrollBatchStatus.LOCKED)
                 .set(PayrollBatch::getCalculationStatus, PayrollCalculationStatus.LOCKED)
-                .set(PayrollBatch::getBatchRevision, batchRevision));
+                .set(PayrollBatch::getBatchRevision, batchRevision);
+        appendVersionGuard(wrapper, b);
+        return update(wrapper);
     }
 
     @Override
@@ -211,9 +214,41 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
     @Override
     @Transactional
     public boolean updateStatus(Long batchId, String status) {
-        return update(new LambdaUpdateWrapper<PayrollBatch>()
+        PayrollBatch batch = getById(batchId);
+        if (batch == null) {
+            return false;
+        }
+
+        PayrollBatchStatus target = PayrollBatchStatus.fromCode(status);
+        if (target == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "未知的薪资批次状态: " + status);
+        }
+        PayrollBatchStatus current = batch.getStatus();
+        if (current == null || !current.canTransitionTo(target)) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_STATUS,
+                    "不允许的薪资批次状态转移: " + (current == null ? "null" : current.getCode())
+                            + " -> " + target.getCode()
+            );
+        }
+        if (current == target) {
+            return true;
+        }
+
+        LambdaUpdateWrapper<PayrollBatch> wrapper = new LambdaUpdateWrapper<PayrollBatch>()
                 .eq(PayrollBatch::getId, batchId)
-                .set(PayrollBatch::getStatus, status));
+                .eq(PayrollBatch::getStatus, current)
+                .set(PayrollBatch::getStatus, target);
+        appendVersionGuard(wrapper, batch);
+        return update(wrapper);
+    }
+
+    private void appendVersionGuard(LambdaUpdateWrapper<PayrollBatch> wrapper, PayrollBatch batch) {
+        if (batch == null || batch.getVersion() == null) {
+            return;
+        }
+        wrapper.eq(PayrollBatch::getVersion, batch.getVersion())
+                .set(PayrollBatch::getVersion, batch.getVersion() + 1);
     }
 
     private SysUser resolveCurrentUser() {
@@ -404,12 +439,12 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
         try {
             // 调用支付服务创建支付批次
             var paymentBatch = payrollPaymentService.createPaymentBatch(batch, currentUser, triggerTransfer);
-            if (paymentBatch != null) {
+            if (paymentBatch != null && paymentBatch.getStatus() != BatchStatus.FAILED) {
                 log.info("重试创建支付批次成功: batchId={}, paymentBatchNo={}",
                         batchId, paymentBatch.getBatchNo());
                 return true;
             } else {
-                log.warn("重试创建支付批次失败，无有效支付记录: batchId={}", batchId);
+                log.warn("重试创建支付批次失败，无有效支付记录或支付批次已失败: batchId={}", batchId);
                 return false;
             }
         } catch (Exception e) {

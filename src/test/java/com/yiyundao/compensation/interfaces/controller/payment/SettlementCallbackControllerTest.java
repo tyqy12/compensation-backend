@@ -62,7 +62,7 @@ class SettlementCallbackControllerTest {
         );
 
         assertThat(response.getStatusCode().is2xxSuccessful()).isTrue();
-        assertThat(response.getBody()).isEqualTo("SUCCESS");
+        assertThat(response.getBody()).isEqualTo("success");
 
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, String>> captor = ArgumentCaptor.forClass(Map.class);

@@ -315,7 +315,7 @@ POST /admin/integration-configs/{platformType}/test-connection
 }
 ```
 
-**必填字段**: `dealerId`, `brokerId`, `appKey`, `des3Key`, `rsaPrivateKey`, `rsaPublicKey`, `signType`, `url`
+**必填字段**: `dealerId`, `brokerId`, `appKey`, `des3Key`, `rsaPrivateKey`, `rsaPublicKey`, `signType`, `url`, `dealerPlatformName`
 
 **沙箱地址**: `https://api-service.yunzhanghu.com/sandbox`
 

@@ -13,6 +13,8 @@ public class PayCycleResponseDto {
 
     private Long id;
     private String type;
+    private Long ruleTemplateId;
+    private Long ruleTemplateVersion;
     private String periodLabel;
     private String cycleCode;
     private String cycleName;
@@ -38,6 +40,8 @@ public class PayCycleResponseDto {
         return PayCycleResponseDto.builder()
                 .id(cycle.getId())
                 .type(cycle.getType())
+                .ruleTemplateId(cycle.getRuleTemplateId())
+                .ruleTemplateVersion(cycle.getRuleTemplateVersion())
                 .periodLabel(cycle.getPeriodLabel())
                 .cycleCode(cycle.getCycleCode())
                 .cycleName(cycle.getCycleName())

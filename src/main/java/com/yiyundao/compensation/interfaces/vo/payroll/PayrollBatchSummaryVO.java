@@ -22,6 +22,12 @@ public class PayrollBatchSummaryVO {
     @Schema(description = "发薪周期ID")
     private Long payCycleId;
 
+    @Schema(description = "批次锁定的薪资规则包ID")
+    private Long ruleTemplateId;
+
+    @Schema(description = "批次锁定的薪资规则包版本")
+    private Long ruleTemplateVersion;
+
     @Schema(description = "周期标签，如 2024-08")
     private String periodLabel;
 
@@ -33,6 +39,21 @@ public class PayrollBatchSummaryVO {
 
     @Schema(description = "批次状态")
     private String status;
+
+    @Schema(description = "计算状态")
+    private String calculationStatus;
+
+    @Schema(description = "批次结果版本号")
+    private Integer batchRevision;
+
+    @Schema(description = "输入事实快照摘要")
+    private String inputSnapshotHash;
+
+    @Schema(description = "薪资规则快照摘要")
+    private String ruleSnapshotHash;
+
+    @Schema(description = "计算引擎版本")
+    private String calculationEngineVersion;
 
     @Schema(description = "计算状态: pending/running/completed/failed/pay_processing")
     private String computeStatus;

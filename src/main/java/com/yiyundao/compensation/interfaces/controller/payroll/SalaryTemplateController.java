@@ -11,7 +11,9 @@ import com.yiyundao.compensation.enums.PayrollType;
 import com.yiyundao.compensation.interfaces.dto.payroll.SalaryTemplateResponseDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.SalaryTemplateUpsertRequest;
 import com.yiyundao.compensation.modules.payroll.entity.SalaryTemplate;
+import com.yiyundao.compensation.modules.payroll.entity.SalaryTemplateVersion;
 import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateService;
+import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateVersionService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -37,6 +39,7 @@ public class SalaryTemplateController {
     private static final String STATUS_DISABLED = "disabled";
 
     private final SalaryTemplateService salaryTemplateService;
+    private final SalaryTemplateVersionService salaryTemplateVersionService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -183,6 +186,10 @@ public class SalaryTemplateController {
         }
         String normalizedType = normalizeTemplateType(req.getType());
         String normalizedStatus = normalizeTemplateStatus(req.getStatus(), STATUS_ENABLED);
+        if (STATUS_ENABLED.equals(normalizedStatus) && hasAnotherEnabledTemplate(normalizedType, null)) {
+            return ApiResponse.error(ErrorCode.REQUEST_CONFLICT,
+                    "同一用工类型只能有一个启用中的规则包，请先停用现有规则包");
+        }
 
         SalaryTemplate t = new SalaryTemplate();
         t.setName(req.getName());
@@ -194,6 +201,7 @@ public class SalaryTemplateController {
 
         try {
             salaryTemplateService.save(t);
+            saveVersionSnapshot(t);
             log.info("创建薪资模板成功: id={}, name={}, dataVersion={}", t.getId(), t.getName(), t.getDataVersion());
         } catch (Exception e) {
             log.error("创建薪资模板失败: name={}", req.getName(), e);
@@ -224,6 +232,11 @@ public class SalaryTemplateController {
         }
         String normalizedType = req.getType() != null ? normalizeTemplateType(req.getType()) : null;
         String normalizedStatus = req.getStatus() != null ? normalizeTemplateStatus(req.getStatus(), null) : null;
+        String effectiveType = normalizedType != null ? normalizedType : t.getType();
+        if (STATUS_ENABLED.equals(normalizedStatus) && hasAnotherEnabledTemplate(effectiveType, id)) {
+            return ApiResponse.error(ErrorCode.REQUEST_CONFLICT,
+                    "同一用工类型只能有一个启用中的规则包，请先停用现有规则包");
+        }
 
         // 版本控制：只有当内容真正变化时才递增版本
         boolean contentChanged = false;
@@ -251,6 +264,9 @@ public class SalaryTemplateController {
 
         try {
             salaryTemplateService.updateById(t);
+            if (contentChanged) {
+                saveVersionSnapshot(t);
+            }
             log.info("更新薪资模板成功: id={}, dataVersion={}", id, t.getDataVersion());
         } catch (Exception e) {
             log.error("更新薪资模板失败: id={}", id, e);
@@ -280,6 +296,61 @@ public class SalaryTemplateController {
         return ApiResponse.success(info);
     }
 
+    @PostMapping("/{id}/publish")
+    public ApiResponse<SalaryTemplateResponseDto> publish(@PathVariable Long id) {
+        SalaryTemplate template = salaryTemplateService.getById(id);
+        if (template == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "template not found");
+        }
+        List<String> itemsErrors = validateItemsJson(template.getItemsJson());
+        if (!itemsErrors.isEmpty()) {
+            return ApiResponse.error(ErrorCode.PARAM_INVALID,
+                    "itemsJson验证失败: " + String.join("; ", itemsErrors));
+        }
+        List<String> taxErrors = validateTaxRuleJson(template.getTaxRuleJson());
+        if (!taxErrors.isEmpty()) {
+            return ApiResponse.error(ErrorCode.PARAM_INVALID,
+                    "taxRuleJson验证失败: " + String.join("; ", taxErrors));
+        }
+        if (STATUS_ENABLED.equals(template.getStatus())) {
+            return ApiResponse.success(SalaryTemplateResponseDto.from(template));
+        }
+        if (hasAnotherEnabledTemplate(template.getType(), id)) {
+            return ApiResponse.error(ErrorCode.REQUEST_CONFLICT,
+                    "同一用工类型只能有一个启用中的规则包，请先停用现有规则包");
+        }
+        template.setStatus(STATUS_ENABLED);
+        try {
+            salaryTemplateService.updateById(template);
+            saveVersionSnapshot(template);
+            log.info("发布薪资规则包成功: id={}, type={}, dataVersion={}",
+                    template.getId(), template.getType(), template.getDataVersion());
+        } catch (Exception e) {
+            log.error("发布薪资规则包失败: id={}", id, e);
+            return ApiResponse.error(ErrorCode.SYSTEM_ERROR, "发布薪资规则包失败");
+        }
+        return ApiResponse.success(SalaryTemplateResponseDto.from(template));
+    }
+
+    @PostMapping("/{id}/disable")
+    public ApiResponse<SalaryTemplateResponseDto> disable(@PathVariable Long id) {
+        SalaryTemplate template = salaryTemplateService.getById(id);
+        if (template == null) {
+            return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "template not found");
+        }
+        template.setStatus(STATUS_DISABLED);
+        try {
+            salaryTemplateService.updateById(template);
+            saveVersionSnapshot(template);
+            log.info("停用薪资规则包成功: id={}, type={}, dataVersion={}",
+                    template.getId(), template.getType(), template.getDataVersion());
+        } catch (Exception e) {
+            log.error("停用薪资规则包失败: id={}", id, e);
+            return ApiResponse.error(ErrorCode.SYSTEM_ERROR, "停用薪资规则包失败");
+        }
+        return ApiResponse.success(SalaryTemplateResponseDto.from(template));
+    }
+
     @GetMapping
     public ApiResponse<Page<SalaryTemplateResponseDto>> list(@RequestParam(defaultValue = "1") int page,
                                                              @RequestParam(defaultValue = "10") int size,
@@ -289,7 +360,8 @@ public class SalaryTemplateController {
         LambdaQueryWrapper<SalaryTemplate> qw = new LambdaQueryWrapper<>();
         if (type != null && !type.isBlank()) qw.eq(SalaryTemplate::getType, normalizeTemplateTypeFilter(type));
         if (status != null && !status.isBlank()) qw.eq(SalaryTemplate::getStatus, normalizeTemplateStatusFilter(status));
-        qw.orderByDesc(SalaryTemplate::getVersion); // 按版本号降序排列
+        qw.orderByDesc(SalaryTemplate::getDataVersion)
+                .orderByDesc(SalaryTemplate::getUpdateTime);
         return ApiResponse.success(toResponsePage(salaryTemplateService.page(p, qw)));
     }
 
@@ -347,6 +419,42 @@ public class SalaryTemplateController {
             throw new BusinessException(ErrorCode.PARAM_INVALID, "无效的模板状态: " + status);
         }
         return normalizedStatus;
+    }
+
+    private boolean hasAnotherEnabledTemplate(String type, Long excludeId) {
+        LambdaQueryWrapper<SalaryTemplate> query = new LambdaQueryWrapper<SalaryTemplate>()
+                .eq(SalaryTemplate::getType, type)
+                .eq(SalaryTemplate::getStatus, STATUS_ENABLED);
+        if (excludeId != null) {
+            query.ne(SalaryTemplate::getId, excludeId);
+        }
+        return salaryTemplateService.count(query) > 0;
+    }
+
+    private void saveVersionSnapshot(SalaryTemplate template) {
+        if (template == null || template.getId() == null) {
+            return;
+        }
+        long versionNo = template.getDataVersion() == null ? 1L : template.getDataVersion();
+        LambdaQueryWrapper<SalaryTemplateVersion> existingQuery = new LambdaQueryWrapper<SalaryTemplateVersion>()
+                .eq(SalaryTemplateVersion::getTemplateId, template.getId())
+                .eq(SalaryTemplateVersion::getVersionNo, versionNo)
+                .eq(SalaryTemplateVersion::getDeleted, 0);
+        if (salaryTemplateVersionService.count(existingQuery) > 0) {
+            return;
+        }
+
+        SalaryTemplateVersion snapshot = new SalaryTemplateVersion();
+        snapshot.setTemplateId(template.getId());
+        snapshot.setVersionNo(versionNo);
+        snapshot.setName(template.getName());
+        snapshot.setType(template.getType());
+        snapshot.setItemsJson(template.getItemsJson());
+        snapshot.setTaxRuleJson(template.getTaxRuleJson());
+        snapshot.setStatus(template.getStatus());
+        if (!salaryTemplateVersionService.save(snapshot)) {
+            throw new IllegalStateException("薪资规则包版本快照写入失败");
+        }
     }
 
     private void validateItemAmountBounds(JsonNode item, int index, List<String> errors) {

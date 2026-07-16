@@ -36,70 +36,25 @@ export const PageHeader: React.FC<PageHeaderProps> = ({
   };
 
   return (
-    <div
-      className={className}
-      style={{
-        backgroundColor: '#fff',
-        padding: '16px 24px',
-        marginBottom: '16px',
-        borderRadius: '6px',
-        boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.03)',
-        border: '1px solid #f0f0f0',
-        ...style,
-      }}
-    >
+    <div className={`app-navigation-page-header ${className || ''}`} style={style}>
       {/* 面包屑导航 */}
       <AppBreadcrumb />
 
       {/* 页面标题和操作 */}
       {(title || extra || showBack) && (
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            marginTop: title ? '8px' : 0,
-          }}
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="app-navigation-page-header-row">
+          <div className="app-navigation-page-header-copy">
             {showBack && (
-              <Button
-                type="text"
-                icon={<ArrowLeftOutlined />}
-                onClick={handleBack}
-                style={{ marginBottom: '8px' }}
-              >
+              <Button type="text" icon={<ArrowLeftOutlined />} onClick={handleBack}>
                 返回
               </Button>
             )}
-            {title && (
-              <h1
-                style={{
-                  fontSize: '24px',
-                  fontWeight: 600,
-                  margin: 0,
-                  marginBottom: subTitle ? '4px' : 0,
-                  color: '#262626',
-                }}
-              >
-                {title}
-              </h1>
-            )}
-            {subTitle && (
-              <p
-                style={{
-                  fontSize: '14px',
-                  color: '#8c8c8c',
-                  margin: 0,
-                }}
-              >
-                {subTitle}
-              </p>
-            )}
+            {title && <h1 className="app-navigation-page-header-title">{title}</h1>}
+            {subTitle && <p className="app-navigation-page-header-subtitle">{subTitle}</p>}
           </div>
 
           {extra && (
-            <div style={{ marginLeft: '16px' }}>
+            <div className="app-navigation-page-header-extra">
               {Array.isArray(extra) ? <Space>{extra}</Space> : extra}
             </div>
           )}

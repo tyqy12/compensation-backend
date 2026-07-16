@@ -117,13 +117,19 @@ class PayrollBatchControllerResponseTest {
 
     @Test
     void createShouldNormalizePayrollTypeBeforeSaving() {
+        when(payCycleService.getById(88L)).thenReturn(openCycle("2026-07"));
         when(payrollBatchService.save(any(PayrollBatch.class))).thenAnswer(invocation -> {
             PayrollBatch batch = invocation.getArgument(0);
             assertThat(batch.getType()).isEqualTo("part_time");
             return true;
         });
         PayrollBatchCreateRequest request = new PayrollBatchCreateRequest();
+        request.setPayCycleId(88L);
         request.setType("PART_TIME");
+
+        PayCycle cycle = openCycle("2026-07");
+        cycle.setType("part_time");
+        when(payCycleService.getById(88L)).thenReturn(cycle);
 
         controller.create(request);
 
@@ -155,6 +161,36 @@ class PayrollBatchControllerResponseTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
                 .isEqualTo(ErrorCode.INVALID_STATUS);
+    }
+
+    @Test
+    void createShouldRejectMissingPayCycle() {
+        PayrollBatchCreateRequest request = new PayrollBatchCreateRequest();
+        request.setType("full_time");
+
+        assertThatThrownBy(() -> controller.create(request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PARAM_INVALID);
+        verify(payrollBatchService, never()).save(any(PayrollBatch.class));
+    }
+
+    @Test
+    void createShouldRejectPayCycleWithDifferentPayrollType() {
+        PayCycle cycle = openCycle("2026-05");
+        cycle.setType("part_time");
+        when(payCycleService.getById(88L)).thenReturn(cycle);
+
+        PayrollBatchCreateRequest request = new PayrollBatchCreateRequest();
+        request.setPayCycleId(88L);
+        request.setPeriodLabel("2026-05");
+        request.setType("full_time");
+
+        assertThatThrownBy(() -> controller.create(request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode")
+                .isEqualTo(ErrorCode.PARAM_INVALID);
+        verify(payrollBatchService, never()).save(any(PayrollBatch.class));
     }
 
     @Test
@@ -333,6 +369,9 @@ class PayrollBatchControllerResponseTest {
     private PayCycle cycle(String periodLabel, String status) {
         PayCycle cycle = new PayCycle();
         cycle.setId(88L);
+        cycle.setType("full_time");
+        cycle.setRuleTemplateId(20L);
+        cycle.setRuleTemplateVersion(1L);
         cycle.setPeriodLabel(periodLabel);
         cycle.setStatus(status);
         return cycle;

@@ -111,19 +111,82 @@ const parseJsonSafe = <T,>(jsonStr: string, defaultValue: T): T => {
 
 // 默认薪资项目配置
 const DEFAULT_ITEMS: SalaryItem[] = [
-  { code: 'base_salary', name: '基本工资', type: 'earning', required: true, min: 0, description: '员工的基本薪资' },
-  { code: 'bonus', name: '奖金', type: 'earning', required: false, min: 0, description: '绩效奖金、年终奖等' },
-  { code: 'allowance', name: '津贴补贴', type: 'earning', required: false, min: 0, description: '餐补、交通补、住房补等' },
-  { code: 'tax', name: '个人所得税', type: 'deduction', required: true, min: 0, description: '工资薪金所得个人所得税' },
-  { code: 'social_security', name: '社保扣款', type: 'deduction', required: true, min: 0, description: '个人缴纳社保部分' },
-  { code: 'housing_fund', name: '公积金扣款', type: 'deduction', required: true, min: 0, description: '个人缴纳公积金部分' },
+  {
+    code: 'base_salary',
+    name: '基本工资',
+    type: 'earning',
+    required: true,
+    min: 0,
+    description: '员工的基本薪资',
+  },
+  {
+    code: 'bonus',
+    name: '奖金',
+    type: 'earning',
+    required: false,
+    min: 0,
+    description: '绩效奖金、年终奖等',
+  },
+  {
+    code: 'allowance',
+    name: '津贴补贴',
+    type: 'earning',
+    required: false,
+    min: 0,
+    description: '餐补、交通补、住房补等',
+  },
+  {
+    code: 'tax',
+    name: '个人所得税',
+    type: 'deduction',
+    required: true,
+    min: 0,
+    description: '工资薪金所得个人所得税',
+  },
+  {
+    code: 'social_security',
+    name: '社保扣款',
+    type: 'deduction',
+    required: true,
+    min: 0,
+    description: '个人缴纳社保部分',
+  },
+  {
+    code: 'housing_fund',
+    name: '公积金扣款',
+    type: 'deduction',
+    required: true,
+    min: 0,
+    description: '个人缴纳公积金部分',
+  },
 ];
 
 // 默认税务规则配置
 const DEFAULT_TAX_RULES: TaxRuleItem[] = [
-  { ruleCode: 'income_tax', ruleName: '个人所得税', rate: 0.03, applyOn: 'TAXABLE_EARNINGS', mode: 'HALF_UP', scale: 2 },
-  { ruleCode: 'social_security', ruleName: '社保个人缴费', rate: 0.1, applyOn: 'TAXABLE_EARNINGS', mode: 'HALF_UP', scale: 2 },
-  { ruleCode: 'housing_fund', ruleName: '公积金个人缴费', rate: 0.12, applyOn: 'TAXABLE_EARNINGS', mode: 'HALF_UP', scale: 2 },
+  {
+    ruleCode: 'income_tax',
+    ruleName: '个人所得税',
+    rate: 0.03,
+    applyOn: 'TAXABLE_EARNINGS',
+    mode: 'HALF_UP',
+    scale: 2,
+  },
+  {
+    ruleCode: 'social_security',
+    ruleName: '社保个人缴费',
+    rate: 0.1,
+    applyOn: 'TAXABLE_EARNINGS',
+    mode: 'HALF_UP',
+    scale: 2,
+  },
+  {
+    ruleCode: 'housing_fund',
+    ruleName: '公积金个人缴费',
+    rate: 0.12,
+    applyOn: 'TAXABLE_EARNINGS',
+    mode: 'HALF_UP',
+    scale: 2,
+  },
 ];
 
 // ==================== 主组件 ====================
@@ -169,14 +232,17 @@ const TemplatesPage: React.FC = () => {
   const updateMutation = useUpdateSalaryTemplateMutation();
 
   // ==================== URL 同步 ====================
-  const updateUrlParams = useCallback((params: SalaryTemplateListParams) => {
-    const next = new URLSearchParams();
-    if (params.current) next.set('page', String(params.current));
-    if (params.pageSize) next.set('size', String(params.pageSize));
-    if (params.type) next.set('type', params.type);
-    if (params.status) next.set('status', params.status);
-    setSearchParams(next);
-  }, [setSearchParams]);
+  const updateUrlParams = useCallback(
+    (params: SalaryTemplateListParams) => {
+      const next = new URLSearchParams();
+      if (params.current) next.set('page', String(params.current));
+      if (params.pageSize) next.set('size', String(params.pageSize));
+      if (params.type) next.set('type', params.type);
+      if (params.status) next.set('status', params.status);
+      setSearchParams(next);
+    },
+    [setSearchParams],
+  );
 
   // ==================== 统计数据 ====================
   const summary = useMemo(() => {
@@ -204,52 +270,64 @@ const TemplatesPage: React.FC = () => {
     setIsModalOpen(true);
   }, [form]);
 
-  const handleEdit = useCallback((record: SalaryTemplateDto) => {
-    setModalType('edit');
-    setEditingRecord(record);
-    
-    // 解析现有的 JSON 配置
-    const parsedItems = parseJsonSafe<SalaryItem[]>(record.itemsJson || '[]', DEFAULT_ITEMS);
-    const parsedTaxRules = parseJsonSafe<TaxRuleItem[]>(record.taxRuleJson || '[]', DEFAULT_TAX_RULES);
-    
-    setSalaryItems(parsedItems);
-    setTaxRules(parsedTaxRules);
-    setActiveTab('items');
-    
-    form.setFieldsValue({
-      name: record.name,
-      type: record.type,
-      status: record.status,
-    });
-    setIsModalOpen(true);
-  }, [form]);
+  const handleEdit = useCallback(
+    (record: SalaryTemplateDto) => {
+      setModalType('edit');
+      setEditingRecord(record);
 
-  const handleCopy = useCallback((record: SalaryTemplateDto) => {
-    setModalType('create');
-    setEditingRecord(null);
-    form.resetFields();
-    
-    // 解析现有的 JSON 配置
-    const parsedItems = parseJsonSafe<SalaryItem[]>(record.itemsJson || '[]', DEFAULT_ITEMS);
-    const parsedTaxRules = parseJsonSafe<TaxRuleItem[]>(record.taxRuleJson || '[]', DEFAULT_TAX_RULES);
-    
-    setSalaryItems(parsedItems);
-    setTaxRules(parsedTaxRules);
-    setActiveTab('items');
-    
-    form.setFieldsValue({
-      name: `${record.name} (副本)`,
-      type: record.type,
-      status: 'disabled',
-    });
-    setIsModalOpen(true);
-    message.info('已复制模板内容，请修改名称后保存');
-  }, [form]);
+      // 解析现有的 JSON 配置
+      const parsedItems = parseJsonSafe<SalaryItem[]>(record.itemsJson || '[]', DEFAULT_ITEMS);
+      const parsedTaxRules = parseJsonSafe<TaxRuleItem[]>(
+        record.taxRuleJson || '[]',
+        DEFAULT_TAX_RULES,
+      );
+
+      setSalaryItems(parsedItems);
+      setTaxRules(parsedTaxRules);
+      setActiveTab('items');
+
+      form.setFieldsValue({
+        name: record.name,
+        type: record.type,
+        status: record.status,
+      });
+      setIsModalOpen(true);
+    },
+    [form],
+  );
+
+  const handleCopy = useCallback(
+    (record: SalaryTemplateDto) => {
+      setModalType('create');
+      setEditingRecord(null);
+      form.resetFields();
+
+      // 解析现有的 JSON 配置
+      const parsedItems = parseJsonSafe<SalaryItem[]>(record.itemsJson || '[]', DEFAULT_ITEMS);
+      const parsedTaxRules = parseJsonSafe<TaxRuleItem[]>(
+        record.taxRuleJson || '[]',
+        DEFAULT_TAX_RULES,
+      );
+
+      setSalaryItems(parsedItems);
+      setTaxRules(parsedTaxRules);
+      setActiveTab('items');
+
+      form.setFieldsValue({
+        name: `${record.name} (副本)`,
+        type: record.type,
+        status: 'disabled',
+      });
+      setIsModalOpen(true);
+      message.info('已复制模板内容，请修改名称后保存');
+    },
+    [form],
+  );
 
   // 序列化税务规则为后端期望的对象格式
   const serializeTaxRules = useCallback((rules: TaxRuleItem[]): string => {
     const taxRuleObj: Record<string, any> = {};
-    
+
     for (const rule of rules) {
       if (rule.ruleCode === 'income_tax' || rule.ruleName?.includes('税')) {
         taxRuleObj.tax = {
@@ -263,14 +341,14 @@ const TemplatesPage: React.FC = () => {
         };
       }
     }
-    
+
     // 添加舍入配置
-    const firstRuleWithRounding = rules.find(r => r.mode || r.scale !== undefined);
+    const firstRuleWithRounding = rules.find((r) => r.mode || r.scale !== undefined);
     taxRuleObj.rounding = {
       scale: firstRuleWithRounding?.scale ?? 2,
       mode: firstRuleWithRounding?.mode || 'HALF_UP',
     };
-    
+
     return JSON.stringify(taxRuleObj, null, 2);
   }, []);
 
@@ -279,7 +357,7 @@ const TemplatesPage: React.FC = () => {
       const values = await form.validateFields();
 
       // 序列化配置为 JSON，确保所有必要字段都有值
-      const sanitizedItems = salaryItems.map(item => ({
+      const sanitizedItems = salaryItems.map((item) => ({
         code: item.code || 'unknown',
         name: item.name || '未命名项目',
         type: item.type || 'earning',
@@ -323,7 +401,16 @@ const TemplatesPage: React.FC = () => {
       const msg = error?.response?.data?.message || error?.message || '操作失败';
       message.error(msg);
     }
-  }, [form, modalType, editingRecord, createMutation, updateMutation, salaryItems, taxRules, serializeTaxRules]);
+  }, [
+    form,
+    modalType,
+    editingRecord,
+    createMutation,
+    updateMutation,
+    salaryItems,
+    taxRules,
+    serializeTaxRules,
+  ]);
 
   // ==================== 表格列定义 ====================
   const columns: ProColumns<SalaryTemplateDto>[] = [
@@ -428,9 +515,7 @@ const TemplatesPage: React.FC = () => {
             ),
             children: (
               <div style={{ maxHeight: 300, overflow: 'auto' }}>
-                <pre style={{ fontSize: 12, margin: 0 }}>
-                  {formatJson(detailRecord.itemsJson)}
-                </pre>
+                <pre style={{ fontSize: 12, margin: 0 }}>{formatJson(detailRecord.itemsJson)}</pre>
               </div>
             ),
           },
@@ -479,7 +564,7 @@ const TemplatesPage: React.FC = () => {
         ],
       }}
     >
-      <Space direction="vertical" size={16} style={{ width: '100%', padding: 24 }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%', padding: 24 }}>
         {/* 统计卡片 */}
         <div style={{ display: 'flex', gap: 12, overflowX: 'auto', paddingBottom: 4 }}>
           <Card size="small" style={{ flex: '0 0 auto', width: 140 }}>
@@ -487,7 +572,7 @@ const TemplatesPage: React.FC = () => {
               title="模板数量"
               value={summary.total}
               prefix={<FileTextOutlined />}
-              valueStyle={{ fontSize: 20 }}
+              styles={{ content: { fontSize: 20 } }}
             />
           </Card>
           <Card size="small" style={{ flex: '0 0 auto', width: 140 }}>
@@ -495,7 +580,7 @@ const TemplatesPage: React.FC = () => {
               title="启用模板"
               value={summary.enabled}
               prefix={<ThunderboltOutlined />}
-              valueStyle={{ fontSize: 20, color: '#52c41a' }}
+              styles={{ content: { fontSize: 20, color: '#52c41a' } }}
             />
           </Card>
           <Card size="small" style={{ flex: '0 0 auto', width: 140 }}>
@@ -503,7 +588,7 @@ const TemplatesPage: React.FC = () => {
               title="停用模板"
               value={summary.disabled}
               prefix={<SafetyCertificateOutlined />}
-              valueStyle={{ fontSize: 20 }}
+              styles={{ content: { fontSize: 20 } }}
             />
           </Card>
         </div>
@@ -626,12 +711,7 @@ const TemplatesPage: React.FC = () => {
                     薪资项目配置
                   </span>
                 ),
-                children: (
-                  <SalaryItemsConfig
-                    value={salaryItems}
-                    onChange={setSalaryItems}
-                  />
-                ),
+                children: <SalaryItemsConfig value={salaryItems} onChange={setSalaryItems} />,
               },
               {
                 key: 'tax',
@@ -641,12 +721,7 @@ const TemplatesPage: React.FC = () => {
                     税务/扣款规则
                   </span>
                 ),
-                children: (
-                  <TaxRulesConfig
-                    value={taxRules}
-                    onChange={setTaxRules}
-                  />
-                ),
+                children: <TaxRulesConfig value={taxRules} onChange={setTaxRules} />,
               },
             ]}
           />
@@ -675,7 +750,7 @@ const TemplatesPage: React.FC = () => {
       >
         <Spin spinning={detailQuery.isLoading}>
           {detailRecord && (
-            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={16} style={{ width: '100%' }}>
               <Descriptions column={1} bordered size="small">
                 <Descriptions.Item label="模板名称">{detailRecord.name}</Descriptions.Item>
                 <Descriptions.Item label="用工类型">
@@ -704,7 +779,7 @@ const TemplatesPage: React.FC = () => {
               <Alert
                 type="info"
                 showIcon
-                message="版本说明"
+                title="版本说明"
                 description="每次修改模板内容（薪资项目或税务规则），版本号会自动递增。历史版本可用于追溯和回滚。"
               />
             </Space>

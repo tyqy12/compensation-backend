@@ -59,7 +59,10 @@ const taskStatusOptions = [
   { label: '失败', value: 'failed' },
 ];
 
-const normalizeStatus = (value?: string) => String(value ?? '').trim().toLowerCase();
+const normalizeStatus = (value?: string) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase();
 
 const parsePositiveInt = (value: string | null | undefined, fallback?: number) => {
   const next = Number.parseInt(String(value ?? ''), 10);
@@ -82,10 +85,8 @@ const formatCurrency = (value?: number | null, currency = 'CNY') => {
 
 const formatDateTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—');
 
-const renderTag = (
-  meta: { text: string; color: string } | undefined,
-  fallback?: string,
-) => (meta ? <Tag color={meta.color}>{meta.text}</Tag> : fallback || '—');
+const renderTag = (meta: { text: string; color: string } | undefined, fallback?: string) =>
+  meta ? <Tag color={meta.color}>{meta.text}</Tag> : fallback || '—';
 
 const parseDifferenceDetail = (value?: string) => {
   if (!value) {
@@ -155,7 +156,9 @@ const Reconciliations: React.FC = () => {
   const [distributionIdInput, setDistributionIdInput] = useState<number | undefined>(
     initialFilters.distributionId,
   );
-  const [taskStatusInput, setTaskStatusInput] = useState<string | undefined>(initialFilters.taskStatus);
+  const [taskStatusInput, setTaskStatusInput] = useState<string | undefined>(
+    initialFilters.taskStatus,
+  );
   const [resultInput, setResultInput] = useState<string | undefined>(initialFilters.result);
   const [selectedTaskId, setSelectedTaskId] = useState<number | undefined>(initialTaskId);
 
@@ -258,7 +261,9 @@ const Reconciliations: React.FC = () => {
   const summary = useMemo(() => {
     const matched = records.filter((item) => normalizeStatus(item.result) === 'matched').length;
     const mismatch = records.filter((item) => normalizeStatus(item.result) === 'mismatch').length;
-    const processing = records.filter((item) => ['pending', 'processing'].includes(normalizeStatus(item.taskStatus))).length;
+    const processing = records.filter((item) =>
+      ['pending', 'processing'].includes(normalizeStatus(item.taskStatus)),
+    ).length;
     const totalDifference = records.reduce((sum, item) => sum + Math.abs(item.difference ?? 0), 0);
     return {
       total: reconciliationsQuery.data?.total ?? 0,
@@ -276,10 +281,12 @@ const Reconciliations: React.FC = () => {
         dataIndex: 'id',
         width: 220,
         render: (_, record) => (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Space size={8} wrap>
               <Text strong>{record.id ? `#${record.id}` : '—'}</Text>
-              {record.batchRevision != null && <Tag>{getBatchRevisionText(record.batchRevision)}</Tag>}
+              {record.batchRevision != null && (
+                <Tag>{getBatchRevisionText(record.batchRevision)}</Tag>
+              )}
             </Space>
             <Text type="secondary">发放单：{record.distributionNo || '—'}</Text>
             <Text type="secondary">批次：#{record.batchId ?? '—'}</Text>
@@ -291,10 +298,13 @@ const Reconciliations: React.FC = () => {
         key: 'status',
         width: 220,
         render: (_, record) => (
-          <Space direction="vertical" size={4}>
+          <Space orientation="vertical" size={4}>
             <Text>{record.periodLabel || '—'}</Text>
             <Space size={8} wrap>
-              {renderTag(taskStatusMeta[normalizeStatus(record.taskStatus)], record.taskStatus || '—')}
+              {renderTag(
+                taskStatusMeta[normalizeStatus(record.taskStatus)],
+                record.taskStatus || '—',
+              )}
               {renderTag(resultMeta[normalizeStatus(record.result)], record.result || '—')}
             </Space>
           </Space>
@@ -305,7 +315,7 @@ const Reconciliations: React.FC = () => {
         key: 'amounts',
         width: 240,
         render: (_, record) => (
-          <Space direction="vertical" size={2}>
+          <Space orientation="vertical" size={2}>
             <Text>应发：{formatCurrency(record.expectedAmount)}</Text>
             <Text>实发：{formatCurrency(record.actualAmount)}</Text>
             <Text type="secondary">差异：{formatCurrency(record.difference)}</Text>
@@ -365,7 +375,10 @@ const Reconciliations: React.FC = () => {
       {
         key: 'taskStatus',
         label: '任务状态',
-        children: renderTag(taskStatusMeta[normalizeStatus(detail.taskStatus)], detail.taskStatus || '—'),
+        children: renderTag(
+          taskStatusMeta[normalizeStatus(detail.taskStatus)],
+          detail.taskStatus || '—',
+        ),
       },
       {
         key: 'result',
@@ -388,7 +401,9 @@ const Reconciliations: React.FC = () => {
       {
         key: 'batch',
         label: '关联批次',
-        children: detail.batchId ? `#${detail.batchId} ${getBatchRevisionText(detail.batchRevision)}` : '—',
+        children: detail.batchId
+          ? `#${detail.batchId} ${getBatchRevisionText(detail.batchRevision)}`
+          : '—',
       },
       {
         key: 'period',
@@ -438,7 +453,7 @@ const Reconciliations: React.FC = () => {
         </Button>
       }
     >
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         <Card>
           <Space wrap>
             <InputNumber
@@ -487,20 +502,32 @@ const Reconciliations: React.FC = () => {
             <Statistic title="任务总数" value={summary.total} />
           </Card>
           <Card size="small">
-            <Statistic title="待处理" value={summary.processing} valueStyle={{ color: '#1677ff' }} />
+            <Statistic
+              title="待处理"
+              value={summary.processing}
+              styles={{ content: { color: '#1677ff' } }}
+            />
           </Card>
           <Card size="small">
-            <Statistic title="一致" value={summary.matched} valueStyle={{ color: '#52c41a' }} />
+            <Statistic
+              title="一致"
+              value={summary.matched}
+              styles={{ content: { color: '#52c41a' } }}
+            />
           </Card>
           <Card size="small">
-            <Statistic title="不一致" value={summary.mismatch} valueStyle={{ color: '#ff4d4f' }} />
+            <Statistic
+              title="不一致"
+              value={summary.mismatch}
+              styles={{ content: { color: '#ff4d4f' } }}
+            />
           </Card>
           <Card size="small">
             <Statistic title="累计差异" value={summary.totalDifference} precision={2} prefix="¥" />
           </Card>
         </Space>
 
-        <Card bodyStyle={{ padding: 0 }}>
+        <Card styles={{ body: { padding: 0 } }}>
           <Table<PayrollReconciliationTaskDto>
             rowKey={(record) => record.id ?? `${record.distributionId}-${record.batchId}`}
             loading={reconciliationsQuery.isLoading}
@@ -521,15 +548,18 @@ const Reconciliations: React.FC = () => {
 
       <Drawer
         title={detail?.id ? `对账任务详情 · #${detail.id}` : '对账任务详情'}
-        width={920}
+        size={920}
         open={drawerOpen}
         onClose={closeDrawer}
         extra={
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => {
-              reconciliationDetailQuery.refetch();
-              relatedDistributionQuery.refetch();
-            }}>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                reconciliationDetailQuery.refetch();
+                relatedDistributionQuery.refetch();
+              }}
+            >
               刷新
             </Button>
             {relatedDistribution?.paymentBatchNo && (
@@ -553,12 +583,12 @@ const Reconciliations: React.FC = () => {
       >
         <Spin spinning={drawerLoading}>
           {detail ? (
-            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={16} style={{ width: '100%' }}>
               {normalizeStatus(detail.result) === 'mismatch' && (
                 <Alert
                   type="error"
                   showIcon
-                  message="对账存在差异"
+                  title="对账存在差异"
                   description={`当前差异金额为 ${formatCurrency(detail.difference)}，请结合发放明细与渠道回执排查。`}
                 />
               )}

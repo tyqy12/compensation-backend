@@ -1,289 +1,182 @@
 import React from 'react';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { vi, describe, it, expect, beforeEach } from 'vitest';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { App as AntdApp, ConfigProvider } from 'antd';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { Provider } from 'react-redux';
 import { MemoryRouter } from 'react-router-dom';
-import { ConfigProvider } from 'antd';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AppLayout from './AppLayout';
+import { store } from '@services/stores/authSlice';
+import { useUIStore } from '@services/stores/uiStore';
 
-// Mock the stores
-const mockUiStore = {
-  theme: 'light',
-  collapsed: false,
-  toggleTheme: vi.fn(),
-  toggleSidebar: vi.fn(),
-};
+const mockRbac = vi.hoisted(() => ({ resources: [] as Record<string, unknown>[] }));
 
-const mockAuthStore = {
-  user: {
-    id: 1,
-    username: 'admin',
-    name: '管理员',
-    email: 'admin@company.com',
-    roles: ['ROLE_ADMIN'],
-  },
-  isAuthenticated: true,
-  logout: vi.fn(),
-};
-
-vi.mock('@services/stores/uiStore', () => ({
-  useUiStore: () => mockUiStore,
+vi.mock('@services/queries/auth', () => ({
+  useLogoutMutation: () => ({ mutate: vi.fn() }),
 }));
 
-vi.mock('@services/stores/authSlice', () => ({
-  useAuthStore: () => mockAuthStore,
+vi.mock('@services/queries/rbac', () => ({
+  useMeResourcesQuery: () => ({ data: { resources: mockRbac.resources }, isLoading: false }),
 }));
 
-// Mock ProLayout
-vi.mock('@ant-design/pro-layout', async () => {
-  const actual = await vi.importActual('@ant-design/pro-layout');
-  return {
-    ...actual,
-    ProLayout: ({ children, menuItemRender, headerContentRender, avatarProps, ...props }: any) => (
-      <div data-testid="pro-layout" {...props}>
-        <div data-testid="header">
-          {headerContentRender && headerContentRender()}
-          {avatarProps && (
-            <div data-testid="avatar" onClick={avatarProps.onClick}>
-              {avatarProps.title}
-            </div>
-          )}
-        </div>
-        <div data-testid="menu">
-          {props.route?.routes?.map((route: any) =>
-            menuItemRender ? (
-              menuItemRender({ path: route.path, name: route.name }, null, props)
-            ) : (
-              <div key={route.path} data-testid={`menu-item-${route.path}`}>
-                {route.name}
-              </div>
-            ),
-          )}
-        </div>
-        <div data-testid="content">{children}</div>
-      </div>
-    ),
-  };
-});
+vi.mock('@hooks/useWecomRegister', () => ({ useWecomRegister: vi.fn() }));
+vi.mock('@hooks/useMenuRefresh', () => ({ useMenuRefresh: vi.fn() }));
+vi.mock('@components/Navigation/Breadcrumb', () => ({
+  AppBreadcrumb: () => <div data-testid="breadcrumb" />,
+}));
+vi.mock('@components/Navigation/BackTop', () => ({
+  BackTop: () => <div data-testid="back-top" />,
+}));
 
-// Mock Outlet
-vi.mock('react-router-dom', async () => {
-  const actual = await vi.importActual('react-router-dom');
-  return {
-    ...actual,
-    Outlet: () => <div data-testid="outlet">Page Content</div>,
-    useNavigate: () => vi.fn(),
-    useLocation: () => ({ pathname: '/dashboard' }),
-  };
-});
-
-const TestWrapper: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const queryClient = new QueryClient({
-    defaultOptions: {
-      queries: { retry: false },
-      mutations: { retry: false },
-    },
-  });
-
+const TestWrapper: React.FC<{ children: React.ReactNode; initialEntries?: string[] }> = ({
+  children,
+  initialEntries = ['/'],
+}) => {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return (
-    <MemoryRouter>
+    <Provider store={store}>
       <QueryClientProvider client={queryClient}>
-        <ConfigProvider>{children}</ConfigProvider>
+        <ConfigProvider>
+          <AntdApp>
+            <MemoryRouter initialEntries={initialEntries}>{children}</MemoryRouter>
+          </AntdApp>
+        </ConfigProvider>
       </QueryClientProvider>
-    </MemoryRouter>
+    </Provider>
   );
 };
 
 describe('AppLayout', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it('should render layout with user info', () => {
-    render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    expect(screen.getByTestId('pro-layout')).toBeInTheDocument();
-    expect(screen.getByTestId('content')).toBeInTheDocument();
-    expect(screen.getByTestId('outlet')).toBeInTheDocument();
-  });
-
-  it('should render menu items', () => {
-    render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    // Check if menu container exists
-    expect(screen.getByTestId('menu')).toBeInTheDocument();
-  });
-
-  it('should render header with user avatar', () => {
-    render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    expect(screen.getByTestId('header')).toBeInTheDocument();
-  });
-
-  it('should render theme toggle when theme prop is provided', () => {
-    const { rerender } = render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    // Mock the theme toggle component being rendered
-    expect(screen.getByTestId('header')).toBeInTheDocument();
-
-    // Test theme switching
-    mockUiStore.theme = 'dark';
-    rerender(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    expect(screen.getByTestId('header')).toBeInTheDocument();
-  });
-
-  it('should handle avatar click', () => {
-    render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    const avatar = screen.queryByTestId('avatar');
-    if (avatar) {
-      fireEvent.click(avatar);
-      // Avatar click should work without errors
-      expect(avatar).toBeInTheDocument();
-    }
-  });
-
-  it('should render with collapsed sidebar', () => {
-    mockUiStore.collapsed = true;
-
-    render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    expect(screen.getByTestId('pro-layout')).toBeInTheDocument();
-  });
-
-  it('should render with expanded sidebar', () => {
-    mockUiStore.collapsed = false;
-
-    render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    expect(screen.getByTestId('pro-layout')).toBeInTheDocument();
-  });
-
-  it('should apply dark theme styles', () => {
-    mockUiStore.theme = 'dark';
-
-    render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    expect(screen.getByTestId('pro-layout')).toBeInTheDocument();
-  });
-
-  it('should apply light theme styles', () => {
-    mockUiStore.theme = 'light';
-
-    render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    expect(screen.getByTestId('pro-layout')).toBeInTheDocument();
-  });
-
-  it('should render without user when not authenticated', () => {
-    mockAuthStore.isAuthenticated = false;
-    mockAuthStore.user = null;
-
-    render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    expect(screen.getByTestId('pro-layout')).toBeInTheDocument();
-    expect(screen.getByTestId('content')).toBeInTheDocument();
-  });
-
-  it('should render with different user roles', () => {
-    mockAuthStore.user = {
-      id: 2,
-      username: 'user',
-      name: '普通用户',
-      email: 'user@company.com',
-      roles: ['ROLE_USER'],
-    };
-
-    render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    expect(screen.getByTestId('pro-layout')).toBeInTheDocument();
-  });
-
-  it('should handle store updates', async () => {
-    const { rerender } = render(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    // Simulate store updates
-    mockUiStore.collapsed = true;
-    mockUiStore.theme = 'dark';
-
-    rerender(
-      <TestWrapper>
-        <AppLayout />
-      </TestWrapper>,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByTestId('pro-layout')).toBeInTheDocument();
+    mockRbac.resources = [];
+    useUIStore.setState({ theme: 'light', collapsed: false });
+    store.dispatch({
+      type: 'auth/setSession',
+      payload: { user: { id: 'admin', username: 'admin', roles: ['ROLE_ADMIN'] } },
     });
   });
 
-  it('should render responsive layout', () => {
-    // Mock window size
-    Object.defineProperty(window, 'innerWidth', {
-      writable: true,
-      configurable: true,
-      value: 768,
-    });
+  it('renders the application shell and its content', () => {
+    render(
+      <TestWrapper>
+        <AppLayout>
+          <div>Page Content</div>
+        </AppLayout>
+      </TestWrapper>,
+    );
 
+    expect(screen.getByText('薪酬管理后台')).toBeInTheDocument();
+    expect(screen.getByText('admin')).toBeInTheDocument();
+    expect(screen.getByText('Page Content')).toBeInTheDocument();
+    expect(screen.getByTestId('breadcrumb')).toBeInTheDocument();
+  });
+
+  it('shows the empty-resource fallback menu for administrators', () => {
+    render(
+      <TestWrapper>
+        <AppLayout>
+          <div>Page Content</div>
+        </AppLayout>
+      </TestWrapper>,
+    );
+
+    expect(screen.getByText('菜单管理')).toBeInTheDocument();
+    expect(screen.getByText('角色管理')).toBeInTheDocument();
+  });
+
+  it('renders without page content', () => {
     render(
       <TestWrapper>
         <AppLayout />
       </TestWrapper>,
     );
 
-    expect(screen.getByTestId('pro-layout')).toBeInTheDocument();
+    expect(screen.getByText('薪酬管理后台')).toBeInTheDocument();
+  });
+
+  it('toggles the sidebar and keeps the state in sync', () => {
+    render(
+      <TestWrapper>
+        <AppLayout />
+      </TestWrapper>,
+    );
+
+    const sider = screen.getByRole('complementary');
+    const collapseButton = screen.getByRole('button', { name: '折叠侧边导航' });
+
+    expect(sider).not.toHaveClass('ant-layout-sider-collapsed');
+    fireEvent.click(collapseButton);
+    expect(sider).toHaveClass('ant-layout-sider-collapsed');
+    expect(screen.getByRole('button', { name: '展开侧边导航' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '展开侧边导航' }));
+    expect(sider).not.toHaveClass('ant-layout-sider-collapsed');
+  });
+
+  it('renders resource icons so collapsed navigation remains usable', () => {
+    mockRbac.resources = [
+      {
+        id: 1,
+        type: 'MENU',
+        code: 'employees',
+        name: '员工管理',
+        path: '/employees',
+        icon: 'team',
+        parentId: null,
+        orderNum: 1,
+      },
+    ];
+
+    const { container } = render(
+      <TestWrapper>
+        <AppLayout />
+      </TestWrapper>,
+    );
+
+    expect(container.querySelector('.anticon-team')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '折叠侧边导航' }));
+    expect(container.querySelector('.anticon-team')).toBeInTheDocument();
+  });
+
+  it('renders every database resource even when paths overlap', async () => {
+    mockRbac.resources = [
+      {
+        id: 1,
+        type: 'MENU',
+        code: 'menu.system.payroll',
+        name: '薪酬管理',
+        path: null,
+        parentId: null,
+        orderNum: 1,
+      },
+      {
+        id: 2,
+        type: 'VIEW',
+        code: 'view.payroll.batches',
+        name: '旧版批次视图',
+        path: '/payroll/batches',
+        parentId: 1,
+        orderNum: 1,
+      },
+      {
+        id: 3,
+        type: 'MENU',
+        code: 'menu.payroll.batches',
+        name: '薪酬批次',
+        path: '/payroll/batches',
+        parentId: 1,
+        orderNum: 2,
+      },
+    ];
+
+    render(
+      <TestWrapper initialEntries={['/payroll/batches']}>
+        <AppLayout />
+      </TestWrapper>,
+    );
+
+    fireEvent.click(screen.getByText('薪酬管理'));
+    await waitFor(() => expect(screen.getByText('薪酬批次')).toBeInTheDocument());
+    expect(screen.getByText('旧版批次视图')).toBeInTheDocument();
   });
 });

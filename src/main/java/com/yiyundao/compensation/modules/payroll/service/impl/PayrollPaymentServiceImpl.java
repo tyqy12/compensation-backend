@@ -7,10 +7,6 @@ import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.common.util.TransactionAfterCommitExecutor;
-import com.yiyundao.compensation.common.utils.SettlementAccountPlaintextGuard;
-import com.yiyundao.compensation.common.utils.ValidationUtils;
-import com.yiyundao.compensation.enums.EmploymentType;
-import com.yiyundao.compensation.enums.SettlementAccountType;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.infrastructure.dao.PayrollDistributionItemMapper;
 import com.yiyundao.compensation.infrastructure.dao.PayrollDistributionMapper;
@@ -21,7 +17,7 @@ import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
 import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.modules.payment.service.SettlementService;
-import com.yiyundao.compensation.modules.payment.support.SettlementRouteProviderResolver;
+import com.yiyundao.compensation.modules.payment.support.SettlementRecipientRouteResolver;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollDistribution;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollDistributionItem;
@@ -105,12 +101,14 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
         }
 
         List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
-                .eq(PayrollLine::getBatchId, payrollBatch.getId()));
+                .eq(PayrollLine::getBatchId, payrollBatch.getId())
+                .eq(PayrollLine::getBatchRevision, normalizeRevision(payrollBatch.getBatchRevision())));
         if (lines.isEmpty()) {
             boolean computed = computePayrollLinesIfNeeded(payrollBatch);
             if (computed) {
                 lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
-                        .eq(PayrollLine::getBatchId, payrollBatch.getId()));
+                        .eq(PayrollLine::getBatchId, payrollBatch.getId())
+                        .eq(PayrollLine::getBatchRevision, normalizeRevision(payrollBatch.getBatchRevision())));
             }
         }
         if (lines.isEmpty()) {
@@ -134,8 +132,10 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
             }
             Employee employee = getEmployeeService().getById(line.getEmployeeId());
             if (employee == null) {
-                log.warn("Employee {} missing for payroll line {}", line.getEmployeeId(), line.getId());
-                continue;
+                throw new BusinessException(
+                        ErrorCode.RESOURCE_NOT_FOUND,
+                        "工资行关联的员工不存在: employeeId=" + line.getEmployeeId() + ", lineId=" + line.getId()
+                );
             }
 
             PaymentRecord record = new PaymentRecord();
@@ -207,6 +207,7 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
 
         payrollBatch.setPaymentBatchNo(batchNo);
         payrollBatch.setStatus(targetStatus);
+        payrollBatch.setPaymentStatus(paymentBatch.getPaymentStatus());
 
         if (triggerTransfer && payableCount > 0) {
             afterCommitExecutor.execute(() -> settlementService.batchTransfer(batchNo));
@@ -294,6 +295,11 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
 
         boolean updatePaymentBatch = paymentBatchService.update(new UpdateWrapper<PaymentBatch>()
                 .eq("batch_no", batchNo)
+                .and(status -> status
+                        .eq("status", BatchStatus.FAILED.getCode())
+                        .or(partial -> partial
+                                .eq("status", BatchStatus.COMPLETED.getCode())
+                                .eq("payment_status", PaymentBatchProcessStatus.PARTIAL_SUCCESS.getCode())))
                 .set("status", BatchStatus.SUBMITTED.getCode())
                 .set("payment_status", PaymentBatchProcessStatus.SUBMITTED.getCode())
                 .set("success_count", (int) successCount)
@@ -308,10 +314,11 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
 
         payrollBatchMapper.update(null, new UpdateWrapper<PayrollBatch>()
                 .eq("id", payrollBatchId)
-                .set("status", PayrollBatchStatus.PAY_PROCESSING.getCode()));
+                .set("status", PayrollBatchStatus.PAY_PROCESSING.getCode())
+                .set("payment_status", PaymentBatchProcessStatus.SUBMITTED.getCode()));
         PayrollPaymentFailureService payrollPaymentFailureService = payrollPaymentFailureServiceProvider.getIfAvailable();
         if (payrollPaymentFailureService != null) {
-            payrollPaymentFailureService.markResolvedByPayrollBatchId(payrollBatchId, batchNo);
+            payrollPaymentFailureService.markRetryingByPayrollBatchId(payrollBatchId, batchNo);
         }
 
         if (triggerTransfer) {
@@ -357,15 +364,16 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
             PayrollDistributionItemStatus itemStatus = record.getStatus() == PaymentStatus.FAILED
                     ? PayrollDistributionItemStatus.FAILED
                     : PayrollDistributionItemStatus.PENDING;
-            int updated = payrollDistributionItemMapper.update(null, new UpdateWrapper<PayrollDistributionItem>()
+            UpdateWrapper<PayrollDistributionItem> itemUpdate = new UpdateWrapper<PayrollDistributionItem>()
                     .eq("distribution_id", distribution.getId())
                     .eq("line_id", entry.getKey())
                     .set("payment_record_id", record.getId())
                     .set("item_status", itemStatus.getCode())
-                    .set("failure_reason", record.getStatus() == PaymentStatus.FAILED ? record.getErrorMsg() : null)
-                    .set("retry_count", record.getStatus() == PaymentStatus.FAILED
-                            ? safeRetryLimit(distribution)
-                            : 0));
+                    .set("failure_reason", record.getStatus() == PaymentStatus.FAILED ? record.getErrorMsg() : null);
+            if (record.getStatus() != PaymentStatus.FAILED) {
+                itemUpdate.set("retry_count", 0);
+            }
+            int updated = payrollDistributionItemMapper.update(null, itemUpdate);
             linkedCount += updated;
         }
 
@@ -435,23 +443,36 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
             return;
         }
 
+        PayrollDistribution distribution = payrollDistributionMapper.selectById(paymentBatch.getDistributionId());
+        if (distribution == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "支付批次关联的薪资发放单不存在，不能重试");
+        }
+        int retryLimit = normalizeRetryLimit(distribution.getRetryLimit());
         int updatedItems = payrollDistributionItemMapper.update(null, new UpdateWrapper<PayrollDistributionItem>()
                 .eq("distribution_id", paymentBatch.getDistributionId())
                 .in("payment_record_id", retryableRecordIds)
+                .eq("item_status", PayrollDistributionItemStatus.FAILED.getCode())
+                .apply("COALESCE(retry_count, 0) < {0}", retryLimit)
                 .set("item_status", PayrollDistributionItemStatus.RETRYING.getCode())
-                .set("failure_reason", null));
-        if (updatedItems == 0) {
-            log.warn("支付批次重试未匹配到发放明细: distributionId={}, paymentBatchNo={}, retryableRecordIds={}",
-                    paymentBatch.getDistributionId(), paymentBatch.getBatchNo(), retryableRecordIds);
+                .set("failure_reason", null)
+                .setSql("retry_count = COALESCE(retry_count, 0) + 1"));
+        if (updatedItems != retryableRecordIds.size()) {
+            throw new BusinessException(
+                    ErrorCode.INVALID_STATUS,
+                    "部分工资明细已达到最大重试次数或状态已变更，不能重试"
+            );
         }
 
-        payrollDistributionMapper.update(null, new UpdateWrapper<PayrollDistribution>()
+        int updatedDistribution = payrollDistributionMapper.update(null, new UpdateWrapper<PayrollDistribution>()
                 .eq("id", paymentBatch.getDistributionId())
                 .in("distribution_status",
                         PayrollDistributionStatus.PLANNED.getCode(),
                         PayrollDistributionStatus.FAILED.getCode(),
                         PayrollDistributionStatus.PARTIALLY_COMPLETED.getCode())
                 .set("distribution_status", PayrollDistributionStatus.PROCESSING.getCode()));
+        if (updatedDistribution == 0) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "薪资发放单正在被其他重试流程处理，请稍后再试");
+        }
     }
 
     private int safeCurrentAttempt(PayrollDistribution distribution) {
@@ -460,10 +481,8 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
                 : distribution.getCurrentAttempt();
     }
 
-    private int safeRetryLimit(PayrollDistribution distribution) {
-        return distribution == null || distribution.getRetryLimit() == null || distribution.getRetryLimit() < 1
-                ? 3
-                : distribution.getRetryLimit();
+    private int normalizeRetryLimit(Integer retryLimit) {
+        return retryLimit == null || retryLimit < 1 ? 3 : retryLimit;
     }
 
     private int normalizeRevision(Integer revision) {
@@ -485,8 +504,22 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
         wrapper.set("payment_batch_no", batchNo);
         if (targetStatus != null) {
             wrapper.set("status", targetStatus.getCode());
+            PaymentBatchProcessStatus paymentStatus = paymentStatusForPayrollTarget(targetStatus);
+            if (paymentStatus != null) {
+                wrapper.set("payment_status", paymentStatus.getCode());
+            }
         }
         return payrollBatchMapper.update(null, wrapper) > 0;
+    }
+
+    private PaymentBatchProcessStatus paymentStatusForPayrollTarget(PayrollBatchStatus targetStatus) {
+        if (targetStatus == PayrollBatchStatus.PAY_PROCESSING) {
+            return PaymentBatchProcessStatus.SUBMITTED;
+        }
+        if (targetStatus == PayrollBatchStatus.PAY_FAILED) {
+            return PaymentBatchProcessStatus.FAILED;
+        }
+        return null;
     }
 
     private PaymentBatch resolveConcurrentPaymentBatch(Long payrollBatchId) {
@@ -545,188 +578,16 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
     }
 
     private RecipientRouteResult resolveRecipientRoute(PayrollBatch payrollBatch, PayrollLine line, Employee employee) {
-        if (employee == null) {
-            return RecipientRouteResult.failed("ACCOUNT_MISSING", "员工信息不存在");
-        }
-
-        String employmentType = resolveEmploymentType(payrollBatch, line, employee);
-        if (!StringUtils.hasText(employmentType)) {
-            return RecipientRouteResult.failed("EMPLOYMENT_TYPE_MISSING", "缺少用工类型，无法路由结算渠道");
-        }
-
-        String settlementType = normalizeSettlementType(employee.getSettlementAccountType());
-        AccountResolution settlementAccountResult = decryptAccount(employee.getSettlementAccount());
-        if (settlementAccountResult.decryptFailed()) {
-            return RecipientRouteResult.failed("ACCOUNT_DECRYPT_FAILED", "收款账号解密失败，请重新维护收款信息");
-        }
-        String settlementAccount = settlementAccountResult.value();
-        boolean hasConfiguredAccount = settlementAccountResult.configured();
-
-        if (!StringUtils.hasText(settlementAccount)) {
-            AccountResolution bankAccountResult = decryptAccount(employee.getBankAccount());
-            if (bankAccountResult.decryptFailed()) {
-                return RecipientRouteResult.failed("ACCOUNT_DECRYPT_FAILED", "收款账号解密失败，请重新维护收款信息");
-            }
-            hasConfiguredAccount = hasConfiguredAccount || bankAccountResult.configured();
-            if (StringUtils.hasText(bankAccountResult.value())) {
-                settlementAccount = bankAccountResult.value();
-                if (!StringUtils.hasText(settlementType)) {
-                    settlementType = SettlementAccountType.BANK_CARD.getCode();
-                }
-            }
-        }
-        if (!StringUtils.hasText(settlementType) && StringUtils.hasText(settlementAccount)) {
-            settlementType = inferSettlementType(settlementAccount);
-        }
-
-        if (!StringUtils.hasText(settlementAccount) && !hasConfiguredAccount) {
-            String fallbackAlipayAccount = resolveFallbackAlipayAccount(employee);
-            if (StringUtils.hasText(fallbackAlipayAccount)) {
-                settlementAccount = fallbackAlipayAccount;
-                settlementType = SettlementAccountType.ALIPAY.getCode();
-            }
-        }
-
-        if (!StringUtils.hasText(settlementAccount)) {
-            return RecipientRouteResult.failed("ACCOUNT_MISSING", "缺少收款账号（结算账户/银行卡/手机号/邮箱）");
-        }
-
-        String accountType = StringUtils.hasText(settlementType) ? settlementType : SettlementAccountType.BANK_CARD.getCode();
-        String paymentMethod = resolvePaymentMethod(accountType);
-
-        if (EmploymentType.PART_TIME.getCode().equals(employmentType)) {
-            if (!SettlementAccountType.ALIPAY.getCode().equals(accountType)) {
-                return RecipientRouteResult.failed(
-                        accountType,
-                        settlementAccount,
-                        paymentMethod,
-                        "yunzhanghu",
-                        "ACCOUNT_TYPE_UNSUPPORTED",
-                        "灵活用工仅支持支付宝收款账户"
-                );
-            }
-            return RecipientRouteResult.supported(accountType, settlementAccount, "ALIPAY", "yunzhanghu");
-        }
-
-        if (EmploymentType.FULL_TIME.getCode().equals(employmentType)) {
-            String providerCode = SettlementRouteProviderResolver.resolveFullTimeProvider(
-                    accountType, employee, payrollBatch);
-            if (SettlementAccountType.ALIPAY.getCode().equals(accountType)) {
-                return RecipientRouteResult.supported(accountType, settlementAccount, "ALIPAY", providerCode);
-            }
-            if (SettlementAccountType.BANK_CARD.getCode().equals(accountType)) {
-                return RecipientRouteResult.supported(accountType, settlementAccount, "BANK_CARD", providerCode);
-            }
-            return RecipientRouteResult.failed(
-                    accountType,
-                    settlementAccount,
-                    paymentMethod,
-                    "alipay",
-                    "ACCOUNT_TYPE_UNSUPPORTED",
-                    "全职用工仅支持支付宝或银行卡收款账户"
-            );
-        }
-
-        return RecipientRouteResult.failed(
-                accountType,
-                settlementAccount,
-                paymentMethod,
-                "unknown",
-                "EMPLOYMENT_TYPE_UNSUPPORTED",
-                "不支持的用工类型: " + employmentType
+        SettlementRecipientRouteResolver.RouteResult route = SettlementRecipientRouteResolver.resolve(
+                payrollBatch, line, employee, encryptionService);
+        return new RecipientRouteResult(
+                route.accountType(),
+                route.recipientAccount(),
+                route.paymentMethod(),
+                route.providerCode(),
+                route.errorCode(),
+                route.errorMsg()
         );
-    }
-
-    private String resolveEmploymentType(PayrollBatch payrollBatch, PayrollLine line, Employee employee) {
-        String rawEmploymentType = line != null ? line.getEmploymentType() : null;
-        if (!StringUtils.hasText(rawEmploymentType) && employee != null) {
-            rawEmploymentType = employee.getEmploymentType();
-        }
-        if (!StringUtils.hasText(rawEmploymentType) && payrollBatch != null) {
-            rawEmploymentType = payrollBatch.getType();
-        }
-        return normalizeEmploymentType(rawEmploymentType);
-    }
-
-    private String normalizeEmploymentType(String employmentType) {
-        if (!StringUtils.hasText(employmentType)) {
-            return null;
-        }
-        String normalized = employmentType.trim().toLowerCase();
-        return switch (normalized) {
-            case "fulltime", "full-time", "full_time" -> EmploymentType.FULL_TIME.getCode();
-            case "parttime", "part-time", "part_time" -> EmploymentType.PART_TIME.getCode();
-            default -> normalized;
-        };
-    }
-
-    private String resolveFallbackAlipayAccount(Employee employee) {
-        if (employee == null) {
-            return null;
-        }
-        // 仅使用员工联系方式兜底，避免误将第三方平台账号（如企业微信subject_id）当作支付宝收款账号。
-        if (StringUtils.hasText(employee.getPhone())) {
-            return employee.getPhone().trim();
-        }
-        if (StringUtils.hasText(employee.getEmail())) {
-            return employee.getEmail().trim();
-        }
-        return null;
-    }
-
-    private String inferSettlementType(String account) {
-        if (!StringUtils.hasText(account)) {
-            return SettlementAccountType.BANK_CARD.getCode();
-        }
-        if (ValidationUtils.isValidPhone(account) || ValidationUtils.isValidEmail(account)) {
-            return SettlementAccountType.ALIPAY.getCode();
-        }
-        return SettlementAccountType.BANK_CARD.getCode();
-    }
-
-    private String normalizeSettlementType(String type) {
-        if (!StringUtils.hasText(type)) {
-            return null;
-        }
-        String normalized = type.trim().toLowerCase();
-        return switch (normalized) {
-            case "bank", "bankcard", "bank_card" -> SettlementAccountType.BANK_CARD.getCode();
-            case "alipay" -> SettlementAccountType.ALIPAY.getCode();
-            case "wechat", "weixin", "wx" -> SettlementAccountType.WECHAT.getCode();
-            case "other" -> SettlementAccountType.OTHER.getCode();
-            default -> normalized;
-        };
-    }
-
-    private String resolvePaymentMethod(String accountType) {
-        return switch (accountType) {
-            case "alipay" -> "ALIPAY";
-            case "bank_card" -> "BANK_CARD";
-            case "wechat" -> "WECHAT";
-            case "other" -> "OTHER";
-            default -> "UNKNOWN";
-        };
-    }
-
-    private AccountResolution decryptAccount(String encryptedValue) {
-        if (!StringUtils.hasText(encryptedValue)) {
-            return AccountResolution.missing();
-        }
-        try {
-            String plainAccount = encryptionService.decrypt(encryptedValue);
-            if (StringUtils.hasText(plainAccount)) {
-                return AccountResolution.resolved(plainAccount.trim());
-            }
-            log.warn("解密收款账户结果为空，阻断支付记录生成");
-            return AccountResolution.failed();
-        } catch (Exception ex) {
-            if (SettlementAccountPlaintextGuard.isRecognizedPlainAccount(encryptedValue)) {
-                log.warn("解密收款账户失败，按历史明文账号兼容处理: {}", ex.getMessage());
-                return AccountResolution.resolved(encryptedValue.trim());
-            }
-            log.warn("解密收款账户失败，且原始值不像合法明文账号，阻断支付记录生成: {}", ex.getMessage());
-            return AccountResolution.failed();
-        }
     }
 
     private record RecipientRouteResult(
@@ -737,42 +598,8 @@ public class PayrollPaymentServiceImpl implements PayrollPaymentService {
             String errorCode,
             String errorMsg
     ) {
-        private static RecipientRouteResult supported(String accountType,
-                                                      String recipientAccount,
-                                                      String paymentMethod,
-                                                      String providerCode) {
-            return new RecipientRouteResult(accountType, recipientAccount, paymentMethod, providerCode, null, null);
-        }
-
-        private static RecipientRouteResult failed(String errorCode, String errorMsg) {
-            return new RecipientRouteResult(null, null, "UNKNOWN", "unknown", errorCode, errorMsg);
-        }
-
-        private static RecipientRouteResult failed(String accountType,
-                                                   String recipientAccount,
-                                                   String paymentMethod,
-                                                   String providerCode,
-                                                   String errorCode,
-                                                   String errorMsg) {
-            return new RecipientRouteResult(accountType, recipientAccount, paymentMethod, providerCode, errorCode, errorMsg);
-        }
-
         private boolean supported() {
             return StringUtils.hasText(recipientAccount) && !StringUtils.hasText(errorCode);
-        }
-    }
-
-    private record AccountResolution(String value, boolean configured, boolean decryptFailed) {
-        private static AccountResolution missing() {
-            return new AccountResolution(null, false, false);
-        }
-
-        private static AccountResolution resolved(String value) {
-            return new AccountResolution(value, true, false);
-        }
-
-        private static AccountResolution failed() {
-            return new AccountResolution(null, true, true);
         }
     }
 

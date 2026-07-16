@@ -49,7 +49,7 @@ public class PaymentBatchServiceImpl extends ServiceImpl<PaymentBatchMapper, Pay
         UpdateWrapper<PaymentBatch> updateWrapper = new UpdateWrapper<PaymentBatch>()
                 .eq("id", batchId)
                 .set("status", status == null ? null : status.getCode())
-                .set("payment_status", mapPaymentStatus(status) == null ? null : mapPaymentStatus(status).getCode());
+                .set("payment_status", mapPaymentStatus(status, false) == null ? null : mapPaymentStatus(status, false).getCode());
         update(updateWrapper);
         syncTerminalRelations(batchId, status);
     }
@@ -59,12 +59,16 @@ public class PaymentBatchServiceImpl extends ServiceImpl<PaymentBatchMapper, Pay
         if (batch == null || batch.getId() == null) {
             return;
         }
-        updateById(batch);
+        if (!updateById(batch)) {
+            log.warn("支付批次终态更新未命中，跳过旧快照同步: batchId={}, batchNo={}",
+                    batch.getId(), batch.getBatchNo());
+            return;
+        }
         syncPayrollBatchStatus(batch);
         syncDistributionStatus(batch);
     }
 
-    private PaymentBatchProcessStatus mapPaymentStatus(BatchStatus status) {
+    private PaymentBatchProcessStatus mapPaymentStatus(BatchStatus status, boolean partialSuccess) {
         if (status == null) {
             return null;
         }
@@ -72,7 +76,7 @@ public class PaymentBatchServiceImpl extends ServiceImpl<PaymentBatchMapper, Pay
             case DRAFT -> PaymentBatchProcessStatus.CREATED;
             case SUBMITTED, APPROVED -> PaymentBatchProcessStatus.SUBMITTED;
             case PROCESSING -> PaymentBatchProcessStatus.PROCESSING;
-            case COMPLETED -> PaymentBatchProcessStatus.SUCCESS;
+            case COMPLETED -> partialSuccess ? PaymentBatchProcessStatus.PARTIAL_SUCCESS : PaymentBatchProcessStatus.SUCCESS;
             case FAILED -> PaymentBatchProcessStatus.FAILED;
         };
     }
@@ -88,7 +92,8 @@ public class PaymentBatchServiceImpl extends ServiceImpl<PaymentBatchMapper, Pay
         payrollBatchMapper.update(null, new UpdateWrapper<com.yiyundao.compensation.modules.payroll.entity.PayrollBatch>()
                 .eq("payment_batch_no", batch.getBatchNo())
                 .in("status", PayrollBatchStatus.PAY_PROCESSING.getCode(), PayrollBatchStatus.PAY_FAILED.getCode())
-                .set("status", resolvePayrollBatchStatus(batch).getCode()));
+                .set("status", resolvePayrollBatchStatus(batch).getCode())
+                .set("payment_status", resolvePaymentStatus(batch).getCode()));
         syncDistributionStatus(batch);
     }
 
@@ -106,7 +111,8 @@ public class PaymentBatchServiceImpl extends ServiceImpl<PaymentBatchMapper, Pay
         payrollBatchMapper.update(null, new UpdateWrapper<com.yiyundao.compensation.modules.payroll.entity.PayrollBatch>()
                 .eq("payment_batch_no", batch.getBatchNo())
                 .in("status", PayrollBatchStatus.PAY_PROCESSING.getCode(), PayrollBatchStatus.PAY_FAILED.getCode())
-                .set("status", resolvePayrollBatchStatus(status, partialSuccess).getCode()));
+                .set("status", resolvePayrollBatchStatus(status, partialSuccess).getCode())
+                .set("payment_status", mapPaymentStatus(status, partialSuccess).getCode()));
     }
 
     private PayrollBatchStatus resolvePayrollBatchStatus(PaymentBatch batch) {
@@ -123,6 +129,19 @@ public class PaymentBatchServiceImpl extends ServiceImpl<PaymentBatchMapper, Pay
         return status == BatchStatus.COMPLETED && !partialSuccess
                 ? PayrollBatchStatus.PAID
                 : PayrollBatchStatus.PAY_FAILED;
+    }
+
+    private PaymentBatchProcessStatus resolvePaymentStatus(PaymentBatch batch) {
+        if (batch == null) {
+            return PaymentBatchProcessStatus.FAILED;
+        }
+        if (batch.getStatus() == null) {
+            return PaymentBatchProcessStatus.FAILED;
+        }
+        boolean partialSuccess = batch.getPaymentStatus() == PaymentBatchProcessStatus.PARTIAL_SUCCESS
+                || (batch.getSuccessCount() != null && batch.getSuccessCount() > 0
+                && batch.getFailedCount() != null && batch.getFailedCount() > 0);
+        return mapPaymentStatus(batch.getStatus(), partialSuccess);
     }
 
     private void syncDistributionStatus(PaymentBatch batch) {

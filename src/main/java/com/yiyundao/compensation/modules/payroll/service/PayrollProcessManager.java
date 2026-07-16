@@ -173,9 +173,54 @@ public class PayrollProcessManager {
     @Transactional
     public void submitDistribution(Long distributionId) {
         PaymentBatch paymentBatch = prepareDistributionSubmission(distributionId);
-        if (paymentBatch != null && StringUtils.hasText(paymentBatch.getBatchNo())) {
-            afterCommitExecutor.execute(() -> settlementService.batchTransfer(paymentBatch.getBatchNo()));
+        scheduleSettlement(paymentBatch);
+    }
+
+    /**
+     * 手工重试失败发放单。该入口只允许已审批的当前版本发放单重试，且会清理没有渠道订单的失败明细。
+     * 已经产生渠道订单的记录必须先经过对账，避免人工重试造成重复打款。
+     */
+    @Transactional
+    public PaymentBatch retryFailedDistribution(Long distributionId) {
+        PayrollDistribution distribution = distributionService.getById(distributionId);
+        if (distribution == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "发放单不存在");
         }
+        if (distribution.getDistributionStatus() != PayrollDistributionStatus.FAILED
+                && distribution.getDistributionStatus() != PayrollDistributionStatus.PARTIALLY_COMPLETED) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "当前发放单状态不支持手工重试: "
+                    + distribution.getDistributionStatus());
+        }
+
+        PayrollApprovalProjection projection = approvalProjectionService.getByDistributionId(distributionId);
+        if (projection == null || !"APPROVED".equalsIgnoreCase(projection.getBusinessStatus())) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "发放单审批尚未通过，不能重试");
+        }
+        PayrollBatch batch = payrollBatchMapper.selectById(distribution.getBatchId());
+        if (!isActiveDistributionRevision(distribution, batch)) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "发放单已不是当前薪资批次版本");
+        }
+        if (batch.getStatus() != PayrollBatchStatus.APPROVED && batch.getStatus() != PayrollBatchStatus.PAY_FAILED) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "当前薪资批次状态不可重试: " + batch.getStatus());
+        }
+
+        resetFailedItemsForManualRetry(distribution);
+        boolean reset = distributionService.update(new UpdateWrapper<PayrollDistribution>()
+                .eq("id", distribution.getId())
+                .in("distribution_status",
+                        PayrollDistributionStatus.FAILED.getCode(),
+                        PayrollDistributionStatus.PARTIALLY_COMPLETED.getCode())
+                .set("distribution_status", PayrollDistributionStatus.PLANNED.getCode()));
+        if (!reset) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "发放单状态已变更，请刷新后重试");
+        }
+
+        PaymentBatch paymentBatch = prepareDistributionSubmission(distributionId);
+        if (paymentBatch == null) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "发放单没有可重试的支付明细");
+        }
+        scheduleSettlement(paymentBatch);
+        return paymentBatch;
     }
 
     protected PaymentBatch prepareDistributionSubmission(Long distributionId) {
@@ -195,9 +240,7 @@ public class PayrollProcessManager {
         int nextAttempt = distribution.getCurrentAttempt() == null ? 1 : distribution.getCurrentAttempt() + 1;
         List<PayrollDistributionItem> candidateItems = selectCandidateItems(distribution, activeItems, nextAttempt);
         if (candidateItems.isEmpty()) {
-            distribution.setDistributionStatus(PayrollDistributionStatus.FAILED);
-            distributionService.updateById(distribution);
-            reconciliationTaskService.createOrRefresh(distribution);
+            markDistributionSubmissionFailed(distribution);
             return null;
         }
         ensureRetryCandidatesHaveNoSubmittedProviderOrder(candidateItems, nextAttempt);
@@ -289,7 +332,8 @@ public class PayrollProcessManager {
                     .eq("payment_batch_no", ""));
         }
         batchUpdate.set("payment_batch_no", batchNo)
-                .set("status", PayrollBatchStatus.PAY_PROCESSING.getCode());
+                .set("status", PayrollBatchStatus.PAY_PROCESSING.getCode())
+                .set("payment_status", PaymentBatchProcessStatus.SUBMITTED.getCode());
 
         int updatedBatch = payrollBatchMapper.update(null, batchUpdate);
         if (updatedBatch > 0) {
@@ -361,6 +405,7 @@ public class PayrollProcessManager {
                 submitDistributionInTransaction(distribution.getId());
             } catch (Exception ex) {
                 log.error("自动提交发放失败: distributionId={}", distribution.getId(), ex);
+                markSubmissionExecutionFailed(distribution.getId(), ex);
             }
         }
     }
@@ -377,9 +422,79 @@ public class PayrollProcessManager {
             try {
                 submitDistributionInTransaction(distributionId);
             } catch (Exception ex) {
-                log.error("审批通过后提交发放失败，等待计划任务或人工重试: distributionId={}", distributionId, ex);
+                log.error("审批通过后提交发放失败，已标记为失败并等待人工重试: distributionId={}", distributionId, ex);
+                markSubmissionExecutionFailed(distributionId, ex);
             }
         });
+    }
+
+    private void markSubmissionExecutionFailed(Long distributionId, Exception cause) {
+        try {
+            transactionOperations.execute(status -> {
+                PayrollDistribution distribution = distributionService.getById(distributionId);
+                if (distribution == null || !canMarkSubmissionFailure(distribution.getDistributionStatus())) {
+                    return null;
+                }
+                markDistributionSubmissionFailed(distribution);
+                return null;
+            });
+        } catch (Exception markFailureException) {
+            log.error("提交失败状态落库失败: distributionId={}, originalError={}",
+                    distributionId, cause == null ? null : cause.getMessage(), markFailureException);
+        }
+    }
+
+    private boolean canMarkSubmissionFailure(PayrollDistributionStatus status) {
+        return status == PayrollDistributionStatus.PLANNED
+                || status == PayrollDistributionStatus.SUBMITTING;
+    }
+
+    private void scheduleSettlement(PaymentBatch paymentBatch) {
+        if (paymentBatch != null && StringUtils.hasText(paymentBatch.getBatchNo())) {
+            afterCommitExecutor.execute(() -> settlementService.batchTransfer(paymentBatch.getBatchNo()));
+        }
+    }
+
+    private void markDistributionSubmissionFailed(PayrollDistribution distribution) {
+        distribution.setDistributionStatus(PayrollDistributionStatus.FAILED);
+        distributionService.updateById(distribution);
+        reconciliationTaskService.createOrRefresh(distribution);
+
+        payrollBatchMapper.update(null, new UpdateWrapper<PayrollBatch>()
+                .eq("id", distribution.getBatchId())
+                .eq("batch_revision", normalizeRevision(distribution.getBatchRevision()))
+                .in("status", PayrollBatchStatus.APPROVED.getCode(), PayrollBatchStatus.PAY_PROCESSING.getCode())
+                .set("status", PayrollBatchStatus.PAY_FAILED.getCode())
+                .set("payment_status", PaymentBatchProcessStatus.FAILED.getCode()));
+    }
+
+    private void resetFailedItemsForManualRetry(PayrollDistribution distribution) {
+        List<PayrollDistributionItem> activeItems = distributionService.listActiveItems(distribution.getId());
+        int resetCount = 0;
+        boolean firstAttempt = distribution.getCurrentAttempt() == null || distribution.getCurrentAttempt() <= 0;
+        int retryLimit = safeRetryLimit(distribution);
+        for (PayrollDistributionItem item : activeItems) {
+            if (item == null || item.getItemStatus() != PayrollDistributionItemStatus.FAILED) {
+                continue;
+            }
+            if (item.getPaymentRecordId() != null
+                    && hasProviderOrder(paymentRecordService.getById(item.getPaymentRecordId()))) {
+                throw new BusinessException(
+                        ErrorCode.INVALID_STATUS,
+                        "存在已提交渠道的失败记录，请等待对账确认后再重试，避免重复打款"
+                );
+            }
+            if (!firstAttempt && item.getRetryCount() != null && item.getRetryCount() >= retryLimit) {
+                continue;
+            }
+            item.setItemStatus(firstAttempt ? PayrollDistributionItemStatus.PENDING : PayrollDistributionItemStatus.FAILED);
+            item.setFailureReason(null);
+            distributionItemMapper.updateById(item);
+            resetCount++;
+        }
+        if (resetCount == 0) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "发放单没有可重试的失败明细");
+        }
     }
 
     private List<PayrollDistributionItem> selectCandidateItems(PayrollDistribution distribution,

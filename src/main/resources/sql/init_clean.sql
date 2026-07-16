@@ -101,15 +101,23 @@ CREATE TABLE `employee_department` (
 CREATE TABLE `payroll_batch` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `pay_cycle_id` bigint DEFAULT NULL COMMENT '周期ID',
+  `rule_template_id` bigint DEFAULT NULL COMMENT '批次锁定的薪资规则包ID',
+  `rule_template_version` bigint DEFAULT NULL COMMENT '批次锁定的薪资规则包版本',
   `period_label` varchar(20) DEFAULT NULL COMMENT '周期标签',
   `type` varchar(20) NOT NULL COMMENT 'full_time/part_time',
   `scope_json` json DEFAULT NULL COMMENT '范围JSON',
   `currency` varchar(10) DEFAULT 'CNY',
   `calculation_status` varchar(32) DEFAULT 'draft' COMMENT '核算状态',
   `batch_revision` int DEFAULT '1' COMMENT '业务批次版本号',
+  `input_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资输入事实快照摘要',
+  `input_snapshot_json` json DEFAULT NULL COMMENT '薪资输入事实完整快照',
+  `rule_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资规则快照摘要',
+  `rule_snapshot_json` json DEFAULT NULL COMMENT '薪资规则完整快照',
+  `calculation_engine_version` varchar(64) DEFAULT NULL COMMENT '计算引擎版本',
   `status` varchar(20) DEFAULT 'draft' COMMENT '业务状态',
   `approval_workflow_id` bigint DEFAULT NULL COMMENT '审批流ID',
   `payment_batch_no` varchar(50) DEFAULT NULL COMMENT '最新支付批次号',
+  `payment_status` varchar(32) DEFAULT NULL COMMENT '支付子域状态投影',
   `settlement_provider_code` varchar(32) DEFAULT NULL COMMENT '结算渠道编码',
   `confirmation_required` tinyint(1) DEFAULT '1' COMMENT '是否需要员工确认',
   `confirmation_mode` varchar(20) DEFAULT 'individual' COMMENT '确认模式',
@@ -124,17 +132,24 @@ CREATE TABLE `payroll_batch` (
   PRIMARY KEY (`id`),
   KEY `idx_batch_type_period_status` (`type`,`period_label`,`status`),
   KEY `idx_calculation_status` (`calculation_status`),
-  KEY `idx_batch_revision` (`batch_revision`)
+  KEY `idx_batch_revision` (`batch_revision`),
+  KEY `idx_payroll_payment_status` (`payment_status`),
+  KEY `idx_batch_rule_template` (`rule_template_id`,`rule_template_version`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='发薪批次';
 
 -- Payroll Line
 CREATE TABLE `payroll_line` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `batch_id` bigint NOT NULL COMMENT '批次ID',
+  `batch_revision` int NOT NULL DEFAULT '1' COMMENT '工资行所属批次版本号',
   `employee_id` bigint NOT NULL COMMENT '员工ID',
   `employment_type` varchar(20) NOT NULL COMMENT 'full_time/part_time',
   `template_id` bigint DEFAULT NULL COMMENT '模板ID',
+  `template_version` bigint DEFAULT NULL COMMENT '工资行使用的规则包版本',
   `items_snapshot_json` json DEFAULT NULL COMMENT '项快照JSON',
+  `input_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资输入事实快照摘要',
+  `rule_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资规则快照摘要',
+  `calculation_engine_version` varchar(64) DEFAULT NULL COMMENT '计算引擎版本',
   `gross_amount` decimal(12,2) DEFAULT '0.00',
   `tax_amount` decimal(12,2) DEFAULT '0.00',
   `social_amount` decimal(12,2) DEFAULT '0.00',
@@ -160,6 +175,8 @@ CREATE TABLE `payroll_line` (
   `version` int DEFAULT '0' COMMENT '乐观锁版本号',
   PRIMARY KEY (`id`),
   KEY `idx_batch_employee` (`batch_id`,`employee_id`),
+  KEY `idx_batch_revision_employee` (`batch_id`,`batch_revision`,`employee_id`),
+  KEY `idx_line_template_version` (`template_id`,`template_version`),
   KEY `idx_confirmation_assignee_status` (`confirmation_assignee_employee_id`,`confirmation_status`),
   KEY `idx_dispute_workflow` (`dispute_workflow_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='工资行';
@@ -353,7 +370,7 @@ CREATE TABLE `payment_record` (
   `amount` decimal(10,2) NOT NULL COMMENT '支付金额',
   `currency` varchar(10) DEFAULT 'CNY' COMMENT '币种',
   `payment_method` varchar(20) DEFAULT 'alipay' COMMENT '支付方式',
-  `recipient_account` varchar(100) NOT NULL COMMENT '收款账户',
+  `recipient_account` varchar(100) DEFAULT NULL COMMENT '收款账户；校验失败记录允许为空，补充收款信息后可重试',
   `recipient_name` varchar(100) NOT NULL COMMENT '收款人姓名',
   `payment_desc` varchar(500) DEFAULT NULL COMMENT '支付描述',
   `status` varchar(20) DEFAULT 'pending' COMMENT '支付状态',

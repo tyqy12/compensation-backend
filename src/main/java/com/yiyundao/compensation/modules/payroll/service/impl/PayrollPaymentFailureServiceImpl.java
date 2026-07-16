@@ -64,25 +64,23 @@ public class PayrollPaymentFailureServiceImpl
 
     @Override
     @Transactional
-    public void markResolved(Long workflowId, String paymentBatchNo) {
+    public void markRetrying(Long workflowId, String paymentBatchNo) {
         if (workflowId == null) {
             return;
         }
         PayrollPaymentFailure failure = getOne(new LambdaQueryWrapper<PayrollPaymentFailure>()
                 .eq(PayrollPaymentFailure::getWorkflowId, workflowId)
+                .ne(PayrollPaymentFailure::getStatus, STATUS_RESOLVED)
                 .last("limit 1"));
-        if (failure == null || failure.isResolved()) {
+        if (failure == null) {
             return;
         }
-        failure.setStatus(STATUS_RESOLVED);
-        failure.setResolvedTime(LocalDateTime.now());
-        failure.setPaymentBatchNo(paymentBatchNo);
-        updateById(failure);
+        markRetrying(failure, paymentBatchNo);
     }
 
     @Override
     @Transactional
-    public void markResolvedByPayrollBatchId(Long payrollBatchId, String paymentBatchNo) {
+    public void markRetryingByPayrollBatchId(Long payrollBatchId, String paymentBatchNo) {
         if (payrollBatchId == null) {
             return;
         }
@@ -91,14 +89,60 @@ public class PayrollPaymentFailureServiceImpl
                 .ne(PayrollPaymentFailure::getStatus, STATUS_RESOLVED)
                 .orderByDesc(PayrollPaymentFailure::getLastFailedTime)
                 .last("limit 1"));
-        if (failure == null || failure.isResolved()) {
+        if (failure == null) {
+            return;
+        }
+        markRetrying(failure, paymentBatchNo);
+    }
+
+    private void markRetrying(PayrollPaymentFailure failure, String paymentBatchNo) {
+        failure.setStatus(STATUS_RETRYING);
+        failure.setResolvedTime(null);
+        failure.setErrorMessage(null);
+        if (StringUtils.hasText(paymentBatchNo)) {
+            failure.setPaymentBatchNo(paymentBatchNo);
+        }
+        updateById(failure);
+    }
+
+    @Override
+    @Transactional
+    public void markResolvedByPaymentBatchNo(String paymentBatchNo) {
+        if (!StringUtils.hasText(paymentBatchNo)) {
+            return;
+        }
+        PayrollPaymentFailure failure = getOne(new LambdaQueryWrapper<PayrollPaymentFailure>()
+                .eq(PayrollPaymentFailure::getPaymentBatchNo, paymentBatchNo)
+                .ne(PayrollPaymentFailure::getStatus, STATUS_RESOLVED)
+                .orderByDesc(PayrollPaymentFailure::getLastFailedTime)
+                .last("limit 1"));
+        if (failure == null) {
             return;
         }
         failure.setStatus(STATUS_RESOLVED);
         failure.setResolvedTime(LocalDateTime.now());
-        if (StringUtils.hasText(paymentBatchNo)) {
-            failure.setPaymentBatchNo(paymentBatchNo);
+        failure.setErrorMessage(null);
+        updateById(failure);
+    }
+
+    @Override
+    @Transactional
+    public void markUnresolvedByPaymentBatchNo(String paymentBatchNo, String errorMessage) {
+        if (!StringUtils.hasText(paymentBatchNo)) {
+            return;
         }
+        PayrollPaymentFailure failure = getOne(new LambdaQueryWrapper<PayrollPaymentFailure>()
+                .eq(PayrollPaymentFailure::getPaymentBatchNo, paymentBatchNo)
+                .ne(PayrollPaymentFailure::getStatus, STATUS_RESOLVED)
+                .orderByDesc(PayrollPaymentFailure::getLastFailedTime)
+                .last("limit 1"));
+        if (failure == null) {
+            return;
+        }
+        failure.setStatus(STATUS_UNRESOLVED);
+        failure.setResolvedTime(null);
+        failure.setLastFailedTime(LocalDateTime.now());
+        failure.setErrorMessage(trimError(errorMessage));
         updateById(failure);
     }
 
@@ -156,8 +200,8 @@ public class PayrollPaymentFailureServiceImpl
             return failure;
         }
 
-        failure.setStatus(STATUS_RESOLVED);
-        failure.setResolvedTime(LocalDateTime.now());
+        failure.setStatus(STATUS_RETRYING);
+        failure.setResolvedTime(null);
         failure.setErrorMessage(null);
         updateById(failure);
         return failure;

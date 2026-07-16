@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.modules.payroll.entity;
 
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.yiyundao.compensation.entity.BaseEntity;
 import lombok.Data;
@@ -13,6 +14,10 @@ import java.time.LocalDateTime;
 @TableName("pay_cycle")
 public class PayCycle extends BaseEntity {
     private String type; // monthly/custom
+    @TableField("rule_template_id")
+    private Long ruleTemplateId;
+    @TableField("rule_template_version")
+    private Long ruleTemplateVersion;
     private String periodLabel;
     private String cycleCode;
     private String cycleName;

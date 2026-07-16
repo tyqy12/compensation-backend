@@ -18,7 +18,7 @@ import static org.mockito.Mockito.when;
 class PayrollPaymentFailureServiceImplTest {
 
     @Test
-    void retryShouldMarkResolvedWhenPaymentBatchCreationSucceeds() {
+    void retryShouldKeepFailureRetryingWhenPaymentBatchCreationSucceeds() {
         PayrollBatchService payrollBatchService = mock(PayrollBatchService.class);
         PayrollPaymentService payrollPaymentService = mock(PayrollPaymentService.class);
         when(payrollBatchService.getById(20L)).thenReturn(payrollBatch(null));
@@ -35,8 +35,8 @@ class PayrollPaymentFailureServiceImplTest {
 
         PayrollPaymentFailure retried = service.retry(1L, true);
 
-        assertThat(retried.getStatus()).isEqualTo(PayrollPaymentFailureServiceImpl.STATUS_RESOLVED);
-        assertThat(retried.getResolvedTime()).isNotNull();
+        assertThat(retried.getStatus()).isEqualTo(PayrollPaymentFailureServiceImpl.STATUS_RETRYING);
+        assertThat(retried.getResolvedTime()).isNull();
         assertThat(retried.getRetryCount()).isEqualTo(1);
         assertThat(retried.getPaymentBatchNo()).isEqualTo("PB-20");
         verify(payrollBatchService).retryCreatePaymentBatch(20L, true);
@@ -58,7 +58,7 @@ class PayrollPaymentFailureServiceImplTest {
 
         PayrollPaymentFailure retried = service.retry(2L, true);
 
-        assertThat(retried.getStatus()).isEqualTo(PayrollPaymentFailureServiceImpl.STATUS_RESOLVED);
+        assertThat(retried.getStatus()).isEqualTo(PayrollPaymentFailureServiceImpl.STATUS_RETRYING);
         assertThat(retried.getPaymentBatchNo()).isEqualTo("PB-EXISTING-20");
         verify(payrollPaymentService).retryFailedPayment(20L, true);
         verify(payrollBatchService, never()).retryCreatePaymentBatch(20L, true);

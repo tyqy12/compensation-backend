@@ -54,6 +54,18 @@ public class AlipaySettlementProvider implements SettlementProvider {
                     ? tradeNo
                     : (record != null ? record.getProviderTradeNo() : null);
 
+            if (record != null && AlipayService.RESULT_UNKNOWN_ERROR_CODE.equals(record.getErrorCode())) {
+                return SettlementResult.builder()
+                        .success(true)
+                        .status(SettlementStatus.PROCESSING)
+                        .providerOrderNo(providerOrderNo)
+                        .providerTradeNo(providerTradeNo)
+                        .errorCode(record.getErrorCode())
+                        .errorMsg(record.getErrorMsg())
+                        .responseTime(LocalDateTime.now())
+                        .build();
+            }
+
             return SettlementResult.builder()
                     .success(true)
                     .providerOrderNo(providerOrderNo)
@@ -70,6 +82,17 @@ public class AlipaySettlementProvider implements SettlementProvider {
             String providerTradeNo = record != null && StringUtils.hasText(record.getProviderTradeNo())
                     ? record.getProviderTradeNo()
                     : (record != null ? record.getAlipayTradeNo() : null);
+            if (record != null && AlipayService.RESULT_UNKNOWN_ERROR_CODE.equals(record.getErrorCode())) {
+                return SettlementResult.builder()
+                        .success(true)
+                        .status(SettlementStatus.PROCESSING)
+                        .providerOrderNo(providerOrderNo)
+                        .providerTradeNo(providerTradeNo)
+                        .errorCode(record.getErrorCode())
+                        .errorMsg(record.getErrorMsg())
+                        .responseTime(LocalDateTime.now())
+                        .build();
+            }
             return SettlementResult.builder()
                     .success(false)
                     .status(SettlementStatus.FAILED)
@@ -87,35 +110,38 @@ public class AlipaySettlementProvider implements SettlementProvider {
         if (requests == null || requests.isEmpty()) {
             return fail("INVALID_REQUEST", "批量请求不能为空");
         }
-        if (requests.size() == 1) {
-            return singleTransfer(requests.get(0));
+        int successCount = 0;
+        int failedCount = 0;
+        String lastErrorCode = null;
+        String lastErrorMsg = null;
+        for (SettlementRequest request : requests) {
+            SettlementResult result = singleTransfer(request);
+            if (result != null && result.isSuccess()) {
+                successCount++;
+            } else {
+                failedCount++;
+                if (result != null) {
+                    lastErrorCode = result.getErrorCode();
+                    lastErrorMsg = result.getErrorMsg();
+                }
+            }
         }
 
-        SettlementRequest first = requests.get(0);
-        String batchNo = null;
-        if (first.getExtra() != null && first.getExtra().get("batchNo") != null) {
-            batchNo = String.valueOf(first.getExtra().get("batchNo"));
-        }
-        if (!StringUtils.hasText(batchNo) && first.getPaymentRecordId() != null) {
-            PaymentRecord record = paymentRecordService.getById(first.getPaymentRecordId());
-            batchNo = record != null ? record.getBatchNo() : null;
-        }
-        if (!StringUtils.hasText(batchNo)) {
-            return fail("INVALID_REQUEST", "批量转账缺少批次号");
-        }
-
-        try {
-            alipayService.batchTransfer(batchNo);
-            return SettlementResult.builder()
-                    .success(true)
-                    .status(SettlementStatus.PROCESSING)
-                    .responseTime(LocalDateTime.now())
-                    .metadata(Map.of("batchNo", batchNo, "count", requests.size()))
-                    .build();
-        } catch (Exception e) {
-            log.error("支付宝批量转账失败: batchNo={}", batchNo, e);
-            return fail("ALIPAY_BATCH_FAILED", e.getMessage());
-        }
+        SettlementStatus status = failedCount == 0
+                ? SettlementStatus.SUCCESS
+                : successCount > 0 ? SettlementStatus.PROCESSING : SettlementStatus.FAILED;
+        return SettlementResult.builder()
+                .success(failedCount == 0)
+                .status(status)
+                .errorCode(lastErrorCode)
+                .errorMsg(lastErrorMsg)
+                .responseTime(LocalDateTime.now())
+                .metadata(Map.of(
+                        "count", requests.size(),
+                        "successCount", successCount,
+                        "failedCount", failedCount
+                ))
+                .build();
     }
 
     @Override

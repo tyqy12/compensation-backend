@@ -18,7 +18,7 @@ spring:
       host: ${REDIS_HOST}
       port: ${REDIS_PORT}
       database: 1
-      password: ${REDIS_PASSWORD}
+      password: ${SPRING_DATA_REDIS_PASSWORD:${REDIS_PASSWORD}}
       timeout: 5000ms
       lettuce:
         pool:
@@ -40,41 +40,6 @@ jwt:
   secret: ${JWT_SECRET}
   expiration: 86400000
   refresh-expiration: 604800000
-
-# Alipay配置（沙箱环境）
-alipay:
-  app-id: ${ALIPAY_APP_ID}
-  server-url: https://openapi.alipaydev.com/gateway.do
-  private-key: ${ALIPAY_PRIVATE_KEY}
-  public-key: ${ALIPAY_PUBLIC_KEY}
-  charset: UTF-8
-  sign-type: RSA2
-  format: json
-  notify-url: https://staging.compensation.yiyundao.com/api/alipay/notify
-  return-url: https://staging.compensation.yiyundao.com/api/alipay/return
-
-# 企业微信配置
-wechat:
-  corp-id: ${WECHAT_CORP_ID}
-  corp-secret: ${WECHAT_CORP_SECRET}
-  agent-id: ${WECHAT_AGENT_ID}
-
-# 钉钉配置
-dingtalk:
-  app-key: ${DINGTALK_APP_KEY}
-  app-secret: ${DINGTALK_APP_SECRET}
-
-# 飞书配置
-feishu:
-  app-id: ${FEISHU_APP_ID}
-  app-secret: ${FEISHU_APP_SECRET}
-
-# 短信配置
-sms:
-  access-key-id: ${SMS_ACCESS_KEY_ID}
-  access-key-secret: ${SMS_ACCESS_KEY_SECRET}
-  sign-name: 薪酬助手
-  template-code: ${SMS_TEMPLATE_CODE}
 
 # 加密配置
 encryption:

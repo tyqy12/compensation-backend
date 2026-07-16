@@ -97,13 +97,22 @@ const ResourceList: React.FC = () => {
         title: (
           <Space size={8}>
             {resourceTypeIcons[r.type] || <FileOutlined />}
-            <Text strong style={{ fontSize: 14 }}>{r.name}</Text>
-            <Text type="secondary" style={{ fontSize: 12 }}>({r.code})</Text>
-            <Tag color={resourceTypeColors[r.type] || 'default'} style={{ margin: 0, fontSize: 10 }}>
+            <Text strong style={{ fontSize: 14 }}>
+              {r.name}
+            </Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              ({r.code})
+            </Text>
+            <Tag
+              color={resourceTypeColors[r.type] || 'default'}
+              style={{ margin: 0, fontSize: 10 }}
+            >
               {r.type}
             </Tag>
             {r.status === 'disabled' && (
-              <Tag color="red" style={{ margin: 0, fontSize: 10 }}>已禁用</Tag>
+              <Tag color="red" style={{ margin: 0, fontSize: 10 }}>
+                已禁用
+              </Tag>
             )}
           </Space>
         ),
@@ -205,7 +214,9 @@ const ResourceList: React.FC = () => {
                 type="text"
                 size="small"
                 icon={<PlusOutlined />}
-                onClick={() => navigate(`/admin/auth-center/resources/create?parentId=${resourceId}`)}
+                onClick={() =>
+                  navigate(`/admin/auth-center/resources/create?parentId=${resourceId}`)
+                }
               />
             </Tooltip>
             <Dropdown menu={getActionMenu(resourceId)} trigger={['click']}>
@@ -240,7 +251,7 @@ const ResourceList: React.FC = () => {
     return (
       <PageContainer>
         <Card>
-          <Spin tip="加载中..." />
+          <Spin description="加载中..." />
         </Card>
       </PageContainer>
     );
@@ -344,9 +355,9 @@ const ResourceList: React.FC = () => {
       {/* 提示信息 */}
       <Card style={{ marginTop: 16 }} size="small">
         <Alert
-          message="资源类型说明"
+          title="资源类型说明"
           description={
-            <Space direction="vertical">
+            <Space orientation="vertical">
               <Space>
                 <Tag color="blue">MENU</Tag>
                 <Text>菜单资源 - 系统导航菜单</Text>

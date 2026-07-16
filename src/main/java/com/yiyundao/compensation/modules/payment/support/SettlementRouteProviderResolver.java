@@ -8,6 +8,7 @@ import org.springframework.util.StringUtils;
 public final class SettlementRouteProviderResolver {
 
     private static final String DEFAULT_PROVIDER = "alipay";
+    private static final String YUNZHANGHU_PROVIDER = "yunzhanghu";
 
     private SettlementRouteProviderResolver() {
     }
@@ -20,7 +21,8 @@ public final class SettlementRouteProviderResolver {
         if (SettlementAccountType.BANK_CARD.getCode().equals(accountType)) {
             return DEFAULT_PROVIDER;
         }
-        return normalizeProviderCode(configuredProvider, DEFAULT_PROVIDER);
+        String provider = normalizeProviderCode(configuredProvider, DEFAULT_PROVIDER);
+        return YUNZHANGHU_PROVIDER.equals(provider) ? DEFAULT_PROVIDER : provider;
     }
 
     public static String resolveConfiguredProvider(Employee employee, PayrollBatch batch, String fallbackProvider) {

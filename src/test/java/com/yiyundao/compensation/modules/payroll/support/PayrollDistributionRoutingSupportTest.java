@@ -50,6 +50,30 @@ class PayrollDistributionRoutingSupportTest {
     }
 
     @Test
+    void buildSnapshotShouldUseAlipayForFullTimeAlipayAccountWhenYunzhanghuIsConfigured() {
+        PayrollDistributionRoutingSupport support = new PayrollDistributionRoutingSupport(encryptionService);
+        PayrollBatch batch = new PayrollBatch();
+        batch.setType(EmploymentType.FULL_TIME.getCode());
+        PayrollLine line = new PayrollLine();
+        line.setEmploymentType(EmploymentType.FULL_TIME.getCode());
+        line.setNetAmount(new BigDecimal("100.00"));
+        Employee employee = new Employee();
+        employee.setName("张三");
+        employee.setSettlementAccountType(SettlementAccountType.ALIPAY.getCode());
+        employee.setSettlementAccount("payee@example.com");
+        employee.setSettlementProviderCode("yunzhanghu");
+
+        when(encryptionService.decrypt("payee@example.com")).thenThrow(new RuntimeException("legacy plaintext"));
+        when(encryptionService.encrypt("payee@example.com")).thenReturn("ENC_SNAPSHOT");
+
+        PayrollDistributionRoutingSupport.RouteSnapshot snapshot = support.buildSnapshot(batch, line, employee);
+
+        assertThat(snapshot.supported()).isTrue();
+        assertThat(snapshot.paymentMethod()).isEqualTo("ALIPAY");
+        assertThat(snapshot.providerCode()).isEqualTo("alipay");
+    }
+
+    @Test
     void buildSnapshotShouldFailWhenEncryptedAccountCannotBeDecrypted() {
         PayrollDistributionRoutingSupport support = new PayrollDistributionRoutingSupport(encryptionService);
         PayrollBatch batch = new PayrollBatch();

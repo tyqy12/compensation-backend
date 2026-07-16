@@ -11,6 +11,7 @@ import com.yiyundao.compensation.enums.PayrollType;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollBatchCreateRequest;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollBatchResponseDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollBatchUpdateRequest;
+import com.yiyundao.compensation.interfaces.dto.payroll.PayCycleContextDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollLedgerDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollManagerReviewDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollPreviewDto;
@@ -67,9 +68,11 @@ public class PayrollBatchController {
     @SecurityAnnotations.IsFinanceOrAdmin
     @Operation(summary = "创建薪资批次", description = "创建新的薪资批次，默认为草稿状态，仅财务或管理员可操作")
     public ApiResponse<PayrollBatchResponseDto> create(@Valid @RequestBody PayrollBatchCreateRequest req) {
-        PayrollBatch b = mapToEntity(req);
+        String normalizedType = normalizePayrollType(req.getType(), PayrollType.FULL_TIME.getCode());
+        PayCycle payCycle = resolveOpenPayCycle(req.getPayCycleId(), normalizedType);
+        PayrollBatch b = mapToEntity(req, payCycle, normalizedType);
         payrollBatchService.save(b);
-        return ApiResponse.success(PayrollBatchResponseDto.from(b));
+        return ApiResponse.success(toResponse(b, payCycle));
     }
 
     @PutMapping("/{id}")
@@ -82,9 +85,9 @@ public class PayrollBatchController {
         if (status == null || !status.canEdit()) {
             throw new BusinessException(ErrorCode.INVALID_STATUS, "当前状态不可修改");
         }
-        updateEntity(b, req);
+        PayCycle payCycle = updateEntity(b, req);
         payrollBatchService.updateById(b);
-        return ApiResponse.success(PayrollBatchResponseDto.from(b));
+        return ApiResponse.success(toResponse(b, payCycle));
     }
 
     @PostMapping("/{id}/lock")
@@ -186,7 +189,7 @@ public class PayrollBatchController {
         if (batch == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "批次不存在");
         }
-        return ApiResponse.success(PayrollBatchResponseDto.from(batch));
+        return ApiResponse.success(toResponse(batch));
     }
 
     @PostMapping("/{id}/retry-payment")
@@ -203,12 +206,13 @@ public class PayrollBatchController {
         return ApiResponse.success(PaymentBatchResponse.from(paymentBatch));
     }
 
-    private PayrollBatch mapToEntity(PayrollBatchCreateRequest req) {
-        PayCycle payCycle = resolveOpenPayCycle(req.getPayCycleId());
+    private PayrollBatch mapToEntity(PayrollBatchCreateRequest req, PayCycle payCycle, String normalizedType) {
         PayrollBatch b = new PayrollBatch();
         b.setPayCycleId(req.getPayCycleId());
+        b.setRuleTemplateId(payCycle.getRuleTemplateId());
+        b.setRuleTemplateVersion(payCycle.getRuleTemplateVersion());
         b.setPeriodLabel(resolvePeriodLabel(req.getPeriodLabel(), payCycle));
-        b.setType(normalizePayrollType(req.getType(), PayrollType.FULL_TIME.getCode()));
+        b.setType(normalizedType);
         b.setScopeJson(req.getScopeJson());
         b.setCurrency(req.getCurrency() != null ? req.getCurrency() : "CNY");
         b.setConfirmationRequired(req.getConfirmationRequired() == null ? Boolean.TRUE : req.getConfirmationRequired());
@@ -222,11 +226,16 @@ public class PayrollBatchController {
         return b;
     }
 
-    private void updateEntity(PayrollBatch b, PayrollBatchUpdateRequest req) {
+    private PayCycle updateEntity(PayrollBatch b, PayrollBatchUpdateRequest req) {
         PayCycle payCycle = req.getPayCycleId() != null
-                ? resolveOpenPayCycle(req.getPayCycleId())
-                : resolveExistingPayCycle(b.getPayCycleId());
+                ? resolveOpenPayCycle(req.getPayCycleId(), b.getType())
+                : resolveExistingPayCycle(b.getPayCycleId(), b.getType());
+        if (payCycle == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "草稿批次必须关联发薪日历");
+        }
         if (req.getPayCycleId() != null) b.setPayCycleId(req.getPayCycleId());
+        b.setRuleTemplateId(payCycle.getRuleTemplateId());
+        b.setRuleTemplateVersion(payCycle.getRuleTemplateVersion());
         if (req.getPeriodLabel() != null || req.getPayCycleId() != null) {
             b.setPeriodLabel(resolvePeriodLabel(req.getPeriodLabel() != null ? req.getPeriodLabel() : b.getPeriodLabel(), payCycle));
         }
@@ -237,11 +246,12 @@ public class PayrollBatchController {
             b.setConfirmationMode(PayrollConfirmationMode.fromCode(req.getConfirmationMode()).getCode());
         }
         if (req.getRemark() != null) b.setRemark(req.getRemark());
+        return payCycle;
     }
 
-    private PayCycle resolveOpenPayCycle(Long payCycleId) {
+    private PayCycle resolveOpenPayCycle(Long payCycleId, String payrollType) {
         if (payCycleId == null) {
-            return null;
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "必须选择发薪日历");
         }
         PayCycle cycle = payCycleService.getById(payCycleId);
         if (cycle == null) {
@@ -250,18 +260,54 @@ public class PayrollBatchController {
         if (!"open".equalsIgnoreCase(cycle.getStatus())) {
             throw new BusinessException(ErrorCode.INVALID_STATUS, "只能引用开放状态的薪酬周期");
         }
+        validatePayCycleType(cycle, payrollType);
+        validateRuleBinding(cycle);
         return cycle;
     }
 
-    private PayCycle resolveExistingPayCycle(Long payCycleId) {
+    private PayCycle resolveExistingPayCycle(Long payCycleId, String payrollType) {
         if (payCycleId == null) {
-            return null;
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "草稿批次必须关联发薪日历");
         }
         PayCycle cycle = payCycleService.getById(payCycleId);
         if (cycle == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "薪酬周期不存在");
         }
+        validatePayCycleType(cycle, payrollType);
+        validateRuleBinding(cycle);
         return cycle;
+    }
+
+    private void validatePayCycleType(PayCycle cycle, String payrollType) {
+        if (cycle == null || !StringUtils.hasText(cycle.getType())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "发薪日历缺少适用用工类型");
+        }
+        if (StringUtils.hasText(payrollType) && !payrollType.equalsIgnoreCase(cycle.getType().trim())) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "批次用工类型必须与发薪日历一致: batch=" + payrollType + ", cycle=" + cycle.getType());
+        }
+    }
+
+    private void validateRuleBinding(PayCycle cycle) {
+        if (cycle.getRuleTemplateId() == null || cycle.getRuleTemplateVersion() == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "发薪日历尚未绑定薪资规则包版本，请先开放并完成规则绑定");
+        }
+        if (cycle.getRuleTemplateVersion() < 1) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "发薪日历绑定的规则包版本无效");
+        }
+    }
+
+    private PayrollBatchResponseDto toResponse(PayrollBatch batch) {
+        PayCycle cycle = batch != null && batch.getPayCycleId() != null
+                ? payCycleService.getById(batch.getPayCycleId())
+                : null;
+        return toResponse(batch, cycle);
+    }
+
+    private PayrollBatchResponseDto toResponse(PayrollBatch batch, PayCycle cycle) {
+        return PayrollBatchResponseDto.from(batch,
+                PayCycleContextDto.from(cycle));
     }
 
     private String normalizePayrollTypeFilter(String type) {

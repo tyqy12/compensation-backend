@@ -64,13 +64,13 @@ describe('AuthErrorHandler', () => {
   });
 
   it('shows permission warning on 403 without redirecting', async () => {
-    const screen = renderHandler('/admin/resources');
+    const screen = renderHandler('/admin/resources-v2');
 
     act(() => {
       notifyApiError({ status: 403, message: 'forbidden', error: new Error('forbidden') });
     });
 
     await waitFor(() => expect(warning).toHaveBeenCalledWith('没有权限执行该操作'));
-    expect(screen.getByTestId('location')).toHaveTextContent('/admin/resources');
+    expect(screen.getByTestId('location')).toHaveTextContent('/admin/resources-v2');
   });
 });

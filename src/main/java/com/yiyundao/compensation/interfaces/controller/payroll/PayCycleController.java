@@ -3,14 +3,17 @@ package com.yiyundao.compensation.interfaces.controller.payroll;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayCycleResponseDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayCycleUpsertRequest;
 import com.yiyundao.compensation.modules.payroll.entity.PayCycle;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
+import com.yiyundao.compensation.modules.payroll.entity.SalaryTemplate;
 import com.yiyundao.compensation.modules.payroll.service.PayCycleService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
+import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -21,6 +24,7 @@ import java.time.LocalDate;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 @Slf4j
@@ -35,6 +39,7 @@ public class PayCycleController {
 
     private final PayCycleService payCycleService;
     private final PayrollBatchService payrollBatchService;
+    private final SalaryTemplateService salaryTemplateService;
 
     /**
      * 状态转换守护：允许的状态转换路径
@@ -72,6 +77,12 @@ public class PayCycleController {
             return ApiResponse.error(ErrorCode.PARAM_INVALID, "无效状态: " + req.getStatus()
                 + "，允许值: " + String.join(",", ALLOWED_STATUSES));
         }
+        if ("open".equals(requestedStatus)) {
+            validateRunnableCycle(req.getStartDate(), req.getEndDate(), req.getCutoffDate(),
+                req.getPayDay(), req.getCycleType());
+        }
+        RuleBinding ruleBinding = resolveRuleBinding(
+            req.getRuleTemplateId(), req.getRuleTemplateVersion(), normalizedType, requestedStatus, null);
 
         // 检查唯一性约束：type + periodLabel 组合必须唯一
         LambdaQueryWrapper<PayCycle> uniqueCheck = new LambdaQueryWrapper<PayCycle>()
@@ -90,6 +101,8 @@ public class PayCycleController {
 
         PayCycle c = new PayCycle();
         c.setType(normalizedType);
+        c.setRuleTemplateId(ruleBinding.templateId());
+        c.setRuleTemplateVersion(ruleBinding.version());
         c.setPeriodLabel(normalizedPeriodLabel);
         c.setCycleCode(cycleCode);
         c.setCycleName(defaultIfBlank(req.getCycleName(), normalizedPeriodLabel));
@@ -176,7 +189,31 @@ public class PayCycleController {
             log.info("薪酬周期状态转换: id={}, {} -> {}", id, currentStatus, requestedStatus);
         }
 
+        if ("open".equals(currentStatus)
+            && (requestedStatus == null || "open".equals(requestedStatus))
+            && hasSchedulingFieldsChanged(c, normalizedType, normalizedPeriodLabel, req)) {
+            return ApiResponse.error(ErrorCode.INVALID_STATUS,
+                "开放中的发薪日历不能直接修改，请先停用后再调整运行安排");
+        }
+
+        if ("open".equals(requestedStatus != null ? requestedStatus : currentStatus)) {
+            validateRunnableCycle(req.getStartDate(), req.getEndDate(), req.getCutoffDate(),
+                req.getPayDay(), req.getCycleType());
+        }
+
+        RuleBinding ruleBinding = resolveRuleBinding(
+            req.getRuleTemplateId(), req.getRuleTemplateVersion(), normalizedType,
+            requestedStatus != null ? requestedStatus : currentStatus, c);
+        if ("open".equals(currentStatus)
+            && (requestedStatus == null || "open".equals(requestedStatus))
+            && hasRuleBindingChanged(c, ruleBinding)) {
+            return ApiResponse.error(ErrorCode.INVALID_STATUS,
+                "开放中的发薪日历不能直接更换规则包，请先关闭日历后再调整规则版本");
+        }
+
         c.setType(normalizedType);
+        c.setRuleTemplateId(ruleBinding.templateId());
+        c.setRuleTemplateVersion(ruleBinding.version());
         c.setPeriodLabel(normalizedPeriodLabel);
         c.setCycleCode(cycleCode);
         c.setCycleName(defaultIfBlank(req.getCycleName(), normalizedPeriodLabel));
@@ -230,15 +267,27 @@ public class PayCycleController {
             return ApiResponse.error(ErrorCode.INVALID_STATUS, "当前状态不允许转换: current=" + currentStatus);
         }
 
+        if ("open".equals(nextStatus)) {
+            validateRunnableCycle(c.getStartDate(), c.getEndDate(), c.getCutoffDate(),
+                c.getPayDay(), c.getCycleType());
+        }
+
+        RuleBinding ruleBinding = resolveRuleBinding(
+            c.getRuleTemplateId(), c.getRuleTemplateVersion(), c.getType(), nextStatus, c);
+
         try {
             UpdateWrapper<PayCycle> updateWrapper = new UpdateWrapper<PayCycle>();
             addCurrentStatusGuard(updateWrapper, id, c.getStatus());
             updateWrapper.set("status", nextStatus);
+            updateWrapper.set("rule_template_id", ruleBinding.templateId());
+            updateWrapper.set("rule_template_version", ruleBinding.version());
             if (!payCycleService.update(updateWrapper)) {
                 return ApiResponse.error(ErrorCode.REQUEST_CONFLICT, "薪酬周期状态已变更，请刷新后重试");
             }
 
             c.setStatus(nextStatus);
+            c.setRuleTemplateId(ruleBinding.templateId());
+            c.setRuleTemplateVersion(ruleBinding.version());
             log.info("薪酬周期状态推进成功: id={}, {} -> {}", id, currentStatus, nextStatus);
             return ApiResponse.success(PayCycleResponseDto.from(c));
         } catch (Exception e) {
@@ -337,6 +386,8 @@ public class PayCycleController {
         UpdateWrapper<PayCycle> wrapper = new UpdateWrapper<>();
         addCurrentStatusGuard(wrapper, cycle.getId(), originalStatus);
         wrapper.set("type", cycle.getType())
+                .set("rule_template_id", cycle.getRuleTemplateId())
+                .set("rule_template_version", cycle.getRuleTemplateVersion())
                 .set("period_label", cycle.getPeriodLabel())
                 .set("cycle_code", cycle.getCycleCode())
                 .set("cycle_name", cycle.getCycleName())
@@ -406,6 +457,127 @@ public class PayCycleController {
             return false;
         }
         return endDate == null || !cutoffDate.isAfter(endDate);
+    }
+
+    private static void validateRunnableCycle(LocalDate startDate,
+                                              LocalDate endDate,
+                                              LocalDate cutoffDate,
+                                              Integer payDay,
+                                              String cycleType) {
+        if (startDate == null || endDate == null) {
+            throw new BusinessException(
+                ErrorCode.PARAM_INVALID, "开放发薪日历必须配置完整的期间范围");
+        }
+        if (cutoffDate == null) {
+            throw new BusinessException(
+                ErrorCode.PARAM_INVALID, "开放发薪日历必须配置截数日");
+        }
+        if (payDay == null || payDay < 1 || payDay > 31) {
+            throw new BusinessException(
+                ErrorCode.PARAM_INVALID, "开放发薪日历必须配置有效发薪日");
+        }
+        if (normalizeText(cycleType) == null) {
+            throw new BusinessException(
+                ErrorCode.PARAM_INVALID, "开放发薪日历必须配置运行频率");
+        }
+    }
+
+    private RuleBinding resolveRuleBinding(Long requestedTemplateId,
+                                           Long requestedVersion,
+                                           String payrollType,
+                                           String targetStatus,
+                                           PayCycle existing) {
+        Long templateId = requestedTemplateId != null
+            ? requestedTemplateId
+            : existing != null ? existing.getRuleTemplateId() : null;
+        Long version = requestedVersion != null
+            ? requestedVersion
+            : existing != null ? existing.getRuleTemplateVersion() : null;
+        boolean preservingExistingBinding = requestedTemplateId == null
+            && requestedVersion == null
+            && existing != null;
+
+        if (requestedVersion != null && templateId == null) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID, "规则包版本必须随规则包ID一起传入");
+        }
+
+        // 日历表单只维护运行安排；开放时自动绑定该用工类型唯一的启用规则包。
+        if (templateId == null && "open".equals(targetStatus)) {
+            List<SalaryTemplate> enabledTemplates = salaryTemplateService.list(
+                new LambdaQueryWrapper<SalaryTemplate>()
+                    .eq(SalaryTemplate::getType, payrollType)
+                    .eq(SalaryTemplate::getStatus, "enabled")
+                    .eq(SalaryTemplate::getDeleted, 0)
+            );
+            if (enabledTemplates == null || enabledTemplates.isEmpty()) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID,
+                    "开放发薪日历前，必须先配置一个启用中的" + payrollType + "规则包");
+            }
+            if (enabledTemplates.size() > 1) {
+                throw new BusinessException(ErrorCode.REQUEST_CONFLICT,
+                    payrollType + "存在多个启用规则包，无法自动确定日历绑定关系");
+            }
+            SalaryTemplate enabledTemplate = enabledTemplates.get(0);
+            templateId = enabledTemplate.getId();
+            version = enabledTemplate.getDataVersion();
+        }
+
+        if (templateId == null) {
+            if ("open".equals(targetStatus)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "开放发薪日历必须绑定规则包版本");
+            }
+            return new RuleBinding(null, null);
+        }
+
+        SalaryTemplate template = salaryTemplateService.getById(templateId);
+        if (template == null) {
+            throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "规则包不存在");
+        }
+        if (!Objects.equals(payrollType, normalizeLower(template.getType()))) {
+            throw new BusinessException(ErrorCode.PARAM_INVALID,
+                "发薪日历用工类型必须与规则包一致: cycle=" + payrollType + ", template=" + template.getType());
+        }
+
+        Long currentVersion = template.getDataVersion() == null ? 1L : template.getDataVersion();
+        Long effectiveVersion = version == null ? currentVersion : version;
+        if ("open".equals(targetStatus)
+            && preservingExistingBinding
+            && !"open".equalsIgnoreCase(existing.getStatus())) {
+            effectiveVersion = currentVersion;
+        }
+        if ("open".equals(targetStatus) && !Objects.equals(currentVersion, effectiveVersion)) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT,
+                "规则包版本已变化，请重新选择当前版本后再开放发薪日历");
+        }
+        if ("open".equals(targetStatus) && !"enabled".equalsIgnoreCase(template.getStatus())) {
+            throw new BusinessException(ErrorCode.INVALID_STATUS, "开放发薪日历只能绑定启用中的规则包");
+        }
+        return new RuleBinding(templateId, effectiveVersion);
+    }
+
+    private static boolean hasRuleBindingChanged(PayCycle current, RuleBinding next) {
+        return !Objects.equals(current.getRuleTemplateId(), next.templateId())
+            || !Objects.equals(current.getRuleTemplateVersion(), next.version());
+    }
+
+    private static boolean hasSchedulingFieldsChanged(PayCycle current,
+                                                       String type,
+                                                       String periodLabel,
+                                                       PayCycleUpsertRequest request) {
+        String cycleType = defaultIfBlank(normalizeLower(request.getCycleType()), type);
+        return !Objects.equals(current.getType(), type)
+            || !Objects.equals(current.getPeriodLabel(), periodLabel)
+            || !Objects.equals(current.getCycleType(), cycleType)
+            || !Objects.equals(current.getStartDate(), request.getStartDate())
+            || !Objects.equals(current.getEndDate(), request.getEndDate())
+            || !Objects.equals(current.getCutoffDate(), request.getCutoffDate())
+            || !Objects.equals(current.getPayDay(), request.getPayDay())
+            || !Objects.equals(current.getLeadDays(), request.getLeadDays())
+            || !Objects.equals(current.getGraceDays(), request.getGraceDays())
+            || !Objects.equals(current.getTimezone(), defaultIfBlank(request.getTimezone(), "UTC+8"));
+    }
+
+    private record RuleBinding(Long templateId, Long version) {
     }
 
     private static String resolveCycleCode(String code, String existingCode, String type, String periodLabel) {

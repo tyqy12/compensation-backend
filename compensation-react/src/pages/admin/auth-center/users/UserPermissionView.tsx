@@ -41,7 +41,11 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons';
 import { useResourcesQuery } from '@services/queries/resources';
-import { useUserAggregateSearchQuery, useUserAggregateResourcesQuery, useUserResourcesQuery } from '@services/queries/adminAuth';
+import {
+  useUserAggregateSearchQuery,
+  useUserAggregateResourcesQuery,
+  useUserResourcesQuery,
+} from '@services/queries/adminAuth';
 import { useRolesQuery } from '@services/queries/roles';
 import type { SysResource } from '@types/api';
 
@@ -176,17 +180,21 @@ const UserPermissionView: React.FC = () => {
       const resource = resourceMap.get(resourceId);
       if (!resource) return;
 
-      const source: Exclude<SourceType, 'ALL'> = personalizedSet.has(resourceId) ? 'PERSONALIZED' : 'INHERITED';
+      const source: Exclude<SourceType, 'ALL'> = personalizedSet.has(resourceId)
+        ? 'PERSONALIZED'
+        : 'INHERITED';
       const actions = Array.isArray(item.actions)
         ? item.actions
-        : (item.actionsJson ? (() => {
-          try {
-            const parsed = JSON.parse(item.actionsJson);
-            return Array.isArray(parsed) ? parsed : [];
-          } catch {
-            return [];
-          }
-        })() : []);
+        : item.actionsJson
+          ? (() => {
+              try {
+                const parsed = JSON.parse(item.actionsJson);
+                return Array.isArray(parsed) ? parsed : [];
+              } catch {
+                return [];
+              }
+            })()
+          : [];
 
       details.push({
         id: resourceId,
@@ -205,9 +213,9 @@ const UserPermissionView: React.FC = () => {
       if (sourceFilter !== 'ALL' && item.source !== sourceFilter) return false;
       if (!keyword) return true;
       return (
-        (item.resource.name || '').toLowerCase().includes(keyword)
-        || (item.resource.code || '').toLowerCase().includes(keyword)
-        || (item.resource.path || '').toLowerCase().includes(keyword)
+        (item.resource.name || '').toLowerCase().includes(keyword) ||
+        (item.resource.code || '').toLowerCase().includes(keyword) ||
+        (item.resource.path || '').toLowerCase().includes(keyword)
       );
     });
   }, [permissionDetails, resourceKeyword, resourceTypeFilter, sourceFilter]);
@@ -227,9 +235,16 @@ const UserPermissionView: React.FC = () => {
         key: item.id,
         title: (
           <Space size={4} wrap>
-            <Text strong style={{ fontSize: 13 }}>{item.resource.name}</Text>
-            <Text type="secondary" style={{ fontSize: 11 }}>({item.resource.code})</Text>
-            <Tag color={RESOURCE_TYPE_COLOR[item.resource.type] || 'default'} style={{ margin: 0, fontSize: 10 }}>
+            <Text strong style={{ fontSize: 13 }}>
+              {item.resource.name}
+            </Text>
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              ({item.resource.code})
+            </Text>
+            <Tag
+              color={RESOURCE_TYPE_COLOR[item.resource.type] || 'default'}
+              style={{ margin: 0, fontSize: 10 }}
+            >
               {RESOURCE_TYPE_LABEL[item.resource.type] || item.resource.type}
             </Tag>
             <Tag color={SOURCE_COLOR[item.source]} style={{ margin: 0, fontSize: 10 }}>
@@ -271,7 +286,9 @@ const UserPermissionView: React.FC = () => {
     const menuCount = permissionDetails.filter((item) => item.resource.type === 'MENU').length;
     const apiCount = permissionDetails.filter((item) => item.resource.type === 'API').length;
     const actionCount = permissionDetails.filter((item) => item.resource.type === 'ACTION').length;
-    const personalizedCount = permissionDetails.filter((item) => item.source === 'PERSONALIZED').length;
+    const personalizedCount = permissionDetails.filter(
+      (item) => item.source === 'PERSONALIZED',
+    ).length;
     const inheritedCount = permissionDetails.filter((item) => item.source === 'INHERITED').length;
     return {
       menuCount,
@@ -311,15 +328,15 @@ const UserPermissionView: React.FC = () => {
   };
 
   if (
-    resourcesQuery.isLoading
-    || userQuery.isLoading
-    || userAggregateResourcesQuery.isLoading
-    || userPersonalizedResourcesQuery.isLoading
+    resourcesQuery.isLoading ||
+    userQuery.isLoading ||
+    userAggregateResourcesQuery.isLoading ||
+    userPersonalizedResourcesQuery.isLoading
   ) {
     return (
       <PageContainer>
         <Card>
-          <Spin tip="加载中..." />
+          <Spin description="加载中..." />
         </Card>
       </PageContainer>
     );
@@ -329,12 +346,7 @@ const UserPermissionView: React.FC = () => {
     return (
       <PageContainer>
         <Card>
-          <Alert
-            message="用户不存在"
-            description="未找到指定的用户信息"
-            type="error"
-            showIcon
-          />
+          <Alert title="用户不存在" description="未找到指定的用户信息" type="error" showIcon />
         </Card>
       </PageContainer>
     );
@@ -363,28 +375,26 @@ const UserPermissionView: React.FC = () => {
             userAggregateResourcesQuery.refetch();
             userPersonalizedResourcesQuery.refetch();
           }}
-          loading={userAggregateResourcesQuery.isFetching || userPersonalizedResourcesQuery.isFetching}
+          loading={
+            userAggregateResourcesQuery.isFetching || userPersonalizedResourcesQuery.isFetching
+          }
         >
           刷新
         </Button>,
-        <Button
-          key="export"
-          icon={<ExportOutlined />}
-          onClick={handleExport}
-        >
+        <Button key="export" icon={<ExportOutlined />} onClick={handleExport}>
           导出报告
         </Button>,
       ]}
     >
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         {/* 用户信息卡片 */}
         <Card
-          title={(
+          title={
             <Space>
               <UserOutlined />
               <Text strong>基本信息</Text>
             </Space>
-          )}
+          }
           size="small"
         >
           <Descriptions column={2} size="small">
@@ -399,21 +409,24 @@ const UserPermissionView: React.FC = () => {
 
         {/* 角色信息 */}
         <Card
-          title={(
+          title={
             <Space>
               <TeamOutlined />
               <Text strong>角色分配</Text>
             </Space>
-          )}
+          }
           size="small"
         >
           {currentUser.roles ? (
             <Space size={[0, 8]} wrap>
-              {currentUser.roles.split(',').filter(Boolean).map((role: string, index: number) => (
-                <Tag key={index} color="blue">
-                  {getRoleDisplayName(role)}
-                </Tag>
-              ))}
+              {currentUser.roles
+                .split(',')
+                .filter(Boolean)
+                .map((role: string, index: number) => (
+                  <Tag key={index} color="blue">
+                    {getRoleDisplayName(role)}
+                  </Tag>
+                ))}
             </Space>
           ) : (
             <Empty description="未分配角色" />
@@ -422,12 +435,12 @@ const UserPermissionView: React.FC = () => {
 
         {/* 权限统计 */}
         <Card
-          title={(
+          title={
             <Space>
               <SafetyCertificateOutlined />
               <Text strong>权限统计</Text>
             </Space>
-          )}
+          }
           size="small"
         >
           <Row gutter={16}>
@@ -454,13 +467,16 @@ const UserPermissionView: React.FC = () => {
 
         {/* 权限详情 */}
         <Card
-          title={(
+          title={
             <Space>
               <FileTextOutlined />
               <Text strong>权限详情</Text>
-              <Badge count={filteredPermissionDetails.length} style={{ backgroundColor: '#1890ff' }} />
+              <Badge
+                count={filteredPermissionDetails.length}
+                style={{ backgroundColor: '#1890ff' }}
+              />
             </Space>
-          )}
+          }
         >
           <Space wrap style={{ marginBottom: 12 }}>
             <Input.Search
@@ -482,17 +498,32 @@ const UserPermissionView: React.FC = () => {
               options={SOURCE_OPTIONS}
               onChange={setSourceFilter}
             />
-            <Button size="small" onClick={() => setExpandedKeys(allTreeKeys)} disabled={permissionTreeData.length === 0}>
+            <Button
+              size="small"
+              onClick={() => setExpandedKeys(allTreeKeys)}
+              disabled={permissionTreeData.length === 0}
+            >
               展开全部
             </Button>
-            <Button size="small" onClick={() => setExpandedKeys([])} disabled={permissionTreeData.length === 0}>
+            <Button
+              size="small"
+              onClick={() => setExpandedKeys([])}
+              disabled={permissionTreeData.length === 0}
+            >
               折叠全部
             </Button>
           </Space>
 
           <Row gutter={[16, 16]}>
             <Col xs={24} lg={14}>
-              <div style={{ border: '1px solid #f0f0f0', borderRadius: 4, padding: 12, minHeight: 460 }}>
+              <div
+                style={{
+                  border: '1px solid #f0f0f0',
+                  borderRadius: 4,
+                  padding: 12,
+                  minHeight: 460,
+                }}
+              >
                 {permissionTreeData.length > 0 ? (
                   <Tree
                     showLine
@@ -522,13 +553,11 @@ const UserPermissionView: React.FC = () => {
                             <Tag color={RESOURCE_TYPE_COLOR[item.resource.type] || 'default'}>
                               {RESOURCE_TYPE_LABEL[item.resource.type] || item.resource.type}
                             </Tag>
-                            <Tag color={SOURCE_COLOR[item.source]}>
-                              {SOURCE_LABEL[item.source]}
-                            </Tag>
+                            <Tag color={SOURCE_COLOR[item.source]}>{SOURCE_LABEL[item.source]}</Tag>
                           </Space>
                         ),
                         children: (
-                          <Space direction="vertical" size={8} style={{ width: '100%' }}>
+                          <Space orientation="vertical" size={8} style={{ width: '100%' }}>
                             <Text type="secondary">{item.resource.code}</Text>
                             <Text type="secondary">{item.resource.path || '-'}</Text>
                             {item.actions.length > 0 ? (
@@ -556,7 +585,7 @@ const UserPermissionView: React.FC = () => {
           <Divider />
 
           <Alert
-            message="权限说明"
+            title="权限说明"
             description="角色权限来自角色继承；个性化权限为对该用户单独配置；实际权限为两者并集。"
             type="info"
             showIcon
@@ -580,4 +609,3 @@ const UserPermissionView: React.FC = () => {
 };
 
 export default UserPermissionView;
-

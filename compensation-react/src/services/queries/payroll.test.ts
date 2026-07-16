@@ -12,6 +12,7 @@ import {
   usePayrollDistributionDetailQuery,
   usePayrollDistributionItemsQuery,
   usePayrollDistributionReconciliationQuery,
+  useRetryPayrollDistributionMutation,
   usePayrollReconciliationsQuery,
   usePayrollReconciliationDetailQuery,
   usePayrollTemplatesQuery,
@@ -119,6 +120,10 @@ describe('payroll queries', () => {
   it('fetches payroll ledger data', async () => {
     const mockResponse: PayrollLedgerDto = {
       batchId: 1001,
+      batchRevision: 3,
+      inputSnapshotHash: 'input-hash',
+      ruleSnapshotHash: 'rule-hash',
+      calculationEngineVersion: 'legacy-basic-v1',
       status: 'approved',
       periodLabel: '2024-01',
       netTotal: 15000,
@@ -142,6 +147,10 @@ describe('payroll queries', () => {
 
     expect(mockedApi.get).toHaveBeenCalledWith('/payroll/batches/1001/ledger');
     expect(result.current.data).toMatchObject({
+      batchRevision: 3,
+      inputSnapshotHash: 'input-hash',
+      ruleSnapshotHash: 'rule-hash',
+      calculationEngineVersion: 'legacy-basic-v1',
       warnings: ['批次类型 full_time 未找到启用中的薪资模板'],
       lines: [
         expect.objectContaining({
@@ -207,6 +216,9 @@ describe('payroll queries', () => {
           status: 'PAY_FAILED',
           calculation_status: 'CALCULATED',
           batch_revision: 2,
+          input_snapshot_hash: 'input-hash',
+          rule_snapshot_hash: 'rule-hash',
+          calculation_engine_version: 'legacy-basic-v1',
           approval_workflow_id: 8001,
           payment_batch_no: 'PMT-1001',
           total_employees: 120,
@@ -251,6 +263,9 @@ describe('payroll queries', () => {
       status: 'pay_failed',
       calculationStatus: 'calculated',
       batchRevision: 2,
+      inputSnapshotHash: 'input-hash',
+      ruleSnapshotHash: 'rule-hash',
+      calculationEngineVersion: 'legacy-basic-v1',
       approvalWorkflowId: 8001,
       paymentBatchNo: 'PMT-1001',
       totalEmployees: 120,
@@ -361,10 +376,9 @@ describe('payroll queries', () => {
     const itemsHook = renderHook(() => usePayrollDistributionItemsQuery(2001), {
       wrapper: createWrapper(),
     });
-    const reconciliationHook = renderHook(
-      () => usePayrollDistributionReconciliationQuery(2001),
-      { wrapper: createWrapper() },
-    );
+    const reconciliationHook = renderHook(() => usePayrollDistributionReconciliationQuery(2001), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(detailHook.result.current.isSuccess).toBe(true));
     await waitFor(() => expect(itemsHook.result.current.isSuccess).toBe(true));
@@ -392,6 +406,18 @@ describe('payroll queries', () => {
     });
   });
 
+  it('retries failed payroll distributions', async () => {
+    mockedApi.post.mockResolvedValue({ data: { batchNo: 'PDS-2001-A2' } });
+
+    const { result } = renderHook(() => useRetryPayrollDistributionMutation(), {
+      wrapper: createWrapper(),
+    });
+
+    await result.current.mutateAsync(2001);
+
+    expect(mockedApi.post).toHaveBeenCalledWith('/payroll/distributions/2001/retry');
+  });
+
   it('fetches payroll reconciliations and detail', async () => {
     const mockPaged: PagedResponse<PayrollReconciliationTaskDto> = {
       current: 1,
@@ -412,17 +438,15 @@ describe('payroll queries', () => {
       ],
     };
 
-    mockedApi.get
-      .mockResolvedValueOnce({ data: mockPaged })
-      .mockResolvedValueOnce({
-        data: {
-          id: 9001,
-          distribution_id: 2001,
-          task_status: 'COMPLETED',
-          result: 'MATCHED',
-          difference_detail: '{"matched":true}',
-        },
-      });
+    mockedApi.get.mockResolvedValueOnce({ data: mockPaged }).mockResolvedValueOnce({
+      data: {
+        id: 9001,
+        distribution_id: 2001,
+        task_status: 'COMPLETED',
+        result: 'MATCHED',
+        difference_detail: '{"matched":true}',
+      },
+    });
 
     const listHook = renderHook(
       () =>

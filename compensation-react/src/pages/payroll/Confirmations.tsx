@@ -1,17 +1,13 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { PageContainer } from '@ant-design/pro-components';
 import {
   Alert,
   App as AntdApp,
   Button,
-  Card,
   Form,
-  Input,
   InputNumber,
-  Modal,
   Select,
   Space,
-  Statistic,
   Table,
   Tag,
   Typography,
@@ -40,6 +36,12 @@ import {
   usePayrollPendingConfirmationsQuery,
   type PayrollPendingConfirmationDto,
 } from '@services/queries/payroll';
+import ConfirmationActionModals, {
+  type ConfirmationFormValues,
+  type ObjectFormValues,
+} from './components/ConfirmationActionModals';
+import { PayrollMetricGrid, PayrollSection } from './components/PayrollPagePrimitives';
+import './PayrollPages.less';
 
 const { Text } = Typography;
 
@@ -82,9 +84,9 @@ const PayrollConfirmations: React.FC = () => {
   const [batchConfirmModalOpen, setBatchConfirmModalOpen] = useState(false);
   const [activeLine, setActiveLine] = useState<PayrollPendingConfirmationDto | null>(null);
 
-  const [confirmForm] = Form.useForm<{ signature: string; comment?: string }>();
-  const [objectForm] = Form.useForm<{ reason: string; comment?: string }>();
-  const [batchConfirmForm] = Form.useForm<{ signature: string; comment?: string }>();
+  const [confirmForm] = Form.useForm<ConfirmationFormValues>();
+  const [objectForm] = Form.useForm<ObjectFormValues>();
+  const [batchConfirmForm] = Form.useForm<ConfirmationFormValues>();
   const [assignForm] = Form.useForm<{ assigneeEmployeeId: number; scope: 'selected' | 'all' }>();
 
   const pendingQuery = usePayrollPendingConfirmationsQuery(filters);
@@ -100,7 +102,7 @@ const PayrollConfirmations: React.FC = () => {
   const batchConfirmMutation = useBatchConfirmPayrollMutation();
   const assignMutation = useAssignPayrollConfirmationMutation();
 
-  const pendingRecords = useMemo(() => pendingQuery.data?.records ?? [], [pendingQuery.data?.records]);
+  const pendingRecords = pendingQuery.data?.records ?? [];
 
   const refreshAll = async () => {
     await pendingQuery.refetch();
@@ -235,41 +237,33 @@ const PayrollConfirmations: React.FC = () => {
 
   const columns: ColumnsType<PayrollPendingConfirmationDto> = [
     {
-      title: '工资行ID',
-      dataIndex: 'lineId',
-      width: 100,
+      title: '员工',
+      key: 'employee',
+      width: 190,
       fixed: 'left',
-      render: (value: number) => <Text code>{value}</Text>,
+      render: (_, record) => (
+        <div className="payroll-batch-identity">
+          <div>
+            <Text strong>{record.employeeName || '-'}</Text>
+            <div className="payroll-batch-identity-meta">
+              <span>{record.employeeNo || '-'}</span>
+              <span>工资行 #{record.lineId}</span>
+            </div>
+          </div>
+        </div>
+      ),
     },
     {
-      title: '批次ID',
-      dataIndex: 'batchId',
-      width: 100,
-      render: (value: number) => value || '-',
+      title: '部门',
+      dataIndex: 'department',
+      width: 150,
+      ellipsis: true,
+      render: (value: string) => value || '-',
     },
     {
       title: '期间',
       dataIndex: 'periodLabel',
       width: 120,
-      render: (value: string) => value || '-',
-    },
-    {
-      title: '员工工号',
-      dataIndex: 'employeeNo',
-      width: 130,
-      render: (value: string) => value || '-',
-    },
-    {
-      title: '姓名',
-      dataIndex: 'employeeName',
-      width: 120,
-      render: (value: string) => value || '-',
-    },
-    {
-      title: '部门',
-      dataIndex: 'department',
-      width: 160,
-      ellipsis: true,
       render: (value: string) => value || '-',
     },
     {
@@ -289,7 +283,7 @@ const PayrollConfirmations: React.FC = () => {
     {
       title: '操作',
       key: 'actions',
-      width: 190,
+      width: 180,
       fixed: 'right',
       render: (_, record) => (
         <Space>
@@ -317,9 +311,43 @@ const PayrollConfirmations: React.FC = () => {
 
   const summary = summaryQuery.data;
   const batchDetail = batchDetailQuery.data;
+  const summaryMetrics = summary
+    ? [
+        {
+          key: 'flowStatus',
+          title: '流转状态',
+          value: getFlowStatusMeta(batchDetail?.status)?.text ?? summary.batchStatus ?? '-',
+        },
+        {
+          key: 'calculationStatus',
+          title: '核算状态',
+          value:
+            getCalculationStatusMeta(batchDetail?.calculationStatus ?? batchDetail?.computeStatus)
+              ?.text ?? '-',
+        },
+        {
+          key: 'revision',
+          title: '批次版本',
+          value: getBatchRevisionText(batchDetail?.batchRevision),
+        },
+        {
+          key: 'confirmationMode',
+          title: '确认策略',
+          value: getConfirmationModeText(
+            batchDetail?.confirmationMode,
+            batchDetail?.confirmationRequired,
+          ),
+        },
+        { key: 'total', title: '总行数', value: summary.totalLines ?? 0 },
+        { key: 'pending', title: '待确认', value: summary.pendingCount ?? 0 },
+        { key: 'confirmed', title: '已确认', value: summary.confirmedCount ?? 0 },
+        { key: 'objected', title: '异议中', value: summary.objectedCount ?? 0 },
+      ]
+    : [];
 
   return (
     <PageContainer
+      className="payroll-page-shell"
       header={{
         title: '薪酬确认工作台',
         subTitle: '员工签字确认、异议提交流转、负责人批量确认',
@@ -335,11 +363,14 @@ const PayrollConfirmations: React.FC = () => {
         ],
       }}
     >
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
-        <Card>
-          <Space wrap>
+      <div className="payroll-page-main">
+        <PayrollSection
+          title="筛选待确认工资行"
+          description="按批次查看全部待确认行；不筛选批次时显示当前账号负责的待确认行"
+        >
+          <div className="payroll-filter-bar">
             <InputNumber
-              style={{ width: 180 }}
+              className="payroll-filter-field"
               min={1}
               placeholder="按批次ID筛选"
               value={batchIdInput}
@@ -381,81 +412,41 @@ const PayrollConfirmations: React.FC = () => {
             >
               重置
             </Button>
-            <Button type="default" onClick={openBatchConfirmModal}>
-              批量确认选中
-            </Button>
-          </Space>
+          </div>
           {!filters.batchId && (
             <Alert
-              style={{ marginTop: 12 }}
+              className="payroll-context-alert"
               type="info"
               showIcon
-              message="当前为“我的待确认”视图"
-              description="普通员工仅能看到自己负责确认的工资条；财务/管理员可看到更多待确认记录。"
+              title="当前为我的待确认视图"
+              description="筛选具体批次后可进行批量确认和负责人分配。"
             />
           )}
-        </Card>
+        </PayrollSection>
 
         {filters.batchId && summary && (
-          <Card title={`批次 ${filters.batchId} 确认汇总`}>
-            <div style={{ display: 'flex', gap: 12, overflowX: 'auto' }}>
-              <Card size="small" style={{ minWidth: 150 }}>
-                <Statistic
-                  title="流转状态"
-                  value={getFlowStatusMeta(batchDetail?.status)?.text ?? summary.batchStatus ?? '-'}
-                />
-              </Card>
-              <Card size="small" style={{ minWidth: 150 }}>
-                <Statistic
-                  title="核算状态"
-                  value={
-                    getCalculationStatusMeta(batchDetail?.calculationStatus ?? batchDetail?.computeStatus)
-                      ?.text ?? '-'
-                  }
-                />
-              </Card>
-              <Card size="small" style={{ minWidth: 130 }}>
-                <Statistic title="批次版本" value={getBatchRevisionText(batchDetail?.batchRevision)} />
-              </Card>
-              <Card size="small" style={{ minWidth: 140 }}>
-                <Statistic
-                  title="确认策略"
-                  value={getConfirmationModeText(batchDetail?.confirmationMode, batchDetail?.confirmationRequired)}
-                />
-              </Card>
-              <Card size="small" style={{ minWidth: 120 }}>
-                <Statistic title="总行数" value={summary.totalLines ?? 0} />
-              </Card>
-              <Card size="small" style={{ minWidth: 120 }}>
-                <Statistic title="待确认" value={summary.pendingCount ?? 0} />
-              </Card>
-              <Card size="small" style={{ minWidth: 120 }}>
-                <Statistic title="已确认" value={summary.confirmedCount ?? 0} />
-              </Card>
-              <Card size="small" style={{ minWidth: 120 }}>
-                <Statistic title="异议中" value={summary.objectedCount ?? 0} />
-              </Card>
-              <Card size="small" style={{ minWidth: 140 }}>
-                <Statistic title="异议通过" value={summary.objectedApprovedCount ?? 0} />
-              </Card>
-              <Card size="small" style={{ minWidth: 140 }}>
-                <Statistic title="异议驳回" value={summary.objectedRejectedCount ?? 0} />
-              </Card>
-            </div>
+          <PayrollSection
+            title={`批次 ${filters.batchId} 确认汇总`}
+            description="确认状态和批次流转状态"
+          >
+            <PayrollMetricGrid items={summaryMetrics} />
             {batchDetail?.approvalWorkflowId && (
               <Alert
-                style={{ marginTop: 12 }}
+                className="payroll-context-alert"
                 type="info"
                 showIcon
-                message={`当前版本已关联审批流 #${batchDetail.approvalWorkflowId}`}
+                title={`当前版本已关联审批流 #${batchDetail.approvalWorkflowId}`}
                 description="若确认已完成但尚未提审，请返回批次工作台继续推进审批与发放。"
               />
             )}
-          </Card>
+          </PayrollSection>
         )}
 
         {filters.batchId && (
-          <Card title="负责人分配">
+          <PayrollSection
+            title="负责人分配"
+            description="将选中工资行或全部待确认行分配给指定负责人"
+          >
             <Form
               form={assignForm}
               layout="inline"
@@ -489,10 +480,19 @@ const PayrollConfirmations: React.FC = () => {
                 </Button>
               </Form.Item>
             </Form>
-          </Card>
+          </PayrollSection>
         )}
 
-        <Card title="待确认工资行">
+        <PayrollSection
+          title="待确认工资行"
+          description={`共 ${pendingQuery.data?.total ?? 0} 条，已选择 ${selectedLineIds.length} 条`}
+          className="payroll-table-section"
+          extra={
+            <Button type="primary" onClick={openBatchConfirmModal}>
+              批量确认选中
+            </Button>
+          }
+        >
           <Table<PayrollPendingConfirmationDto>
             rowKey={(record) => record.lineId}
             columns={columns}
@@ -518,83 +518,34 @@ const PayrollConfirmations: React.FC = () => {
               },
             }}
           />
-        </Card>
-      </Space>
+        </PayrollSection>
+      </div>
 
-      <Modal
-        title={`工资行 ${activeLine?.lineId || '-'} 签字确认`}
-        open={confirmModalOpen}
-        onCancel={() => {
+      <ConfirmationActionModals
+        activeLine={activeLine}
+        selectedCount={selectedLineIds.length}
+        confirmModalOpen={confirmModalOpen}
+        objectModalOpen={objectModalOpen}
+        batchConfirmModalOpen={batchConfirmModalOpen}
+        confirmForm={confirmForm}
+        objectForm={objectForm}
+        batchConfirmForm={batchConfirmForm}
+        confirmMutation={confirmMutation}
+        objectMutation={objectMutation}
+        batchConfirmMutation={batchConfirmMutation}
+        onConfirm={submitConfirm}
+        onObject={submitObject}
+        onBatchConfirm={submitBatchConfirm}
+        onCloseConfirm={() => {
           setConfirmModalOpen(false);
           setActiveLine(null);
         }}
-        onOk={submitConfirm}
-        confirmLoading={confirmMutation.isPending}
-      >
-        <Form form={confirmForm} layout="vertical">
-          <Form.Item
-            name="signature"
-            label="签字"
-            rules={[{ required: true, message: '请输入签字内容' }]}
-          >
-            <Input placeholder="请输入签字人（姓名/工号）" />
-          </Form.Item>
-          <Form.Item name="comment" label="备注">
-            <Input.TextArea rows={3} placeholder="可选，补充说明" />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title={`工资行 ${activeLine?.lineId || '-'} 发起异议`}
-        open={objectModalOpen}
-        onCancel={() => {
+        onCloseObject={() => {
           setObjectModalOpen(false);
           setActiveLine(null);
         }}
-        onOk={submitObject}
-        confirmLoading={objectMutation.isPending}
-      >
-        <Form form={objectForm} layout="vertical">
-          <Form.Item
-            name="reason"
-            label="异议原因"
-            rules={[{ required: true, message: '请输入异议原因' }]}
-          >
-            <Input.TextArea rows={3} placeholder="例如：绩效系数有误、个税口径不一致等" />
-          </Form.Item>
-          <Form.Item name="comment" label="备注">
-            <Input.TextArea rows={3} placeholder="可选，补充材料或说明" />
-          </Form.Item>
-        </Form>
-      </Modal>
-
-      <Modal
-        title="批量签字确认"
-        open={batchConfirmModalOpen}
-        onCancel={() => setBatchConfirmModalOpen(false)}
-        onOk={submitBatchConfirm}
-        confirmLoading={batchConfirmMutation.isPending}
-      >
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 12 }}
-          message={`将对 ${selectedLineIds.length} 条工资行执行批量签字确认`}
-        />
-        <Form form={batchConfirmForm} layout="vertical">
-          <Form.Item
-            name="signature"
-            label="签字"
-            rules={[{ required: true, message: '请输入签字内容' }]}
-          >
-            <Input placeholder="请输入签字人（姓名/工号）" />
-          </Form.Item>
-          <Form.Item name="comment" label="备注">
-            <Input.TextArea rows={3} placeholder="可选，批量确认备注" />
-          </Form.Item>
-        </Form>
-      </Modal>
+        onCloseBatchConfirm={() => setBatchConfirmModalOpen(false)}
+      />
     </PageContainer>
   );
 };

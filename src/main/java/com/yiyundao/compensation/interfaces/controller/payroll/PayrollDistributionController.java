@@ -4,13 +4,18 @@ import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.common.response.PageResponse;
+import com.yiyundao.compensation.common.idempotent.Idempotent;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollDistributionDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollDistributionItemDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollReconciliationTaskDto;
+import com.yiyundao.compensation.modules.payment.dto.PaymentBatchResponse;
+import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payroll.service.PayrollFlowQueryService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollProcessManager;
 import com.yiyundao.compensation.security.SecurityAnnotations;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -25,6 +30,7 @@ import java.util.List;
 public class PayrollDistributionController {
 
     private final PayrollFlowQueryService payrollFlowQueryService;
+    private final PayrollProcessManager payrollProcessManager;
 
     @GetMapping
     public ApiResponse<PageResponse<PayrollDistributionDto>> page(@RequestParam(defaultValue = "1") Integer page,
@@ -52,5 +58,13 @@ public class PayrollDistributionController {
     @GetMapping("/{id}/reconciliation")
     public ApiResponse<PayrollReconciliationTaskDto> reconciliation(@PathVariable Long id) {
         return ApiResponse.success(payrollFlowQueryService.getDistributionReconciliation(id));
+    }
+
+    @PostMapping("/{id}/retry")
+    @Idempotent(key = "'payroll:distribution:retry:' + #p0", expireSeconds = 600,
+            message = "发放单重试正在处理中，请勿重复提交", throwOnLockFail = true, deleteOnError = true)
+    public ApiResponse<PaymentBatchResponse> retry(@PathVariable Long id) {
+        PaymentBatch paymentBatch = payrollProcessManager.retryFailedDistribution(id);
+        return ApiResponse.success(PaymentBatchResponse.from(paymentBatch));
     }
 }

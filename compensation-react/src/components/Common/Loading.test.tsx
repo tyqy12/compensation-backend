@@ -12,7 +12,7 @@ describe('Loading组件', () => {
 
   it('应该正确渲染自定义提示文本', () => {
     const customTip = '正在处理数据...';
-    const { container } = render(<Loading tip={customTip} />);
+    const { container } = render(<Loading description={customTip} />);
 
     // 检查loading元素是否存在
     expect(container.querySelector('.ant-spin')).toBeInTheDocument();

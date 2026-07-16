@@ -56,7 +56,8 @@ class PaymentBatchServiceImplTest {
         assertThat(wrapper.getSqlSegment()).contains("status IN");
         assertThat(wrapper.getParamNameValuePairs().values())
                 .contains(PayrollBatchStatus.PAY_FAILED.getCode(),
-                        PayrollBatchStatus.PAY_PROCESSING.getCode());
+                        PayrollBatchStatus.PAY_PROCESSING.getCode(),
+                        PaymentBatchProcessStatus.FAILED.getCode());
     }
 
     @Test

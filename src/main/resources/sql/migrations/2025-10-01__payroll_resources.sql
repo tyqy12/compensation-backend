@@ -30,8 +30,7 @@ SET @menu_payroll_id := (SELECT id FROM sys_resource WHERE code='menu.system.pay
 INSERT INTO `sys_resource`(`type`,`code`,`name`,`path`,`component`,`icon`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
 VALUES
 ('VIEW','view.payroll.cycles','发薪周期','/payroll/cycles',NULL,'Calendar',@menu_payroll_id,1,NULL,'enabled',@now,@now),
-('VIEW','view.payroll.templates','薪资模板','/payroll/templates',NULL,'Template',@menu_payroll_id,2,NULL,'enabled',@now,@now),
-('VIEW','view.payroll.batches','发薪批次','/payroll/batches',NULL,'Collection',@menu_payroll_id,3,NULL,'enabled',@now,@now)
+('VIEW','view.payroll.templates','薪资模板','/payroll/templates',NULL,'Template',@menu_payroll_id,2,NULL,'enabled',@now,@now)
 ON DUPLICATE KEY UPDATE `parent_id`=@menu_payroll_id,`status`='enabled',`update_time`=@now;
 
 -- APIs (method in props_json)
@@ -61,7 +60,7 @@ ON DUPLICATE KEY UPDATE `parent_id`=@menu_payroll_id,`status`='enabled',`update_
 SET @res_menu_payroll := (SELECT id FROM sys_resource WHERE code='menu.system.payroll' LIMIT 1);
 SET @res_view_cycles  := (SELECT id FROM sys_resource WHERE code='view.payroll.cycles' LIMIT 1);
 SET @res_view_tmpls   := (SELECT id FROM sys_resource WHERE code='view.payroll.templates' LIMIT 1);
-SET @res_view_batches := (SELECT id FROM sys_resource WHERE code='view.payroll.batches' LIMIT 1);
+SET @res_menu_batches := (SELECT id FROM sys_resource WHERE code='menu.payroll.batches' LIMIT 1);
 
 -- Admin role: grant all enabled resources (idempotent simple grant)
 DELETE FROM sys_role_resource WHERE role_id=@rid_admin;
@@ -73,7 +72,7 @@ DELETE FROM sys_role_resource WHERE role_id=@rid_finance;
 INSERT INTO sys_role_resource(role_id, resource_id, create_time, update_time)
 SELECT @rid_finance, r.id, @now, @now FROM sys_resource r
 WHERE r.status='enabled' AND (
-  r.id IN (@res_menu_payroll, @res_view_cycles, @res_view_tmpls, @res_view_batches)
+  r.id IN (@res_menu_payroll, @res_view_cycles, @res_view_tmpls, @res_menu_batches)
   OR r.code LIKE 'api.payroll.%'
 );
 
@@ -91,10 +90,9 @@ DELETE FROM sys_role_resource WHERE role_id=@rid_manager;
 INSERT INTO sys_role_resource(role_id, resource_id, create_time, update_time)
 SELECT @rid_manager, r.id, @now, @now FROM sys_resource r
 WHERE r.status='enabled' AND (
-  r.id IN (@res_menu_payroll, @res_view_batches)
+  r.id IN (@res_menu_payroll, @res_menu_batches)
   OR r.code IN ('api.payroll.batches.list','api.payroll.batches.detail')
 );
 
 -- Done
 SELECT 'payroll resources migration applied' AS msg;
-

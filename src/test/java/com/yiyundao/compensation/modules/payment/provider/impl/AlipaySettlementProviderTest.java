@@ -1,5 +1,9 @@
 package com.yiyundao.compensation.modules.payment.provider.impl;
 
+import com.alipay.api.AlipayApiException;
+import com.yiyundao.compensation.enums.PaymentStatus;
+import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
+import com.yiyundao.compensation.modules.payment.provider.SettlementRequest;
 import com.yiyundao.compensation.modules.payment.provider.SettlementStatus;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.service.AlipayService;
@@ -14,6 +18,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 class AlipaySettlementProviderTest {
 
@@ -88,5 +93,27 @@ class AlipaySettlementProviderTest {
         SettlementStatus status = provider.queryStatus("ALI_BAD_KEY");
 
         assertThat(status).isEqualTo(SettlementStatus.FAILED);
+    }
+
+    @Test
+    void singleTransferShouldKeepUnknownRemoteResultProcessing() throws Exception {
+        PaymentRecord record = new PaymentRecord();
+        record.setId(42L);
+        record.setStatus(PaymentStatus.PROCESSING);
+        record.setProviderOrderNo("COMP_UNKNOWN_42");
+        record.setErrorCode(AlipayService.RESULT_UNKNOWN_ERROR_CODE);
+        record.setErrorMsg("支付宝转账结果未知");
+        when(paymentRecordService.getById(42L)).thenReturn(record);
+        doThrow(new AlipayApiException(AlipayService.RESULT_UNKNOWN_ERROR_CODE, "支付宝转账结果未知"))
+                .when(alipayService).singleTransfer(42L);
+
+        var result = provider.singleTransfer(SettlementRequest.builder()
+                .paymentRecordId(42L)
+                .build());
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(result.getStatus()).isEqualTo(SettlementStatus.PROCESSING);
+        assertThat(result.getProviderOrderNo()).isEqualTo("COMP_UNKNOWN_42");
+        verify(paymentRecordService).getById(42L);
     }
 }

@@ -118,14 +118,20 @@ const ApprovalWorkflows: React.FC = () => {
   const rejectMutation = useRejectMutation();
 
   // ==================== URL 同步 ====================
-  const updateUrlParams = useCallback((params: ApprovalQueryParams, tab: ApprovalTab = activeTab) => {
-    setSearchParams(buildApprovalSearchParams(params, tab));
-  }, [activeTab, setSearchParams]);
+  const updateUrlParams = useCallback(
+    (params: ApprovalQueryParams, tab: ApprovalTab = activeTab) => {
+      setSearchParams(buildApprovalSearchParams(params, tab));
+    },
+    [activeTab, setSearchParams],
+  );
 
-  const applyQueryParams = useCallback((nextParams: ApprovalQueryParams, tab: ApprovalTab = activeTab) => {
-    setQueryParams(nextParams);
-    updateUrlParams(nextParams, tab);
-  }, [activeTab, updateUrlParams]);
+  const applyQueryParams = useCallback(
+    (nextParams: ApprovalQueryParams, tab: ApprovalTab = activeTab) => {
+      setQueryParams(nextParams);
+      updateUrlParams(nextParams, tab);
+    },
+    [activeTab, updateUrlParams],
+  );
 
   // ==================== 数据查询 ====================
   const {
@@ -146,12 +152,12 @@ const ApprovalWorkflows: React.FC = () => {
     refetch: refetchMy,
   } = useMyApprovalsQuery(queryParams, { enabled: activeTab === 'my' });
 
-  const {
-    data: detailData,
-    isLoading: detailLoading,
-  } = useApprovalWorkflowDetailQuery(selectedWorkflowId || 0, {
-    enabled: !!selectedWorkflowId && drawerVisible,
-  });
+  const { data: detailData, isLoading: detailLoading } = useApprovalWorkflowDetailQuery(
+    selectedWorkflowId || 0,
+    {
+      enabled: !!selectedWorkflowId && drawerVisible,
+    },
+  );
 
   // 刷新所有数据
   const refreshAll = useCallback(() => {
@@ -176,11 +182,14 @@ const ApprovalWorkflows: React.FC = () => {
   const records = useMemo(() => getApprovalTableRecords(currentData.data), [currentData.data]);
 
   // ==================== 处理函数 ====================
-  const handleTabChange = useCallback((newTab: ApprovalTab) => {
-    const nextParams = { ...queryParams, current: 1 };
-    setActiveTab(newTab);
-    applyQueryParams(nextParams, newTab);
-  }, [applyQueryParams, queryParams]);
+  const handleTabChange = useCallback(
+    (newTab: ApprovalTab) => {
+      const nextParams = { ...queryParams, current: 1 };
+      setActiveTab(newTab);
+      applyQueryParams(nextParams, newTab);
+    },
+    [applyQueryParams, queryParams],
+  );
 
   const handleViewDetail = useCallback((id: number) => {
     setSelectedWorkflowId(id);
@@ -276,7 +285,14 @@ const ApprovalWorkflows: React.FC = () => {
       valueEnum: statusEnum,
       render: (_, record) => {
         const info = getApprovalStatusInfo(record.status as any);
-        return <Tag color={info.color} icon={record.status === 'pending' ? <SyncOutlined spin /> : undefined}>{info.text}</Tag>;
+        return (
+          <Tag
+            color={info.color}
+            icon={record.status === 'pending' ? <SyncOutlined spin /> : undefined}
+          >
+            {info.text}
+          </Tag>
+        );
       },
     },
     {
@@ -325,7 +341,9 @@ const ApprovalWorkflows: React.FC = () => {
         style={{ width: 250 }}
         allowClear
         value={queryParams.keyword}
-        onChange={(e) => setQueryParams(prev => ({ ...prev, keyword: e.target.value || undefined }))}
+        onChange={(e) =>
+          setQueryParams((prev) => ({ ...prev, keyword: e.target.value || undefined }))
+        }
         onSearch={(keyword) => {
           const nextParams = { ...queryParams, keyword: keyword || undefined, current: 1 };
           applyQueryParams(nextParams);
@@ -425,17 +443,19 @@ const ApprovalWorkflows: React.FC = () => {
           const current = pagination.current || 1;
           const pageSize = pagination.pageSize || 10;
           const sortBy = Array.isArray(sorter) ? sorter[0]?.field : sorter.field;
-          const order = Array.isArray(sorter) ? (sorter[0]?.order === 'ascend' ? 'asc' : 'desc') : (sorter.order === 'ascend' ? 'asc' : 'desc');
+          const order = Array.isArray(sorter)
+            ? sorter[0]?.order === 'ascend'
+              ? 'asc'
+              : 'desc'
+            : sorter.order === 'ascend'
+              ? 'asc'
+              : 'desc';
 
           const nextParams = { ...queryParams, current, pageSize, sortBy, order };
           applyQueryParams(nextParams);
         }}
         toolBarRender={() => [
-          <Button
-            key="refresh"
-            icon={<ReloadOutlined />}
-            onClick={refreshAll}
-          >
+          <Button key="refresh" icon={<ReloadOutlined />} onClick={refreshAll}>
             刷新
           </Button>,
         ]}
@@ -465,7 +485,9 @@ const ApprovalWorkflows: React.FC = () => {
                   </Tag>
                 </ProDescriptions.Item>
                 <ProDescriptions.Item label="业务类型">
-                  {detailData.businessType === 'payroll' ? '薪资发放' : detailData.businessType || '—'}
+                  {detailData.businessType === 'payroll'
+                    ? '薪资发放'
+                    : detailData.businessType || '—'}
                 </ProDescriptions.Item>
                 <ProDescriptions.Item label="业务标识">
                   {detailData.businessKey}
@@ -483,15 +505,22 @@ const ApprovalWorkflows: React.FC = () => {
             <Card size="small" title="审批步骤" style={{ marginBottom: 16 }}>
               <Steps
                 current={detailData.currentStep - 1}
-                status={detailData.status === 'rejected' ? 'error' : detailData.status === 'approved' ? 'finish' : 'process'}
+                status={
+                  detailData.status === 'rejected'
+                    ? 'error'
+                    : detailData.status === 'approved'
+                      ? 'finish'
+                      : 'process'
+                }
                 items={detailData.steps?.map((step) => ({
                   title: step.stepName,
                   description: step.approverName,
-                  icon: step.status === 'approved'
-                    ? <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                    : step.status === 'rejected'
-                      ? <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
-                      : undefined,
+                  icon:
+                    step.status === 'approved' ? (
+                      <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                    ) : step.status === 'rejected' ? (
+                      <CloseCircleOutlined style={{ color: '#ff4d4f' }} />
+                    ) : undefined,
                 }))}
               />
             </Card>
@@ -501,21 +530,43 @@ const ApprovalWorkflows: React.FC = () => {
               <Card size="small" title="审批记录" style={{ marginBottom: 16 }}>
                 <Timeline
                   items={detailData.steps.map((step) => ({
-                    color: step.status === 'approved' ? 'green' : step.status === 'rejected' ? 'red' : 'gray',
-                    children: (
+                    color:
+                      step.status === 'approved'
+                        ? 'green'
+                        : step.status === 'rejected'
+                          ? 'red'
+                          : 'gray',
+                    content: (
                       <div>
-                        <div style={{ fontWeight: 500 }}>{step.stepName} - {step.approverName}</div>
+                        <div style={{ fontWeight: 500 }}>
+                          {step.stepName} - {step.approverName}
+                        </div>
                         <div style={{ color: '#888', fontSize: 12 }}>
                           {getApprovalStatusInfo(step.status as any).text}
                           {step.approveTime && ` • ${formatDateTime(step.approveTime)}`}
                         </div>
                         {step.approveComment && (
-                          <div style={{ marginTop: 4, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
+                          <div
+                            style={{
+                              marginTop: 4,
+                              padding: 8,
+                              background: '#f5f5f5',
+                              borderRadius: 4,
+                            }}
+                          >
                             {step.approveComment}
                           </div>
                         )}
                         {step.rejectReason && (
-                          <div style={{ marginTop: 4, padding: 8, background: '#fff2f0', borderRadius: 4, color: '#ff4d4f' }}>
+                          <div
+                            style={{
+                              marginTop: 4,
+                              padding: 8,
+                              background: '#fff2f0',
+                              borderRadius: 4,
+                              color: '#ff4d4f',
+                            }}
+                          >
                             拒绝原因：{step.rejectReason}
                           </div>
                         )}

@@ -91,6 +91,19 @@ payment:
     initial-delay-ms: 120000
     batch-limit: 20
     record-limit-per-batch: 200
+    recover-stale-submitted-enabled: true
+    stale-submitted-minutes: 10
+    recover-stale-approved-payroll-enabled: true
+    stale-approved-payroll-minutes: 10
+
+payroll:
+  confirmation:
+    dispute-reconciliation:
+      enabled: true
+      fixed-delay-ms: 300000
+      initial-delay-ms: 120000
+      batch-limit: 20
+      stale-minutes: 10
 
 # ==================== OAuth 配置 ====================
 oauth:

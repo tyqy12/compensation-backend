@@ -14,14 +14,24 @@ import java.time.LocalDateTime;
 public class PayrollLine extends BaseEntity {
     @TableField("batch_id")
     private Long batchId;
+    @TableField("batch_revision")
+    private Integer batchRevision;
     @TableField("employee_id")
     private Long employeeId;
     @TableField("employment_type")
     private String employmentType;
     @TableField("template_id")
     private Long templateId;
+    @TableField("template_version")
+    private Long templateVersion;
     @TableField("items_snapshot_json")
     private String itemsSnapshotJson;
+    @TableField("input_snapshot_hash")
+    private String inputSnapshotHash;
+    @TableField("rule_snapshot_hash")
+    private String ruleSnapshotHash;
+    @TableField("calculation_engine_version")
+    private String calculationEngineVersion;
     @TableField("gross_amount")
     private java.math.BigDecimal grossAmount;
     @TableField("tax_amount")

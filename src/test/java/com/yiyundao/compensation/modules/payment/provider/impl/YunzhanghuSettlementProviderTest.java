@@ -14,6 +14,7 @@ import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
 import com.yiyundao.compensation.service.EncryptionService;
 import com.yiyundao.compensation.service.YunzhanghuClient;
+import com.yunzhanghu.sdk.YzhException;
 import com.yunzhanghu.sdk.base.YzhResponse;
 import com.yunzhanghu.sdk.notify.domain.NotifyResponse;
 import com.yunzhanghu.sdk.payment.domain.CreateAlipayOrderResponse;
@@ -30,6 +31,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -135,10 +137,109 @@ class YunzhanghuSettlementProviderTest {
     }
 
     @Test
+    @DisplayName("重复下单响应：沿用原订单号查单，不直接标记失败")
+    void singleTransfer_shouldQueryOriginalOrderWhenDuplicateResponse() throws Exception {
+        SettlementRequest request = SettlementRequest.builder()
+                .paymentRecordId(1004L)
+                .bizNo("YZH_ORDER_1004")
+                .amount(new BigDecimal("88.66"))
+                .recipientName("张三")
+                .recipientAccount("zhangsan@alipay")
+                .build();
+
+        PaymentRecord record = new PaymentRecord();
+        record.setId(1004L);
+        record.setEmployeeId(9004L);
+        when(paymentRecordService.getById(1004L)).thenReturn(record);
+        when(employeeServiceProvider.getIfAvailable()).thenReturn(employeeService);
+
+        Employee employee = new Employee();
+        employee.setId(9004L);
+        employee.setEncryptedIdCard("enc-id-4");
+        employee.setPhone("13800138004");
+        when(employeeService.getById(9004L)).thenReturn(employee);
+        when(encryptionService.decryptIdCard("enc-id-4")).thenReturn("110101199001011234");
+
+        YzhResponse<CreateAlipayOrderResponse> duplicate = new YzhResponse<>();
+        duplicate.setHttpCode(200);
+        duplicate.setCode("2002");
+        duplicate.setMessage("已上传过该笔流水");
+        when(yunzhanghuClient.createAlipayOrder(
+                eq("YZH_ORDER_1004"),
+                eq(new BigDecimal("88.66")),
+                eq("张三"),
+                eq("zhangsan@alipay"),
+                eq("110101199001011234"),
+                eq("13800138004"),
+                eq(null),
+                eq("9004"),
+                eq("张三")
+        )).thenReturn(duplicate);
+
+        GetOrderResponse order = new GetOrderResponse();
+        order.setOrderId("YZH_ORDER_1004");
+        order.setRef("YZH_REF_004");
+        order.setStatus("1");
+        order.setStatusDetail("0");
+        YzhResponse<GetOrderResponse> query = new YzhResponse<>();
+        query.setHttpCode(200);
+        query.setCode("0000");
+        query.setData(order);
+        when(yunzhanghuClient.queryOrder("YZH_ORDER_1004")).thenReturn(query);
+
+        SettlementResult result = provider.singleTransfer(request);
+
+        assertTrue(result.isSuccess());
+        assertEquals(SettlementStatus.SUCCESS, result.getStatus());
+        assertEquals("YZH_ORDER_1004", result.getProviderOrderNo());
+        assertEquals("YZH_REF_004", result.getProviderTradeNo());
+        verify(yunzhanghuClient).queryOrder("YZH_ORDER_1004");
+    }
+
+    @Test
+    @DisplayName("网络异常：原订单状态未知时保持处理中")
+    void singleTransfer_shouldKeepProcessingWhenSubmitResultUnknown() throws Exception {
+        SettlementRequest request = SettlementRequest.builder()
+                .paymentRecordId(1005L)
+                .bizNo("YZH_ORDER_1005")
+                .amount(new BigDecimal("88.66"))
+                .recipientName("张三")
+                .recipientAccount("zhangsan@alipay")
+                .build();
+
+        PaymentRecord record = new PaymentRecord();
+        record.setId(1005L);
+        record.setEmployeeId(9005L);
+        when(paymentRecordService.getById(1005L)).thenReturn(record);
+        when(employeeServiceProvider.getIfAvailable()).thenReturn(employeeService);
+        Employee employee = new Employee();
+        employee.setId(9005L);
+        employee.setEncryptedIdCard("enc-id-5");
+        employee.setPhone("13800138005");
+        when(employeeService.getById(9005L)).thenReturn(employee);
+        when(encryptionService.decryptIdCard("enc-id-5")).thenReturn("110101199001011234");
+
+        when(yunzhanghuClient.createAlipayOrder(
+                eq("YZH_ORDER_1005"), any(), eq("张三"), eq("zhangsan@alipay"),
+                eq("110101199001011234"), eq("13800138005"), eq(null), eq("9005"), eq("张三")
+        )).thenThrow(new YzhException("timeout"));
+        when(yunzhanghuClient.queryOrder("YZH_ORDER_1005")).thenReturn(null);
+
+        SettlementResult result = provider.singleTransfer(request);
+
+        assertTrue(result.isSuccess());
+        assertEquals(SettlementStatus.PROCESSING, result.getStatus());
+        assertEquals("YZH_ORDER_1005", result.getProviderOrderNo());
+        assertEquals("YZH_ORDER_UNKNOWN", result.getErrorCode());
+        verify(yunzhanghuClient).queryOrder("YZH_ORDER_1005");
+    }
+
+    @Test
     @DisplayName("单笔发放失败：缺少身份证信息")
     void singleTransfer_shouldFailWhenIdCardMissing() {
         SettlementRequest request = SettlementRequest.builder()
                 .paymentRecordId(1002L)
+                .bizNo("YZH_LOCAL_VALIDATION_1002")
                 .amount(new BigDecimal("99.00"))
                 .recipientName("李四")
                 .recipientAccount("lisi@alipay")
@@ -161,7 +262,9 @@ class YunzhanghuSettlementProviderTest {
         assertFalse(result.isSuccess());
         assertEquals("YZH_ID_CARD_MISSING", result.getErrorCode());
         assertEquals(SettlementStatus.FAILED, result.getStatus());
-        verify(paymentRecordService).update(org.mockito.ArgumentMatchers.<Wrapper<PaymentRecord>>any());
+        ArgumentCaptor<Wrapper<PaymentRecord>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(paymentRecordService).update(captor.capture());
+        assertFalse(readUpdateValues(captor.getValue()).containsValue("YZH_LOCAL_VALIDATION_1002"));
     }
 
     @Test
@@ -182,13 +285,63 @@ class YunzhanghuSettlementProviderTest {
     }
 
     @Test
+    @DisplayName("查单状态映射：云账户数字终态")
+    void queryStatus_shouldMapNumericStatuses() throws Exception {
+        GetOrderResponse successData = new GetOrderResponse();
+        successData.setStatus("1");
+        successData.setStatusDetail("0");
+        YzhResponse<GetOrderResponse> successResponse = new YzhResponse<>();
+        successResponse.setHttpCode(200);
+        successResponse.setCode("0000");
+        successResponse.setData(successData);
+        when(yunzhanghuClient.queryOrder("YZH_ORDER_SUCCESS")).thenReturn(successResponse);
+
+        GetOrderResponse failedData = new GetOrderResponse();
+        failedData.setStatus("2");
+        failedData.setStatusDetail("252");
+        YzhResponse<GetOrderResponse> failedResponse = new YzhResponse<>();
+        failedResponse.setHttpCode(200);
+        failedResponse.setCode("0000");
+        failedResponse.setData(failedData);
+        when(yunzhanghuClient.queryOrder("YZH_ORDER_FAILED")).thenReturn(failedResponse);
+
+        GetOrderResponse cancelledData = new GetOrderResponse();
+        cancelledData.setStatus("15");
+        cancelledData.setStatusDetail("0");
+        YzhResponse<GetOrderResponse> cancelledResponse = new YzhResponse<>();
+        cancelledResponse.setHttpCode(200);
+        cancelledResponse.setCode("0000");
+        cancelledResponse.setData(cancelledData);
+        when(yunzhanghuClient.queryOrder("YZH_ORDER_CANCELLED")).thenReturn(cancelledResponse);
+
+        assertEquals(SettlementStatus.SUCCESS, provider.queryStatus("YZH_ORDER_SUCCESS"));
+        assertEquals(SettlementStatus.FAILED, provider.queryStatus("YZH_ORDER_FAILED"));
+        assertEquals(SettlementStatus.CANCELLED, provider.queryStatus("YZH_ORDER_CANCELLED"));
+    }
+
+    @Test
+    @DisplayName("查单状态映射：未知数字主状态不被状态详情文本覆盖")
+    void queryStatus_shouldKeepUnknownNumericStatusProcessing() throws Exception {
+        GetOrderResponse data = new GetOrderResponse();
+        data.setStatus("99");
+        data.setStatusDetail("SUCCESS");
+        YzhResponse<GetOrderResponse> response = new YzhResponse<>();
+        response.setHttpCode(200);
+        response.setCode("0000");
+        response.setData(data);
+        when(yunzhanghuClient.queryOrder("YZH_ORDER_UNKNOWN_STATUS")).thenReturn(response);
+
+        assertEquals(SettlementStatus.PROCESSING, provider.queryStatus("YZH_ORDER_UNKNOWN_STATUS"));
+    }
+
+    @Test
     @DisplayName("回调处理：验签通过后更新支付记录")
     void callback_shouldUpdateRecordWhenVerified() {
         NotifyOrderData notifyData = new NotifyOrderData();
         notifyData.setOrderId("YZH_ORDER_CB_1");
         notifyData.setRef("YZH_REF_CB_1");
-        notifyData.setStatus("SUCCESS");
-        notifyData.setStatusDetail("PAY_SUCCESS");
+        notifyData.setStatus("1");
+        notifyData.setStatusDetail("0");
 
         NotifyOrderRequest notifyOrderRequest = new NotifyOrderRequest();
         notifyOrderRequest.setNotifyId("notify-1");
@@ -205,6 +358,7 @@ class YunzhanghuSettlementProviderTest {
         record.setId(2001L);
         record.setStatus(PaymentStatus.PROCESSING);
         when(paymentRecordService.getByProviderOrderNo("yunzhanghu", "YZH_ORDER_CB_1")).thenReturn(record);
+        when(paymentRecordService.update(any(Wrapper.class))).thenReturn(true);
 
         boolean verified = provider.verifyCallback(Map.of("data", "x", "mess", "m", "timestamp", "t", "sign", "s"));
         SettlementCallbackResult callbackResult = provider.handleCallback(Map.of());
@@ -251,13 +405,50 @@ class YunzhanghuSettlementProviderTest {
     }
 
     @Test
+    @DisplayName("重复成功回调：不重置既有支付时间")
+    void callback_shouldNotResetPaymentTimeForDuplicateSuccess() {
+        NotifyOrderData notifyData = new NotifyOrderData();
+        notifyData.setOrderId("YZH_ORDER_CB_DUPLICATE");
+        notifyData.setRef("YZH_REF_CB_DUPLICATE");
+        notifyData.setStatus("1");
+        notifyData.setStatusDetail("0");
+
+        NotifyOrderRequest notifyOrderRequest = new NotifyOrderRequest();
+        notifyOrderRequest.setNotifyId("notify-duplicate");
+        notifyOrderRequest.setData(notifyData);
+
+        NotifyResponse<NotifyOrderRequest> decoded = new NotifyResponse<>();
+        decoded.setSignRes(true);
+        decoded.setDescryptRes(true);
+        decoded.setData(notifyOrderRequest);
+        when(yunzhanghuClient.decodeOrderNotify(any())).thenReturn(decoded);
+
+        PaymentRecord record = new PaymentRecord();
+        record.setId(2003L);
+        record.setStatus(PaymentStatus.SUCCESS);
+        LocalDateTime paymentTime = LocalDateTime.of(2026, 2, 26, 10, 0);
+        record.setPaymentTime(paymentTime);
+        when(paymentRecordService.getByProviderOrderNo("yunzhanghu", "YZH_ORDER_CB_DUPLICATE"))
+                .thenReturn(record);
+        when(paymentRecordService.update(any(Wrapper.class))).thenReturn(true);
+
+        assertTrue(provider.verifyCallback(Map.of("data", "x", "mess", "m", "timestamp", "t", "sign", "s")));
+        SettlementCallbackResult callbackResult = provider.handleCallback(Map.of());
+
+        assertTrue(callbackResult.isSuccess());
+        ArgumentCaptor<Wrapper<PaymentRecord>> captor = ArgumentCaptor.forClass(Wrapper.class);
+        verify(paymentRecordService).update(captor.capture());
+        assertFalse(readUpdateValues(captor.getValue()).containsValue(paymentTime));
+    }
+
+    @Test
     @DisplayName("回调处理：验签通过但未匹配支付记录时不确认成功")
     void callback_shouldNotAckWhenPaymentRecordMissing() {
         NotifyOrderData notifyData = new NotifyOrderData();
         notifyData.setOrderId("YZH_ORDER_MISSING");
         notifyData.setRef("YZH_REF_MISSING");
-        notifyData.setStatus("SUCCESS");
-        notifyData.setStatusDetail("PAY_SUCCESS");
+        notifyData.setStatus("1");
+        notifyData.setStatusDetail("0");
 
         NotifyOrderRequest notifyOrderRequest = new NotifyOrderRequest();
         notifyOrderRequest.setNotifyId("notify-missing");
@@ -279,5 +470,15 @@ class YunzhanghuSettlementProviderTest {
         assertEquals(SettlementStatus.SUCCESS, callbackResult.getStatus());
         assertEquals("云账户回调未匹配到支付记录", callbackResult.getErrorMsg());
         verify(paymentRecordService, never()).update(org.mockito.ArgumentMatchers.<Wrapper<PaymentRecord>>any());
+    }
+
+    private Map<?, ?> readUpdateValues(Wrapper<PaymentRecord> wrapper) {
+        try {
+            java.lang.reflect.Field field = wrapper.getClass().getSuperclass().getDeclaredField("paramNameValuePairs");
+            field.setAccessible(true);
+            return (Map<?, ?>) field.get(wrapper);
+        } catch (ReflectiveOperationException ex) {
+            throw new AssertionError(ex);
+        }
     }
 }

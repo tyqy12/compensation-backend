@@ -160,7 +160,7 @@ export interface YunzhanghuConfig {
   notifyUrl?: string;
   projectId?: string;
   checkName?: string;
-  dealerPlatformName?: string;
+  dealerPlatformName: string;
   isDebug?: boolean;
 }
 

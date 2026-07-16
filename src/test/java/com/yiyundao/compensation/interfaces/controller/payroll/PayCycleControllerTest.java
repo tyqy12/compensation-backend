@@ -8,8 +8,10 @@ import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayCycleResponseDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayCycleUpsertRequest;
 import com.yiyundao.compensation.modules.payroll.entity.PayCycle;
+import com.yiyundao.compensation.modules.payroll.entity.SalaryTemplate;
 import com.yiyundao.compensation.modules.payroll.service.PayCycleService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
+import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -22,8 +24,10 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.isA;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -35,13 +39,19 @@ class PayCycleControllerTest {
     private PayCycleService payCycleService;
     @Mock
     private PayrollBatchService payrollBatchService;
+    @Mock
+    private SalaryTemplateService salaryTemplateService;
 
     private PayCycleController controller;
     private ObjectMapper objectMapper;
 
     @BeforeEach
     void setUp() {
-        controller = new PayCycleController(payCycleService, payrollBatchService);
+        controller = new PayCycleController(payCycleService, payrollBatchService, salaryTemplateService);
+        SalaryTemplate enabledTemplate = enabledTemplate();
+        lenient().when(salaryTemplateService.list(isA(com.baomidou.mybatisplus.core.conditions.Wrapper.class)))
+                .thenReturn(List.of(enabledTemplate));
+        lenient().when(salaryTemplateService.getById(enabledTemplate.getId())).thenReturn(enabledTemplate);
         objectMapper = new ObjectMapper();
         objectMapper.registerModule(new JavaTimeModule());
     }
@@ -59,9 +69,20 @@ class PayCycleControllerTest {
 
         assertPublicResponseShape(json);
         assertThat(json)
-                .contains("\"cycleCode\":\"CYCLE_MONTHLY_2099-10\"")
+                .contains("\"cycleCode\":\"CYCLE_FULL_TIME_2099-10\"")
                 .contains("\"cycleName\":\"October payroll\"")
                 .contains("\"status\":\"draft\"");
+    }
+
+    @Test
+    void createShouldRejectOpeningAnIncompleteCalendar() {
+        PayCycleUpsertRequest request = upsertRequest("open");
+        request.setPayDay(null);
+
+        assertThatThrownBy(() -> controller.create(request))
+                .isInstanceOf(com.yiyundao.compensation.common.exception.BusinessException.class)
+                .hasMessageContaining("有效发薪日");
+        verify(payCycleService, never()).save(any(PayCycle.class));
     }
 
     @Test
@@ -84,7 +105,7 @@ class PayCycleControllerTest {
         when(payCycleService.list(isA(com.baomidou.mybatisplus.core.conditions.Wrapper.class)))
                 .thenReturn(List.of(openCycle()));
 
-        String json = objectMapper.writeValueAsString(controller.getOpenCycles("monthly"));
+        String json = objectMapper.writeValueAsString(controller.getOpenCycles("full_time"));
 
         assertPublicResponseShape(json);
         assertThat(json)
@@ -173,8 +194,13 @@ class PayCycleControllerTest {
     private static PayCycle draftCycle() {
         PayCycle cycle = new PayCycle();
         cycle.setId(10L);
-        cycle.setType("monthly");
+        cycle.setType("full_time");
         cycle.setPeriodLabel("2099-10");
+        cycle.setCycleType("monthly");
+        cycle.setStartDate(LocalDate.of(2099, 10, 1));
+        cycle.setEndDate(LocalDate.of(2099, 10, 31));
+        cycle.setCutoffDate(LocalDate.of(2099, 10, 25));
+        cycle.setPayDay(30);
         cycle.setStatus("draft");
         return cycle;
     }
@@ -182,7 +208,7 @@ class PayCycleControllerTest {
     private static PayCycle openCycle() {
         PayCycle cycle = draftCycle();
         cycle.setStatus("open");
-        cycle.setCycleCode("CYCLE_MONTHLY_2099-10");
+        cycle.setCycleCode("CYCLE_FULL_TIME_2099-10");
         cycle.setCycleName("October payroll");
         cycle.setCycleType("monthly");
         cycle.setStartDate(LocalDate.of(2099, 10, 1));
@@ -201,7 +227,7 @@ class PayCycleControllerTest {
 
     private static PayCycleUpsertRequest upsertRequest(String status) {
         PayCycleUpsertRequest request = new PayCycleUpsertRequest();
-        request.setType("monthly");
+        request.setType("full_time");
         request.setPeriodLabel("2099-10");
         request.setCycleName("October payroll");
         request.setCycleType("monthly");
@@ -227,10 +253,21 @@ class PayCycleControllerTest {
         cycle.setVersion(9);
     }
 
+    private static SalaryTemplate enabledTemplate() {
+        SalaryTemplate template = new SalaryTemplate();
+        template.setId(20L);
+        template.setName("Full-time standard");
+        template.setType("full_time");
+        template.setStatus("enabled");
+        template.setDataVersion(1L);
+        template.setDeleted(0);
+        return template;
+    }
+
     private static void assertPublicResponseShape(String json) {
         assertThat(json)
                 .contains("\"id\":10")
-                .contains("\"type\":\"monthly\"")
+                .contains("\"type\":\"full_time\"")
                 .contains("\"periodLabel\":\"2099-10\"")
                 .contains("\"createTime\"")
                 .contains("\"updateTime\"")

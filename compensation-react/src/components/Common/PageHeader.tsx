@@ -9,11 +9,9 @@ type Props = {
 
 export const PageHeader: React.FC<Props> = ({ title, extra, children }) => {
   return (
-    <div style={{ marginBottom: 16 }}>
-      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-        <Typography.Title level={3} style={{ margin: 0 }}>
-          {title}
-        </Typography.Title>
+    <div className="app-page-header-simple">
+      <Space className="app-page-header-simple-row">
+        <Typography.Title level={3}>{title}</Typography.Title>
         {extra}
       </Space>
       {children}

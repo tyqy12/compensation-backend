@@ -5,11 +5,7 @@
  */
 
 import React from 'react';
-import {
-  ProFormText,
-  ProFormSelect,
-  ProFormDigit,
-} from '@ant-design/pro-components';
+import { ProFormText, ProFormSelect, ProFormDigit } from '@ant-design/pro-components';
 import { Alert } from 'antd';
 
 interface EncryptionFormProps {
@@ -17,30 +13,33 @@ interface EncryptionFormProps {
 }
 
 const EncryptionForm: React.FC<EncryptionFormProps> = ({ form }) => {
-  const validateEncryptionField = (field: 'aesKey' | 'sm4Key') => async (_: unknown, value?: string) => {
-    const otherField = field === 'aesKey' ? 'sm4Key' : 'aesKey';
-    const otherValue = form.getFieldValue(['encryption', otherField]);
-    const enabled = form.getFieldValue('enabled');
+  const validateEncryptionField =
+    (field: 'aesKey' | 'sm4Key') => async (_: unknown, value?: string) => {
+      const otherField = field === 'aesKey' ? 'sm4Key' : 'aesKey';
+      const otherValue = form.getFieldValue(['encryption', otherField]);
+      const enabled = form.getFieldValue('enabled');
 
-    if (!enabled) {
+      if (!enabled) {
+        return Promise.resolve();
+      }
+
+      if (!value && !otherValue) {
+        return Promise.reject(new Error('至少填写 AES 或 SM4 密钥'));
+      }
+
+      if (value && value.length < 16) {
+        return Promise.reject(
+          new Error(`${field === 'aesKey' ? 'AES' : 'SM4'}密钥长度不能少于16字符`),
+        );
+      }
+
       return Promise.resolve();
-    }
-
-    if (!value && !otherValue) {
-      return Promise.reject(new Error('至少填写 AES 或 SM4 密钥'));
-    }
-
-    if (value && value.length < 16) {
-      return Promise.reject(new Error(`${field === 'aesKey' ? 'AES' : 'SM4'}密钥长度不能少于16字符`));
-    }
-
-    return Promise.resolve();
-  };
+    };
 
   return (
     <>
       <Alert
-        message="加密配置说明"
+        title="加密配置说明"
         description="至少需要配置AES密钥或SM4密钥中的一种，密钥长度不能少于16个字符。"
         type="info"
         showIcon
@@ -69,8 +68,8 @@ const EncryptionForm: React.FC<EncryptionFormProps> = ({ form }) => {
         label="加密算法"
         placeholder="请选择加密算法"
         valueEnum={{
-          'AES': 'AES',
-          'SM4': 'SM4',
+          AES: 'AES',
+          SM4: 'SM4',
           'SM4+AES': 'SM4+AES',
         }}
         initialValue="SM4+AES"
@@ -82,7 +81,7 @@ const EncryptionForm: React.FC<EncryptionFormProps> = ({ form }) => {
         valueEnum={{
           'SHA-256': 'SHA-256',
           'SHA-512': 'SHA-512',
-          'PBKDF2': 'PBKDF2',
+          PBKDF2: 'PBKDF2',
         }}
         initialValue="SHA-256"
       />

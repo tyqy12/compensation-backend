@@ -199,8 +199,9 @@ public class IntegrationConfigController {
                             !StringUtils.hasText(yunzhanghu.getRsaPrivateKey()) ||
                             !StringUtils.hasText(yunzhanghu.getRsaPublicKey()) ||
                             !StringUtils.hasText(yunzhanghu.getUrl()) ||
-                            !StringUtils.hasText(yunzhanghu.getSignType())) {
-                        return ApiResponse.error("云账户配置缺少必填字段：dealerId, brokerId, appKey, 3desKey, rsaPrivateKey, rsaPublicKey, url, signType");
+                            !StringUtils.hasText(yunzhanghu.getSignType()) ||
+                            !StringUtils.hasText(yunzhanghu.getDealerPlatformName())) {
+                        return ApiResponse.error("云账户配置缺少必填字段：dealerId, brokerId, appKey, 3desKey, rsaPrivateKey, rsaPublicKey, url, signType, dealerPlatformName");
                     }
                     json = objectMapper.writeValueAsString(yunzhanghu);
                     break;

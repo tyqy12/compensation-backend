@@ -102,6 +102,22 @@ class ApprovalControllerTest {
     }
 
     @Test
+    void getDetailShouldExposePayrollDistributionBusinessContext() {
+        ApprovalWorkflow workflow = pendingWorkflow(1008L, 10L, 20L);
+        workflow.setBusinessType("payroll_distribution");
+        workflow.setBusinessKey("payroll_distribution:55:retry:1001");
+        when(approvalEngine.getById(1008L)).thenReturn(workflow);
+        when(approvalStepService.listByWorkflow(1008L)).thenReturn(List.of(step(1008L, 1, 20L)));
+
+        ApiResponse<ApprovalWorkflowDetailVO> response = controller.getDetail(1008L);
+
+        assertThat(response.getCode()).isZero();
+        assertThat(response.getData().getBusinessInfo())
+                .containsEntry("businessType", "payroll_distribution")
+                .containsEntry("distributionId", "55");
+    }
+
+    @Test
     void getPendingShouldPopulateWorkflowUserNames() {
         ApprovalWorkflow workflow = pendingWorkflow(1007L, 10L, 20L);
         SysUser initiator = user(10L, "initiator");

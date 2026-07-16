@@ -9,6 +9,7 @@ import {
   Drawer,
   Empty,
   InputNumber,
+  Popconfirm,
   Select,
   Space,
   Spin,
@@ -16,6 +17,7 @@ import {
   Steps,
   Table,
   Tag,
+  Tooltip,
   Typography,
   type DescriptionsProps,
 } from 'antd';
@@ -23,6 +25,7 @@ import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import {
   CheckCircleOutlined,
   FileSearchOutlined,
+  RedoOutlined,
   ReloadOutlined,
   SendOutlined,
   ThunderboltOutlined,
@@ -34,14 +37,23 @@ import {
   usePayrollDistributionItemsQuery,
   usePayrollDistributionReconciliationQuery,
   usePayrollDistributionsQuery,
+  usePayrollBatchDetailQuery,
+  useRetryPayrollDistributionMutation,
   type PayrollDistributionListParams,
 } from '@services/queries/payroll';
+import { useHasAction } from '@services/queries/rbac';
+import { withActionPrefix } from '@utils/error';
 import type {
   PayrollDistributionDto,
   PayrollDistributionItemDto,
   PayrollReconciliationTaskDto,
 } from '@types/openapi';
-import { getBatchRevisionText, getDistributionStatusMeta } from './components/payrollFlow';
+import {
+  getBatchRevisionText,
+  getDistributionStatusMeta,
+  getSettlementRouteFailureMeta,
+  isSettlementRouteBlocked,
+} from './components/payrollFlow';
 
 const { Text, Paragraph } = Typography;
 
@@ -98,7 +110,13 @@ const distributionStatusOptions = [
   { label: '已作废', value: 'superseded' },
 ];
 
-const normalizeStatus = (value?: string) => String(value ?? '').trim().toLowerCase();
+const normalizeStatus = (value?: string) =>
+  String(value ?? '')
+    .trim()
+    .toLowerCase();
+
+const isRetryableDistribution = (status?: string) =>
+  ['failed', 'partially_completed'].includes(normalizeStatus(status));
 
 const parsePositiveInt = (value: string | null | undefined, fallback?: number) => {
   const next = Number.parseInt(String(value ?? ''), 10);
@@ -123,10 +141,8 @@ const formatDate = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD'
 
 const formatDateTime = (value?: string) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—');
 
-const renderTag = (
-  meta: { text: string; color: string } | undefined,
-  fallback?: string,
-) => (meta ? <Tag color={meta.color}>{meta.text}</Tag> : fallback || '—');
+const renderTag = (meta: { text: string; color: string } | undefined, fallback?: string) =>
+  meta ? <Tag color={meta.color}>{meta.text}</Tag> : fallback || '—';
 
 const getApprovalTag = (status?: string) =>
   renderTag(approvalStatusMeta[normalizeStatus(status)], status || '—');
@@ -152,7 +168,11 @@ const getDistributionCurrentStep = (
   if (reconciliation?.id) {
     return 4;
   }
-  if (['completed', 'partially_completed', 'failed', 'cancelled', 'superseded'].includes(distributionStatus)) {
+  if (
+    ['completed', 'partially_completed', 'failed', 'cancelled', 'superseded'].includes(
+      distributionStatus,
+    )
+  ) {
     return 3;
   }
   if (['planned', 'submitting', 'processing'].includes(distributionStatus)) {
@@ -164,10 +184,7 @@ const getDistributionCurrentStep = (
   return 0;
 };
 
-const buildSearchParams = (
-  filters: PayrollDistributionListParams,
-  distributionId?: number,
-) => {
+const buildSearchParams = (filters: PayrollDistributionListParams, distributionId?: number) => {
   const params = new URLSearchParams();
   if ((filters.current ?? 1) > 1) {
     params.set('current', String(filters.current));
@@ -194,6 +211,9 @@ const Distributions: React.FC = () => {
   const navigate = useNavigate();
   const { message } = AntdApp.useApp();
   const [searchParams, setSearchParams] = useSearchParams();
+  const canRetry = useHasAction('api.payroll.distributions.retry');
+  const retryDistributionMutation = useRetryPayrollDistributionMutation();
+  const [retryingDistributionId, setRetryingDistributionId] = useState<number>();
 
   const initialFilters = useMemo<PayrollDistributionListParams>(
     () => ({
@@ -231,7 +251,6 @@ const Distributions: React.FC = () => {
       enabled: Boolean(selectedDistributionId),
     },
   );
-
   const records = useMemo(
     () => distributionsQuery.data?.records ?? [],
     [distributionsQuery.data?.records],
@@ -242,11 +261,44 @@ const Distributions: React.FC = () => {
   );
   const detail = distributionDetailQuery.data ?? selectedRecord;
   const reconciliation = distributionReconciliationQuery.data ?? null;
+  const currentBatchQuery = usePayrollBatchDetailQuery(detail?.batchId ?? 0, {
+    enabled: Boolean(detail?.batchId),
+  });
   const drawerOpen = Boolean(selectedDistributionId);
   const drawerLoading =
     distributionDetailQuery.isLoading ||
     distributionItemsQuery.isLoading ||
-    distributionReconciliationQuery.isLoading;
+    distributionReconciliationQuery.isLoading ||
+    currentBatchQuery.isLoading;
+  const routeBlockedItems = useMemo(
+    () => (distributionItemsQuery.data ?? []).filter(isSettlementRouteBlocked),
+    [distributionItemsQuery.data],
+  );
+  const currentBatchLoaded = Boolean(currentBatchQuery.data);
+  const currentBatchRevision = currentBatchQuery.data?.batchRevision ?? 1;
+  const distributionRevision = detail?.batchRevision ?? 1;
+  const distributionIsStale =
+    normalizeStatus(detail?.distributionStatus) === 'superseded' ||
+    (currentBatchLoaded && currentBatchRevision !== distributionRevision);
+
+  const retryDistribution = useCallback(
+    async (distributionId?: number) => {
+      if (!distributionId) {
+        message.warning('缺少发放单 ID，无法重试');
+        return;
+      }
+      setRetryingDistributionId(distributionId);
+      try {
+        await retryDistributionMutation.mutateAsync(distributionId);
+        message.success('发放单重试已提交');
+      } catch (error) {
+        message.error(withActionPrefix('发放单重试失败', error));
+      } finally {
+        setRetryingDistributionId(undefined);
+      }
+    },
+    [message, retryDistributionMutation],
+  );
 
   const updateRoute = useCallback(
     (nextFilters: PayrollDistributionListParams, distributionId?: number) => {
@@ -310,9 +362,17 @@ const Distributions: React.FC = () => {
   }, [filters, updateRoute]);
 
   const summary = useMemo(() => {
-    const processing = records.filter((item) => ['submitting', 'processing'].includes(normalizeStatus(item.distributionStatus))).length;
-    const completed = records.filter((item) => normalizeStatus(item.distributionStatus) === 'completed').length;
-    const abnormal = records.filter((item) => ['failed', 'partially_completed', 'cancelled', 'superseded'].includes(normalizeStatus(item.distributionStatus))).length;
+    const processing = records.filter((item) =>
+      ['submitting', 'processing'].includes(normalizeStatus(item.distributionStatus)),
+    ).length;
+    const completed = records.filter(
+      (item) => normalizeStatus(item.distributionStatus) === 'completed',
+    ).length;
+    const abnormal = records.filter((item) =>
+      ['failed', 'partially_completed', 'cancelled', 'superseded'].includes(
+        normalizeStatus(item.distributionStatus),
+      ),
+    ).length;
     const totalAmount = records.reduce((sum, item) => sum + (item.totalAmount ?? 0), 0);
     const actualAmount = records.reduce((sum, item) => sum + (item.actualAmount ?? 0), 0);
     return {
@@ -332,13 +392,17 @@ const Distributions: React.FC = () => {
         dataIndex: 'distributionNo',
         width: 240,
         render: (_, record) => (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Space size={8} wrap>
               <Text strong>{record.distributionNo || '—'}</Text>
-              {record.batchRevision != null && <Tag>{getBatchRevisionText(record.batchRevision)}</Tag>}
+              {record.batchRevision != null && (
+                <Tag>{getBatchRevisionText(record.batchRevision)}</Tag>
+              )}
             </Space>
             <Text type="secondary">批次：#{record.batchId ?? '—'}</Text>
-            {record.paymentBatchNo && <Text type="secondary">支付批次：{record.paymentBatchNo}</Text>}
+            {record.paymentBatchNo && (
+              <Text type="secondary">支付批次：{record.paymentBatchNo}</Text>
+            )}
           </Space>
         ),
       },
@@ -347,9 +411,11 @@ const Distributions: React.FC = () => {
         dataIndex: 'periodLabel',
         width: 180,
         render: (_, record) => (
-          <Space direction="vertical" size={4}>
+          <Space orientation="vertical" size={4}>
             <Text>{record.periodLabel || '—'}</Text>
-            {record.payrollType ? renderTag(payrollTypeMeta[normalizeStatus(record.payrollType)], record.payrollType) : '—'}
+            {record.payrollType
+              ? renderTag(payrollTypeMeta[normalizeStatus(record.payrollType)], record.payrollType)
+              : '—'}
           </Space>
         ),
       },
@@ -358,14 +424,17 @@ const Distributions: React.FC = () => {
         dataIndex: 'distributionStatus',
         width: 130,
         render: (_, record) =>
-          renderTag(getDistributionStatusMeta(record.distributionStatus), record.distributionStatus || '—'),
+          renderTag(
+            getDistributionStatusMeta(record.distributionStatus),
+            record.distributionStatus || '—',
+          ),
       },
       {
         title: '审批/对账',
         key: 'flowStatus',
         width: 210,
         render: (_, record) => (
-          <Space direction="vertical" size={4}>
+          <Space orientation="vertical" size={4}>
             <Space size={8} wrap>
               <Text type="secondary">审批</Text>
               {getApprovalTag(record.approvalStatus)}
@@ -390,11 +459,12 @@ const Distributions: React.FC = () => {
         key: 'amountInfo',
         width: 220,
         render: (_, record) => (
-          <Space direction="vertical" size={2}>
+          <Space orientation="vertical" size={2}>
             <Text>应发：{formatCurrency(record.totalAmount)}</Text>
             <Text>实发：{formatCurrency(record.actualAmount)}</Text>
             <Text type="secondary">
-              人数：{record.totalCount ?? 0}，尝试：{record.currentAttempt ?? 0}/{record.retryLimit ?? 0}
+              人数：{record.totalCount ?? 0}，尝试：{record.currentAttempt ?? 0}/
+              {record.retryLimit ?? 0}
             </Text>
           </Space>
         ),
@@ -404,7 +474,7 @@ const Distributions: React.FC = () => {
         key: 'timeInfo',
         width: 180,
         render: (_, record) => (
-          <Space direction="vertical" size={2}>
+          <Space orientation="vertical" size={2}>
             <Text>计划：{formatDate(record.scheduledDate)}</Text>
             <Text type="secondary">更新：{formatDateTime(record.updateTime)}</Text>
           </Space>
@@ -451,7 +521,7 @@ const Distributions: React.FC = () => {
         ),
       },
     ],
-    [message, navigate, openDistribution],
+    [navigate, openDistribution],
   );
 
   const itemColumns = useMemo<ColumnsType<PayrollDistributionItemDto>>(
@@ -461,7 +531,7 @@ const Distributions: React.FC = () => {
         key: 'employee',
         width: 220,
         render: (_, record) => (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Text strong>{record.employeeName || '—'}</Text>
             <Text type="secondary">员工：#{record.employeeId ?? '—'}</Text>
             <Text type="secondary">收款：{record.accountNoMasked || '—'}</Text>
@@ -473,7 +543,7 @@ const Distributions: React.FC = () => {
         key: 'account',
         width: 220,
         render: (_, record) => (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Text>{record.recipientName || '—'}</Text>
             <Text type="secondary">账户类型：{record.accountType || '—'}</Text>
             <Text type="secondary">
@@ -493,20 +563,27 @@ const Distributions: React.FC = () => {
         title: '明细状态',
         dataIndex: 'itemStatus',
         width: 120,
-        render: (_, record) => renderTag(itemStatusMeta[normalizeStatus(record.itemStatus)], record.itemStatus || '—'),
+        render: (_, record) =>
+          isSettlementRouteBlocked(record) ? (
+            <Tag color="error">收款路由阻断</Tag>
+          ) : (
+            renderTag(itemStatusMeta[normalizeStatus(record.itemStatus)], record.itemStatus || '—')
+          ),
       },
       {
         title: '支付记录',
         key: 'paymentRecord',
         width: 220,
         render: (_, record) => (
-          <Space direction="vertical" size={0}>
+          <Space orientation="vertical" size={0}>
             <Text>{record.paymentRecordId ? `#${record.paymentRecordId}` : '—'}</Text>
             {renderTag(
               paymentRecordStatusMeta[normalizeStatus(record.paymentRecordStatus)],
               record.paymentRecordStatus || '—',
             )}
-            {record.paymentTime && <Text type="secondary">支付：{formatDateTime(record.paymentTime)}</Text>}
+            {record.paymentTime && (
+              <Text type="secondary">支付：{formatDateTime(record.paymentTime)}</Text>
+            )}
           </Space>
         ),
       },
@@ -514,12 +591,23 @@ const Distributions: React.FC = () => {
         title: '重试/失败原因',
         key: 'retryInfo',
         width: 240,
-        render: (_, record) => (
-          <Space direction="vertical" size={0}>
-            <Text>重试次数：{record.retryCount ?? 0}</Text>
-            <Text type="secondary">{record.failureReason || record.errorMsg || '—'}</Text>
-          </Space>
-        ),
+        render: (_, record) => {
+          const routeBlocked = isSettlementRouteBlocked(record);
+          const routeMeta = getSettlementRouteFailureMeta(record.errorCode);
+          const reason = record.failureReason || record.errorMsg || '—';
+          return (
+            <Space orientation="vertical" size={0}>
+              <Text>重试次数：{record.retryCount ?? 0}</Text>
+              {routeBlocked && <Tag color={routeMeta.color}>{routeMeta.text}</Tag>}
+              <Tooltip title={reason}>
+                <Text type={routeBlocked ? 'danger' : 'secondary'} ellipsis>
+                  {reason}
+                </Text>
+              </Tooltip>
+              {routeBlocked && <Text type="secondary">修正收款信息后再重试</Text>}
+            </Space>
+          );
+        },
       },
     ],
     [],
@@ -538,7 +626,20 @@ const Distributions: React.FC = () => {
       {
         key: 'batch',
         label: '关联批次',
-        children: detail.batchId ? `#${detail.batchId} ${getBatchRevisionText(detail.batchRevision)}` : '—',
+        children: detail.batchId ? (
+          <Space size={8} wrap>
+            <Text>{`#${detail.batchId} ${getBatchRevisionText(detail.batchRevision)}`}</Text>
+            {distributionIsStale ? (
+              <Tag color="error">旧版本</Tag>
+            ) : currentBatchLoaded ? (
+              <Tag color="success">版本一致</Tag>
+            ) : (
+              <Tag>待校验</Tag>
+            )}
+          </Space>
+        ) : (
+          '—'
+        ),
       },
       {
         key: 'period',
@@ -548,7 +649,9 @@ const Distributions: React.FC = () => {
       {
         key: 'payrollType',
         label: '用工类型',
-        children: detail.payrollType ? renderTag(payrollTypeMeta[normalizeStatus(detail.payrollType)], detail.payrollType) : '—',
+        children: detail.payrollType
+          ? renderTag(payrollTypeMeta[normalizeStatus(detail.payrollType)], detail.payrollType)
+          : '—',
       },
       {
         key: 'status',
@@ -624,13 +727,14 @@ const Distributions: React.FC = () => {
         children: formatDateTime(detail.updateTime),
       },
     ];
-  }, [detail]);
+  }, [currentBatchLoaded, detail, distributionIsStale]);
 
   const stepItems = useMemo(() => {
     const distributionMeta = getDistributionStatusMeta(detail?.distributionStatus);
     const approvalMeta = approvalStatusMeta[normalizeStatus(detail?.approvalStatus)];
-    const reconciliationMeta = reconciliationResultMeta[normalizeStatus(reconciliation?.result)]
-      ?? reconciliationTaskStatusMeta[normalizeStatus(reconciliation?.taskStatus)];
+    const reconciliationMeta =
+      reconciliationResultMeta[normalizeStatus(reconciliation?.result)] ??
+      reconciliationTaskStatusMeta[normalizeStatus(reconciliation?.taskStatus)];
     return [
       {
         title: '创建发放单',
@@ -642,7 +746,9 @@ const Distributions: React.FC = () => {
       },
       {
         title: '渠道提交',
-        description: detail?.paymentBatchNo ? `支付批次 ${detail.paymentBatchNo}` : '待创建支付批次',
+        description: detail?.paymentBatchNo
+          ? `支付批次 ${detail.paymentBatchNo}`
+          : '待创建支付批次',
       },
       {
         title: '执行结果',
@@ -665,7 +771,7 @@ const Distributions: React.FC = () => {
         </Button>
       }
     >
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
+      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
         <Card>
           <Space wrap>
             <InputNumber
@@ -700,13 +806,25 @@ const Distributions: React.FC = () => {
             <Statistic title="发放单总数" value={summary.total} />
           </Card>
           <Card size="small">
-            <Statistic title="处理中" value={summary.processing} valueStyle={{ color: '#1677ff' }} />
+            <Statistic
+              title="处理中"
+              value={summary.processing}
+              styles={{ content: { color: '#1677ff' } }}
+            />
           </Card>
           <Card size="small">
-            <Statistic title="全部完成" value={summary.completed} valueStyle={{ color: '#52c41a' }} />
+            <Statistic
+              title="全部完成"
+              value={summary.completed}
+              styles={{ content: { color: '#52c41a' } }}
+            />
           </Card>
           <Card size="small">
-            <Statistic title="异常单数" value={summary.abnormal} valueStyle={{ color: '#ff4d4f' }} />
+            <Statistic
+              title="异常单数"
+              value={summary.abnormal}
+              styles={{ content: { color: '#ff4d4f' } }}
+            />
           </Card>
           <Card size="small">
             <Statistic title="应发总额" value={summary.totalAmount} precision={2} prefix="¥" />
@@ -716,9 +834,12 @@ const Distributions: React.FC = () => {
           </Card>
         </Space>
 
-        <Card bodyStyle={{ padding: 0 }}>
+        <Card styles={{ body: { padding: 0 } }}>
           <Table<PayrollDistributionDto>
-            rowKey={(record) => record.id ?? `${record.distributionNo ?? 'distribution'}-${record.batchId ?? 'unknown'}`}
+            rowKey={(record) =>
+              record.id ??
+              `${record.distributionNo ?? 'distribution'}-${record.batchId ?? 'unknown'}`
+            }
             loading={distributionsQuery.isLoading}
             columns={columns}
             dataSource={records}
@@ -737,16 +858,19 @@ const Distributions: React.FC = () => {
 
       <Drawer
         title={detail?.distributionNo ? `发放单详情 · ${detail.distributionNo}` : '发放单详情'}
-        width={1080}
+        size={1080}
         open={drawerOpen}
         onClose={closeDrawer}
         extra={
           <Space>
-            <Button icon={<ReloadOutlined />} onClick={() => {
-              distributionDetailQuery.refetch();
-              distributionItemsQuery.refetch();
-              distributionReconciliationQuery.refetch();
-            }}>
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={() => {
+                distributionDetailQuery.refetch();
+                distributionItemsQuery.refetch();
+                distributionReconciliationQuery.refetch();
+              }}
+            >
               刷新
             </Button>
             {detail?.approvalWorkflowId && (
@@ -777,14 +901,33 @@ const Distributions: React.FC = () => {
                 对账任务
               </Button>
             )}
+            {canRetry &&
+              detail &&
+              isRetryableDistribution(detail.distributionStatus) &&
+              !distributionIsStale && (
+                <Popconfirm
+                  title="确认重试该发放单？"
+                  description="仅会重试未产生渠道订单的失败明细，已提交渠道的记录仍需先完成对账。"
+                  okText="确认重试"
+                  cancelText="取消"
+                  onConfirm={() => retryDistribution(detail.id)}
+                >
+                  <Button icon={<RedoOutlined />} loading={retryingDistributionId === detail.id}>
+                    重试发放
+                  </Button>
+                </Popconfirm>
+              )}
           </Space>
         }
       >
         <Spin spinning={drawerLoading}>
           {detail ? (
-            <Space direction="vertical" size={16} style={{ width: '100%' }}>
+            <Space orientation="vertical" size={16} style={{ width: '100%' }}>
               <Card size="small" title="流程进度">
-                <Steps current={getDistributionCurrentStep(detail, reconciliation)} items={stepItems} />
+                <Steps
+                  current={getDistributionCurrentStep(detail, reconciliation)}
+                  items={stepItems}
+                />
               </Card>
 
               {(normalizeStatus(detail.distributionStatus) === 'failed' ||
@@ -792,8 +935,30 @@ const Distributions: React.FC = () => {
                 <Alert
                   type="warning"
                   showIcon
-                  message="当前存在失败明细"
+                  title="当前存在失败明细"
                   description="请重点检查失败原因、收款账户信息与渠道回执，必要时发起失败子集重试。"
+                />
+              )}
+
+              {distributionIsStale && (
+                <Alert
+                  type="error"
+                  showIcon
+                  title="当前发放单不是批次的有效版本"
+                  description={
+                    currentBatchLoaded
+                      ? `该发放单为 ${getBatchRevisionText(detail.batchRevision)}，当前批次为 ${getBatchRevisionText(currentBatchRevision)}。旧版本禁止继续发放，请返回批次工作台重新生成发放单。`
+                      : '该发放单已被标记为旧版本，禁止继续发放，请返回批次工作台重新生成发放单。'
+                  }
+                />
+              )}
+
+              {routeBlockedItems.length > 0 && (
+                <Alert
+                  type="error"
+                  showIcon
+                  title={`${routeBlockedItems.length} 条明细被收款路由阻断`}
+                  description="这些明细没有生成可用渠道或收款账号，不会进入支付渠道；修正员工收款信息后再重试失败明细。"
                 />
               )}
 
@@ -801,7 +966,7 @@ const Distributions: React.FC = () => {
                 <Alert
                   type="error"
                   showIcon
-                  message="对账不一致"
+                  title="对账不一致"
                   description={`差异金额：${formatCurrency(reconciliation.difference)}`}
                 />
               )}
@@ -855,12 +1020,18 @@ const Distributions: React.FC = () => {
 
               <Card size="small" title="发放明细">
                 <Table<PayrollDistributionItemDto>
-                  rowKey={(record) => record.id ?? `${record.distributionId}-${record.employeeId}-${record.lineId}`}
+                  rowKey={(record) =>
+                    record.id ?? `${record.distributionId}-${record.employeeId}-${record.lineId}`
+                  }
                   columns={itemColumns}
                   dataSource={distributionItemsQuery.data ?? []}
                   pagination={false}
                   scroll={{ x: 1200 }}
-                  locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无发放明细" /> }}
+                  locale={{
+                    emptyText: (
+                      <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无发放明细" />
+                    ),
+                  }}
                 />
               </Card>
 
