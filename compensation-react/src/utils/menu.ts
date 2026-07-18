@@ -30,6 +30,10 @@ interface MenuNode extends SysResource {
   children?: MenuNode[];
 }
 
+function isEnabledResource(resource: SysResource): boolean {
+  return resource.status == null || resource.status === 'enabled' || resource.status === 1;
+}
+
 // 标准侧边菜单构建规则：
 // - 仅 MENU 类型参与菜单
 // - 按 parentId 组装层级、orderNum 升序
@@ -41,11 +45,12 @@ export function buildMenuFromResources(
 ) {
   const userRoles = normalizeRoles(opts?.userRoles || []);
 
-  // 检查是否已包含嵌套结构
-  const hasNestedStructure = (resources as MenuNode[]).some(r => r._children && r._children.length > 0);
+  // 检查是否已包含实际的嵌套节点；_children 仅是旧版ID元数据。
+  const hasNestedStructure = (resources as MenuNode[]).some((resource) => Array.isArray(resource.children));
 
   const menus = (resources || [])
     .filter((r) => r.type === 'MENU')
+    .filter(isEnabledResource)
     .filter((r) => {
       const meta = parseMeta((r as any).meta ?? (r as any).propsJson);
       if (meta?.hidden) return false;
@@ -57,8 +62,20 @@ export function buildMenuFromResources(
     });
 
   if (hasNestedStructure) {
-    // 已包含嵌套结构，直接过滤后返回
-    const filteredMenus = menus as MenuNode[];
+    // 已包含嵌套结构，递归过滤禁用/隐藏子节点，避免旧子菜单从父节点重新出现。
+    const filterTree = (nodes: MenuNode[]): MenuNode[] => nodes
+      .filter((node) => isEnabledResource(node))
+      .filter((node) => {
+        const meta = parseMeta((node as any).meta ?? (node as any).propsJson);
+        return !meta.hidden;
+      })
+      .map((node) => ({
+        ...node,
+        children: node.children ? filterTree(node.children) : undefined,
+      }))
+      .filter((node) => Boolean(node.path) || Boolean(node.children?.length));
+
+    const filteredMenus = filterTree(menus as MenuNode[]);
     const sortTree = (nodes: MenuNode[]) => {
       nodes.sort((a, b) => (a.orderNum ?? 0) - (b.orderNum ?? 0));
       nodes.forEach((n) => {

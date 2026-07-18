@@ -32,7 +32,7 @@
     "icon": null,
     "parentId": null,
     "orderNum": 11,
-    "propsJson": {"keepAlive": true},
+    "propsJson": {"keepAlive": true, "hidden": true},
     "status": "enabled"
   },
   {
@@ -45,7 +45,7 @@
     "parentId": null,
     "orderNum": 20,
     "propsJson": {"keepAlive": true},
-    "status": "enabled"
+    "status": "disabled"
   },
   {
     "type": "MENU",

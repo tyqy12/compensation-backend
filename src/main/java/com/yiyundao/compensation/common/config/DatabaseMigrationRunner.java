@@ -427,6 +427,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         migratePayrollIntegrityHardening();
         migratePayrollComplianceResources();
         retireLegacyPayrollContent();
+        migrateFrontendRouteResources();
         // Approval workflow incremental columns
         migrateApprovalWorkflowColumns();
         log.info("DB migrations finished.");
@@ -1390,17 +1391,210 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         changed += executeSqlSafely("UPDATE sys_resource SET name='薪酬运营', component='payroll/Operations', update_by='legacy_payroll_retirement', update_time=NOW() " +
                 "WHERE code='menu.payroll.batches' AND deleted=0 AND (component IS NULL OR component <> 'payroll/Operations')");
         changed += executeSqlSafely("UPDATE sys_resource SET status='disabled', update_by='legacy_payroll_retirement', update_time=NOW() " +
-                "WHERE deleted=0 AND status <> 'disabled' AND code IN ('view.payroll.batches','menu.payroll.import','menu.payroll.reports')");
-        changed += executeSqlSafely("UPDATE sys_role_resource rr JOIN sys_resource r ON r.id=rr.resource_id " +
-                "SET rr.deleted=1, rr.update_by='legacy_payroll_retirement', rr.update_time=NOW() " +
-                "WHERE rr.deleted=0 AND r.code IN ('view.payroll.batches','menu.payroll.import','menu.payroll.reports')");
-        changed += executeSqlSafely("UPDATE sys_user_resource ur JOIN sys_resource r ON r.id=ur.resource_id " +
-                "SET ur.deleted=1, ur.update_by='legacy_payroll_retirement', ur.update_time=NOW() " +
-                "WHERE ur.deleted=0 AND r.code IN ('view.payroll.batches','menu.payroll.import','menu.payroll.reports')");
+                "WHERE deleted=0 AND status <> 'disabled' AND code IN ('view.payroll.batches','view.payroll.cycles','view.payroll.templates','menu.payroll.import','menu.payroll.reports','business')");
+        changed += executeSqlSafely("UPDATE sys_role_resource SET deleted=1, update_by='legacy_payroll_retirement', update_time=NOW() " +
+                "WHERE deleted=0 AND resource_id IN (SELECT id FROM sys_resource WHERE code IN ('view.payroll.batches','view.payroll.cycles','view.payroll.templates','menu.payroll.import','menu.payroll.reports','business'))");
+        changed += executeSqlSafely("UPDATE sys_user_resource SET deleted=1, update_by='legacy_payroll_retirement', update_time=NOW() " +
+                "WHERE deleted=0 AND resource_id IN (SELECT id FROM sys_resource WHERE code IN ('view.payroll.batches','view.payroll.cycles','view.payroll.templates','menu.payroll.import','menu.payroll.reports','business'))");
         if (changed > 0) {
             executeSqlSafely("UPDATE sys_user SET permission_version=COALESCE(permission_version,0)+1, update_by='legacy_payroll_retirement', update_time=NOW() " +
                     "WHERE status='active'");
         }
+    }
+
+    /**
+     * 将前端静态路由与 RBAC 页面资源收敛到同一份目录。
+     *
+     * 资源 SQL 文件主要用于人工部署，生产容器则由本 runner 负责幂等校正，避免旧数据库只执行了
+     * 部分 migration 后出现“菜单可见但页面组件不存在”或“页面存在但被 403 拦截”的半配置状态。
+     */
+    private void migrateFrontendRouteResources() {
+        boolean changed = false;
+
+        changed |= ensureFrontendResource("MENU", "dashboard", "工作台", "/", "dashboard/Dashboard", "dashboard",
+                null, 1, "{\"roles\":[\"ADMIN\",\"FINANCE\",\"HR\"],\"keepAlive\":true,\"affix\":true}");
+        changed |= ensureFrontendResource("MENU", "employees", "员工管理", "/employees", "employees/List", "team",
+                null, 10, "{\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "payments", "支付管理", null, null, "wallet",
+                null, 21, "{\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "payments.batches", "支付批次", "/payments/batches", "payments/Batches", "wallet",
+                "payments", 22, "{\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "system", "系统配置", null, null, "control",
+                null, 90, "{\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "system.integration", "集成配置", "/system/integration", "system/IntegrationConfig", "global",
+                "system", 91, "{}");
+        changed |= ensureFrontendResource("MENU", "system.org-sync", "组织同步", "/system/org-sync", "system/OrgSync", "sync",
+                "system", 92, "{}");
+        changed |= ensureFrontendResource("MENU", "admin", "系统管理", null, null, "setting",
+                null, 80, "{\"roles\":[\"ADMIN\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "admin.auth-center", "授权中心", "/admin/auth-center", "admin/auth-center/users/UserList", "safety-certificate",
+                "admin", 80, "{\"roles\":[\"ADMIN\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "admin.user-binding", "用户绑定", "/admin/user-binding", "admin/UserBinding", "user",
+                "admin", 81, "{\"roles\":[\"ADMIN\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "admin.roles", "角色管理", "/admin/roles", "admin/auth-center/roles/RoleList", "team",
+                "admin", 82, "{\"roles\":[\"ADMIN\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "admin.resources.v2", "菜单管理", "/admin/resources-v2", "admin/ResourcesV2", "menu",
+                "admin", 83, "{\"roles\":[\"ADMIN\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "admin.app-registry", "外部应用注册", "/admin/app-registry", "admin/AppRegistry", "appstore",
+                "admin", 84, "{\"roles\":[\"ADMIN\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "admin.audit", "审计日志", "/admin/audit-logs", "admin/AuditLogs", "file-search",
+                "admin", 85, "{\"roles\":[\"ADMIN\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "admin.monitor", "系统监控", "/admin/monitor", "admin/Monitor", "dashboard",
+                "admin", 86, "{\"roles\":[\"ADMIN\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "admin.tasks", "任务调度", "/admin/tasks", "admin/TaskSchedules", "schedule",
+                "admin", 87, "{\"roles\":[\"ADMIN\"],\"keepAlive\":true}");
+
+        changed |= ensureFrontendResource("MENU", "menu.system.payroll", "薪酬管理", null, null, "money-collect",
+                null, 30, "{\"roles\":[\"ADMIN\",\"FINANCE\",\"HR\",\"MANAGER\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "menu.payroll.batches", "薪酬运营", "/payroll/batches", "payroll/Operations", "audit",
+                "menu.system.payroll", 31, "{\"roles\":[\"ADMIN\",\"FINANCE\",\"HR\",\"MANAGER\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("MENU", "menu.approval", "审批管理", "/approval/workflows", "approval/Workflows", "safety-certificate",
+                null, 25, "{\"keepAlive\":true}");
+
+        changed |= ensureFrontendResource("VIEW", "view.employees.me", "员工自助资料", "/employees/me", "employees/Profile", null,
+                "employees", 30, "{\"roles\":[\"ADMIN\",\"EMPLOYEE\"],\"hidden\":true}");
+        changed |= ensureFrontendResource("VIEW", "payments.batch.detail", "批次详情", "/payments/batches/:batchNo", "payments/BatchDetail", null,
+                "payments.batches", 41, "{\"hidden\":true}");
+        changed |= ensureFrontendResource("VIEW", "view.payroll.batch.entry", "批次录入", "/payroll/batches/:batchId/entry", "payroll/Entry", null,
+                "menu.system.payroll", 32, "{\"hidden\":true}");
+        changed |= ensureFrontendResource("VIEW", "view.payroll.compliance", "合规核算", "/payroll/compliance", "payroll/Compliance", "safety-certificate",
+                "menu.system.payroll", 34, "{\"roles\":[\"ADMIN\",\"FINANCE\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("VIEW", "view.payroll.rules", "规则管理", "/payroll/rules", "payroll/Rules", "file-protect",
+                "menu.system.payroll", 35, "{\"roles\":[\"ADMIN\",\"FINANCE\",\"HR\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("VIEW", "view.payroll.calendar", "薪酬日历", "/payroll/calendar", "payroll/Calendar", "calendar",
+                "menu.system.payroll", 36, "{\"roles\":[\"ADMIN\",\"FINANCE\",\"HR\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("VIEW", "view.payroll.confirmations", "确认工作台", "/payroll/confirmations", "payroll/Confirmations", "check-circle",
+                "menu.system.payroll", 38, "{\"roles\":[\"ADMIN\",\"FINANCE\",\"HR\",\"MANAGER\",\"EMPLOYEE\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("VIEW", "view.payroll.distributions", "薪酬发放", "/payroll/distributions", "payroll/Distributions", "bank",
+                "menu.system.payroll", 39, "{\"roles\":[\"ADMIN\",\"FINANCE\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("VIEW", "view.payroll.reconciliations", "薪酬对账", "/payroll/reconciliations", "payroll/Reconciliations", "audit",
+                "menu.system.payroll", 40, "{\"roles\":[\"ADMIN\",\"FINANCE\"],\"keepAlive\":true}");
+        changed |= ensureFrontendResource("VIEW", "view.payroll.batch.ledger", "薪酬批次台账", "/payroll/batches/:batchId/ledger", "payroll/BatchLedger", null,
+                "menu.system.payroll", 42, "{\"roles\":[\"ADMIN\",\"FINANCE\",\"MANAGER\"],\"hidden\":true}");
+        changed |= ensureFrontendResource("VIEW", "view.payroll.batch.manager", "经理核对", "/payroll/batches/:batchId/manager-review", "payroll/ManagerReview", null,
+                "menu.system.payroll", 43, "{\"roles\":[\"ADMIN\",\"FINANCE\",\"MANAGER\"],\"hidden\":true}");
+        changed |= ensureFrontendResource("VIEW", "view.payroll.pt-readonly", "兼职薪酬查询", "/payroll/pt-readonly", "payroll/PartTimeReadonly", "search",
+                "menu.system.payroll", 44, "{\"roles\":[\"ADMIN\",\"FINANCE\"],\"keepAlive\":true}");
+
+        changed |= grantAllEnabledFrontendResourcesToAdmin();
+        changed |= grantFrontendResource("FINANCE", "dashboard");
+        changed |= grantFrontendResource("FINANCE", "employees");
+        changed |= grantFrontendResource("FINANCE", "payments");
+        changed |= grantFrontendResource("FINANCE", "payments.batches");
+        changed |= grantFrontendResource("FINANCE", "menu.approval");
+        changed |= grantFrontendResource("FINANCE", "menu.system.payroll");
+        changed |= grantFrontendResource("FINANCE", "menu.payroll.batches");
+        changed |= grantFrontendResource("FINANCE", "view.payroll.batch.entry");
+        changed |= grantFrontendResource("FINANCE", "view.payroll.compliance");
+        changed |= grantFrontendResource("FINANCE", "view.payroll.rules");
+        changed |= grantFrontendResource("FINANCE", "view.payroll.calendar");
+        changed |= grantFrontendResource("FINANCE", "view.payroll.confirmations");
+        changed |= grantFrontendResource("FINANCE", "view.payroll.distributions");
+        changed |= grantFrontendResource("FINANCE", "view.payroll.reconciliations");
+        changed |= grantFrontendResource("FINANCE", "view.payroll.batch.ledger");
+        changed |= grantFrontendResource("FINANCE", "view.payroll.batch.manager");
+        changed |= grantFrontendResource("FINANCE", "view.payroll.pt-readonly");
+
+        changed |= grantFrontendResource("HR", "dashboard");
+        changed |= grantFrontendResource("HR", "employees");
+        changed |= grantFrontendResource("HR", "menu.system.payroll");
+        changed |= grantFrontendResource("HR", "menu.payroll.batches");
+        changed |= grantFrontendResource("HR", "view.payroll.batch.entry");
+        changed |= grantFrontendResource("HR", "view.payroll.rules");
+        changed |= grantFrontendResource("HR", "view.payroll.calendar");
+        changed |= grantFrontendResource("HR", "view.payroll.confirmations");
+
+        changed |= grantFrontendResource("MANAGER", "menu.approval");
+        changed |= grantFrontendResource("MANAGER", "menu.system.payroll");
+        changed |= grantFrontendResource("MANAGER", "menu.payroll.batches");
+        changed |= grantFrontendResource("MANAGER", "view.payroll.confirmations");
+        changed |= grantFrontendResource("MANAGER", "view.payroll.batch.ledger");
+        changed |= grantFrontendResource("MANAGER", "view.payroll.batch.manager");
+
+        changed |= grantFrontendResource("EMPLOYEE", "view.employees.me");
+        changed |= grantFrontendResource("EMPLOYEE", "view.payroll.confirmations");
+
+        if (changed) {
+            executeSqlSafely("UPDATE sys_user SET permission_version=COALESCE(permission_version,0)+1, update_by='frontend_route_alignment', update_time=NOW() " +
+                    "WHERE status='active'");
+        }
+    }
+
+    private boolean ensureFrontendResource(String type, String code, String name, String path, String component, String icon,
+                                           String parentCode, int orderNum, String propsJson) {
+        String codeSql = sqlLiteral(code);
+        Long parentId = null;
+        if (parentCode != null) {
+            try {
+                parentId = jdbcTemplate.queryForObject(
+                        "SELECT MAX(id) FROM sys_resource WHERE code=? AND deleted=0", Long.class, parentCode);
+            } catch (Exception e) {
+                log.debug("Parent resource lookup failed for code={}, parentCode={}: {}", code, parentCode, e.getMessage());
+            }
+        }
+        String parentExpression = parentId == null ? "0" : String.valueOf(parentId);
+        String alignedSql = "SELECT COUNT(*) FROM sys_resource WHERE code=" + codeSql +
+                " AND type=" + sqlLiteral(type) +
+                " AND name=" + sqlLiteral(name) +
+                " AND COALESCE(path,'')=COALESCE(" + sqlLiteral(path) + ",'')" +
+                " AND COALESCE(component,'')=COALESCE(" + sqlLiteral(component) + ",'')" +
+                " AND COALESCE(icon,'')=COALESCE(" + sqlLiteral(icon) + ",'')" +
+                " AND COALESCE(parent_id,0)=" + parentExpression +
+                " AND order_num=" + orderNum +
+                " AND COALESCE(props_json,'')=COALESCE(" + sqlLiteral(propsJson) + ",'')" +
+                " AND status='enabled' AND deleted=0";
+        try {
+            Integer aligned = jdbcTemplate.queryForObject(alignedSql, Integer.class);
+            if (aligned != null && aligned > 0) {
+                return false;
+            }
+        } catch (Exception e) {
+            log.debug("Resource alignment check failed for code={}, will attempt repair: {}", code, e.getMessage());
+        }
+
+        String common = "type=" + sqlLiteral(type) +
+                ", name=" + sqlLiteral(name) +
+                ", path=" + sqlLiteral(path) +
+                ", component=" + sqlLiteral(component) +
+                ", icon=" + sqlLiteral(icon) +
+                ", parent_id=" + (parentId == null ? "NULL" : String.valueOf(parentId)) +
+                ", order_num=" + orderNum +
+                ", props_json=" + sqlLiteral(propsJson) +
+                ", status='enabled', deleted=0, update_by='frontend_route_alignment', update_time=NOW()";
+        executeSqlSafely("UPDATE sys_resource SET " + common + " WHERE code=" + codeSql);
+        executeSqlSafely("INSERT INTO sys_resource (type, code, name, path, component, icon, parent_id, order_num, props_json, status, create_time, update_time, create_by, update_by, deleted, version) " +
+                "SELECT " + sqlLiteral(type) + ", " + codeSql + ", " + sqlLiteral(name) + ", " + sqlLiteral(path) + ", " +
+                sqlLiteral(component) + ", " + sqlLiteral(icon) + ", " +
+                (parentId == null ? "NULL" : String.valueOf(parentId)) + ", " +
+                orderNum + ", " + sqlLiteral(propsJson) + ", 'enabled', NOW(), NOW(), 'frontend_route_alignment', 'frontend_route_alignment', 0, 0 " +
+                "WHERE NOT EXISTS (SELECT 1 FROM sys_resource WHERE code=" + codeSql + ")");
+        return true;
+    }
+
+    private boolean grantAllEnabledFrontendResourcesToAdmin() {
+        return executeSqlSafely("INSERT INTO sys_role_resource (role_id, resource_id, actions_json, create_time, create_by, deleted, version) " +
+                "SELECT role.id, resource.id, '[\"*\"]', NOW(), 'frontend_route_alignment', 0, 0 " +
+                "FROM sys_role role JOIN sys_resource resource ON resource.status='enabled' AND resource.deleted=0 " +
+                "WHERE role.code='ADMIN' AND role.deleted=0 AND resource.type IN ('MENU','VIEW') " +
+                "AND NOT EXISTS (SELECT 1 FROM sys_role_resource existing WHERE existing.role_id=role.id AND existing.resource_id=resource.id AND existing.deleted=0)") > 0;
+    }
+
+    private boolean grantFrontendResource(String roleCode, String resourceCode) {
+        String roleSql = sqlLiteral(roleCode);
+        String resourceSql = sqlLiteral(resourceCode);
+        int restored = executeSqlSafely("UPDATE sys_role_resource SET deleted=0, update_by='frontend_route_alignment', update_time=NOW() " +
+                "WHERE deleted=1 AND role_id IN (SELECT id FROM sys_role WHERE code=" + roleSql + " AND deleted=0) " +
+                "AND resource_id IN (SELECT id FROM sys_resource WHERE code=" + resourceSql + " AND deleted=0)");
+        int inserted = executeSqlSafely("INSERT INTO sys_role_resource (role_id, resource_id, actions_json, create_time, create_by, deleted, version) " +
+                "SELECT role.id, resource.id, '[\"*\"]', NOW(), 'frontend_route_alignment', 0, 0 " +
+                "FROM sys_role role JOIN sys_resource resource ON resource.code=" + resourceSql + " AND resource.status='enabled' AND resource.deleted=0 " +
+                "WHERE role.code=" + roleSql + " AND role.deleted=0 " +
+                "AND NOT EXISTS (SELECT 1 FROM sys_role_resource existing WHERE existing.role_id=role.id AND existing.resource_id=resource.id AND existing.deleted=0)");
+        return restored > 0 || inserted > 0;
+    }
+
+    private String sqlLiteral(String value) {
+        return value == null ? "NULL" : "'" + value.replace("'", "''") + "'";
     }
 
     private void addColumnIfMissing(String table, String column, String ddl) {

@@ -4,6 +4,8 @@ import { useMeResourcesQuery } from '@services/queries/rbac';
 import Loading from '@components/Common/Loading';
 import type { SysResource } from '@types/api';
 
+const NotFoundPage = React.lazy(() => import('@pages/misc/NotFound'));
+
 const views = import.meta.glob([
   '/src/pages/**/*.tsx',
   '!/src/pages/**/*.test.tsx',
@@ -12,13 +14,61 @@ const views = import.meta.glob([
   '!/src/pages/demo/**',
 ]);
 
-function resolveComponentPath(component?: string | null): string | undefined {
-  if (!component) return undefined;
+export function resolveComponentPath(component?: string | null): string | undefined {
+  if (!component?.trim()) return undefined;
+  const normalized = component
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/?(?:src\/)?pages\//, '')
+    .replace(/^@pages\//, '')
+    .replace(/\.tsx$/, '')
+    .replace(/\/index$/, '')
+    .replace(/^\/+|\/+$/g, '');
+  if (!normalized) return undefined;
   const candidates = [
-    `/src/pages/${component}.tsx`,
-    `/src/pages/${component}/index.tsx`,
+    `/src/pages/${normalized}.tsx`,
+    `/src/pages/${normalized}/index.tsx`,
   ];
-  return candidates.find((k) => k in views);
+  return candidates.find((key) => key in views);
+}
+
+function normalizeRoutePath(path?: string | null): string | undefined {
+  if (!path?.trim()) return undefined;
+  const normalized = `/${path.trim().replace(/^\/+|\/+$/g, '')}`;
+  return normalized === '/' ? '/' : normalized.replace(/\/+$/g, '');
+}
+
+export function findMatchingResource(resources: SysResource[], pathname: string): SysResource | undefined {
+  const currentPath = normalizeRoutePath(pathname) || '/';
+  const list = resources
+    .filter((resource) =>
+      (resource.type === 'VIEW' || resource.type === 'MENU') && isEnabledResource(resource) && resource.path,
+    )
+    .sort((left, right) => {
+      const lengthOrder = (normalizeRoutePath(right.path)?.length || 0) - (normalizeRoutePath(left.path)?.length || 0);
+      if (lengthOrder !== 0) return lengthOrder;
+      // If stale duplicate resources exist, prefer the one whose component is actually in the bundle.
+      const componentOrder = Number(Boolean(resolveComponentPath(right.component))) -
+        Number(Boolean(resolveComponentPath(left.component)));
+      if (componentOrder !== 0) return componentOrder;
+      return Number(left.type === 'VIEW') - Number(right.type === 'VIEW');
+    });
+
+  return list.find((resource) => {
+    const pattern = normalizeRoutePath(resource.path);
+    return pattern ? Boolean(matchPath({ path: pattern, end: true }, currentPath)) : false;
+  });
+}
+
+type LazyView = React.LazyExoticComponent<React.ComponentType<any>>;
+const lazyViews = new Map<string, LazyView>();
+
+function getLazyView(moduleKey: string): LazyView {
+  const cached = lazyViews.get(moduleKey);
+  if (cached) return cached;
+  const lazyView = React.lazy(views[moduleKey] as () => Promise<{ default: React.ComponentType<any> }>);
+  lazyViews.set(moduleKey, lazyView);
+  return lazyView;
 }
 
 function isEnabledResource(resource: SysResource): boolean {
@@ -29,27 +79,25 @@ export const DynamicPageRenderer: React.FC = () => {
   const { pathname } = useLocation();
   const { data } = useMeResourcesQuery();
 
-  const match = useMemo(() => {
-    const list = (data?.resources || []).filter(
-      (r) => (r.type === 'VIEW' || r.type === 'MENU') && isEnabledResource(r),
-    );
-    // sort by path length desc for best match
-    const sorted = list
-      .filter((r) => r.path)
-      .sort((a, b) => (b.path!.length - a.path!.length));
-    for (const r of sorted) {
-      const ok = matchPath({ path: r.path!, end: true }, pathname);
-      if (ok) return r;
-    }
-    return undefined;
-  }, [data?.resources, pathname]);
+  const match = useMemo(() => findMatchingResource(data?.resources || [], pathname), [data?.resources, pathname]);
 
   const modKey = resolveComponentPath(match?.component || undefined);
-  if (!match || !modKey) {
-    return <div style={{ padding: 24 }}>页面未找到或未配置组件</div>;
+  if (!match) {
+    return (
+      <Suspense fallback={<Loading />}>
+        <NotFoundPage />
+      </Suspense>
+    );
+  }
+  if (!modKey) {
+    return (
+      <div style={{ padding: 24 }} data-testid="dynamic-route-config-error">
+        页面资源已配置，但组件不存在：{match.name}（{match.code}）
+      </div>
+    );
   }
 
-  const LazyComp = React.lazy(views[modKey] as any);
+  const LazyComp = getLazyView(modKey);
 
   return (
     <Suspense fallback={<Loading />}> 

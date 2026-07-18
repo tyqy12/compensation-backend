@@ -70,7 +70,8 @@ class DatabaseMigrationRunnerRbacTest {
         Integer permissionVersion = jdbcTemplate.queryForObject(
                 "SELECT permission_version FROM sys_user WHERE username = 'admin'",
                 Integer.class);
-        assertThat(permissionVersion).isZero();
+        // The route alignment migration adds/revokes resources and must invalidate cached permission bundles.
+        assertThat(permissionVersion).isGreaterThan(0);
 
         Integer adminRoles = jdbcTemplate.queryForObject("""
                 SELECT COUNT(*)
@@ -89,6 +90,27 @@ class DatabaseMigrationRunnerRbacTest {
                   AND deleted = 0
                 """, Integer.class);
         assertThat(seededRoles).isEqualTo(5);
+
+        assertThat(resourceField("view.payroll.rules", "path")).isEqualTo("/payroll/rules");
+        assertThat(resourceField("view.payroll.rules", "component")).isEqualTo("payroll/Rules");
+        assertThat(resourceField("view.payroll.distributions", "status")).isEqualTo("enabled");
+        assertThat(resourceField("view.payroll.reconciliations", "status")).isEqualTo("enabled");
+        assertThat(enabledResourceCount("view.payroll.cycles")).isZero();
+        assertThat(enabledResourceCount("menu.payroll.import")).isZero();
+    }
+
+    private String resourceField(String code, String field) {
+        return jdbcTemplate.queryForObject(
+                "SELECT " + field + " FROM sys_resource WHERE code = ? AND deleted = 0",
+                String.class,
+                code);
+    }
+
+    private int enabledResourceCount(String code) {
+        return jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_resource WHERE code = ? AND status = 'enabled' AND deleted = 0",
+                Integer.class,
+                code);
     }
 
     private void recreateLegacyRbacTables() {

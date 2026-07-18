@@ -71,7 +71,7 @@ describe('AppLayout', () => {
     expect(screen.getByTestId('breadcrumb')).toBeInTheDocument();
   });
 
-  it('shows the empty-resource fallback menu for administrators', () => {
+  it('does not invent menu entries when the backend returns no resources', () => {
     render(
       <TestWrapper>
         <AppLayout>
@@ -80,8 +80,8 @@ describe('AppLayout', () => {
       </TestWrapper>,
     );
 
-    expect(screen.getByText('菜单管理')).toBeInTheDocument();
-    expect(screen.getByText('角色管理')).toBeInTheDocument();
+    expect(screen.queryByText('菜单管理')).not.toBeInTheDocument();
+    expect(screen.queryByText('角色管理')).not.toBeInTheDocument();
   });
 
   it('renders without page content', () => {

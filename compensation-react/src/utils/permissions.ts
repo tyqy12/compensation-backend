@@ -13,7 +13,42 @@ function parseProps(json: any): any {
   return json;
 }
 
-type BuildOpts = { userRoles?: string[]; respectRoles?: boolean };
+export type BuildOpts = {
+  userRoles?: string[];
+  respectRoles?: boolean;
+  /** Navigation callers hide disabled resources by default. */
+  includeDisabled?: boolean;
+  /** Navigation callers hide metadata-hidden resources by default. */
+  includeHidden?: boolean;
+  /** Navigation callers hide parameterized detail routes by default. */
+  includeRouteParams?: boolean;
+};
+
+export function getResourceMeta(resource: SysResource): Record<string, any> {
+  const raw = resource.meta ?? (resource as SysResource & { propsJson?: unknown }).propsJson;
+  return parseProps(raw);
+}
+
+export function isEnabledResource(resource: SysResource): boolean {
+  return resource.status == null || resource.status === 'enabled' || resource.status === 1;
+}
+
+function isAllowedByRoles(resource: SysResource, opts?: BuildOpts): boolean {
+  if (!opts?.respectRoles) return true;
+  const roles = getResourceMeta(resource).roles;
+  if (!Array.isArray(roles) || roles.length === 0) return true;
+  const requiredRoles = normalizeRoles(roles.filter((role): role is string => typeof role === 'string'));
+  const userRoles = normalizeRoles(opts.userRoles || []);
+  return requiredRoles.length === 0 || requiredRoles.some((role) => userRoles.includes(role));
+}
+
+function isVisibleInTree(resource: SysResource, opts?: BuildOpts): boolean {
+  if (!opts?.includeDisabled && !isEnabledResource(resource)) return false;
+  const meta = getResourceMeta(resource);
+  if (!opts?.includeHidden && meta.hidden) return false;
+  if (!opts?.includeRouteParams && hasRouteParams(resource.path)) return false;
+  return isAllowedByRoles(resource, opts);
+}
 
 /**
  * 检查路径是否包含路由参数（如 :id, :batchNo 等）
@@ -24,10 +59,6 @@ function hasRouteParams(path?: string | null): boolean {
   return /:[a-zA-Z_][a-zA-Z0-9_]*/.test(path);
 }
 
-function isEnabledResource(resource: SysResource): boolean {
-  return resource.status == null || resource.status === 'enabled' || resource.status === 1;
-}
-
 /**
  * 构建资源树（支持后端返回的嵌套结构）
  * @param resources 扁平资源列表或已嵌套的资源列表
@@ -35,23 +66,25 @@ function isEnabledResource(resource: SysResource): boolean {
  * @returns 树形结构的菜单节点
  */
 export function buildResourceTree(resources: SysResource[], opts?: BuildOpts): MenuNode[] {
-  // 如果资源已经包含 _children 字段（后端返回的嵌套结构），直接返回
-  const hasNestedStructure = resources.some(r => r._children && r._children.length > 0);
+  // 支持资源管理接口返回的实际 children 结构；_children 只是旧版的ID元数据，不能当成树节点。
+  const hasNestedStructure = resources.some((r) => Array.isArray((r as MenuNode).children));
 
   if (hasNestedStructure) {
-    return (resources as MenuNode[]).filter((r) => {
-      if (!isEnabledResource(r)) return false;
-      const meta = r.meta ?? {};
-      if (meta?.hidden) return false;
-      // 过滤掉带有路由参数的路径（如 /employees/:id），这些是详情页，不应出现在菜单中
-      if (hasRouteParams(r.path)) return false;
-      if (opts?.respectRoles && meta?.roles && Array.isArray(meta.roles)) {
-        const rr = normalizeRoles(meta.roles as string[]);
-        const ur = normalizeRoles(opts?.userRoles || []);
-        return rr.length === 0 || rr.some((x) => ur.includes(x));
-      }
-      return true;
-    });
+    const filterNested = (nodes: MenuNode[]): MenuNode[] => nodes
+      .filter((node) => isVisibleInTree(node, opts))
+      .map((node) => ({
+        ...node,
+        children: node.children ? filterNested(node.children) : undefined,
+      }))
+      .filter((node) => Boolean(node.path) || Boolean(node.children?.length));
+
+    const roots = filterNested(resources as MenuNode[]);
+    const sortChildren = (nodes: MenuNode[]) => {
+      nodes.sort((a, b) => (a.orderNum ?? 0) - (b.orderNum ?? 0));
+      nodes.forEach((node) => node.children && sortChildren(node.children));
+    };
+    sortChildren(roots);
+    return roots;
   }
 
   // 否则，构建树结构
@@ -59,19 +92,7 @@ export function buildResourceTree(resources: SysResource[], opts?: BuildOpts): M
   const roots: MenuNode[] = [];
   const list = (resources || [])
     .filter((r) => r.type === 'MENU' || r.type === 'VIEW')
-    .filter((r) => {
-      if (!isEnabledResource(r)) return false;
-      const meta = r.meta ?? {};
-      if (meta?.hidden) return false;
-      // 过滤掉带有路由参数的路径（如 /employees/:id），这些是详情页，不应出现在菜单中
-      if (hasRouteParams(r.path)) return false;
-      if (opts?.respectRoles && meta?.roles && Array.isArray(meta.roles)) {
-        const rr = normalizeRoles(meta.roles as string[]);
-        const ur = normalizeRoles(opts?.userRoles || []);
-        return rr.length === 0 || rr.some((x) => ur.includes(x));
-      }
-      return true;
-    });
+    .filter((r) => isVisibleInTree(r, opts));
   list.forEach((r) => byId.set(r.id, { ...r, children: [] }));
   list.forEach((r) => {
     const node = byId.get(r.id)!;
@@ -87,7 +108,13 @@ export function buildResourceTree(resources: SysResource[], opts?: BuildOpts): M
     nodes.forEach((n) => n.children && sortChildren(n.children));
   };
   sortChildren(roots);
-  return roots;
+  const removeEmptyGroups = (nodes: MenuNode[]): MenuNode[] => nodes
+    .map((node) => ({
+      ...node,
+      children: node.children ? removeEmptyGroups(node.children) : undefined,
+    }))
+    .filter((node) => Boolean(node.path) || Boolean(node.children?.length));
+  return removeEmptyGroups(roots);
 }
 
 /**
@@ -96,8 +123,10 @@ export function buildResourceTree(resources: SysResource[], opts?: BuildOpts): M
 export function flattenAllowedPaths(resources: SysResource[]): string[] {
   return (resources || [])
     .filter((r) => (r.type === 'MENU' || r.type === 'VIEW') && r.path)
+    .filter(isEnabledResource)
     .map((r) => r.path!)
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((path, index, paths) => paths.indexOf(path) === index);
 }
 
 /**

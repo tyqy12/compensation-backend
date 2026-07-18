@@ -71,9 +71,17 @@ const ResourceManager: React.FC = () => {
         r.name?.toLowerCase().includes(keyword) ||
         r.code?.toLowerCase().includes(keyword)
       );
-      return buildResourceTree(filtered);
+      return buildResourceTree(filtered, {
+        includeDisabled: true,
+        includeHidden: true,
+        includeRouteParams: true,
+      });
     }
-    return buildResourceTree(all);
+    return buildResourceTree(all, {
+      includeDisabled: true,
+      includeHidden: true,
+      includeRouteParams: true,
+    });
   }, [listQuery.data, searchText]);
 
   const flatList = useMemo(() => {

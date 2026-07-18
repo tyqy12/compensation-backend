@@ -201,24 +201,6 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
       });
 
     const dynamicItems = toMenuItems(tree);
-    const isAdmin = userRoles.some((role: string) => /ADMIN/i.test(role));
-    if (dynamicItems.length === 0 && isAdmin) {
-      const fallbackItems = [
-        {
-          key: '/admin/resources-v2',
-          icon: <SettingOutlined />,
-          label: <Link to="/admin/resources-v2">菜单管理</Link>,
-        },
-        {
-          key: '/admin/roles',
-          icon: <SafetyCertificateOutlined />,
-          label: <Link to="/admin/roles">角色管理</Link>,
-        },
-      ];
-      fallbackItems.forEach((item) => pathToKey.set(item.key, item.key));
-      return { menuItems: fallbackItems, selectedMenuKey: getSelectedMenuKey(pathname, pathToKey) };
-    }
-
     return {
       menuItems: dynamicItems,
       selectedMenuKey: getSelectedMenuKey(pathname, pathToKey),
