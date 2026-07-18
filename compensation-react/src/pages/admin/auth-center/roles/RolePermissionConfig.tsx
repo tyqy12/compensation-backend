@@ -30,7 +30,11 @@ import {
 } from '@ant-design/icons';
 import { useResourcesQuery } from '@services/queries/resources';
 import { useRolesQuery } from '@services/queries/roles';
-import { useRoleResourcesQuery, usePutRoleResourcesMutation } from '@services/queries/adminAuth';
+import {
+  usePermissionActionsQuery,
+  useRoleResourcesQuery,
+  usePutRoleResourcesMutation,
+} from '@services/queries/adminAuth';
 import type { RoleInfo, SysResource } from '@types/api';
 import './RolePages.less';
 
@@ -59,15 +63,6 @@ const RESOURCE_TYPE_COLOR: Record<string, string> = {
   ACTION: 'orange',
   API: 'purple',
 };
-
-const ACTION_OPTIONS: Array<{ label: string; value: string }> = [
-  { label: '查看数据', value: 'read' },
-  { label: '新增/编辑', value: 'write' },
-  { label: '删除数据', value: 'delete' },
-  { label: '全部权限', value: 'admin' },
-  { label: '导出 Excel', value: 'export' },
-  { label: '导入数据', value: 'import' },
-];
 
 const ROLE_TYPE_META: Record<RoleInfo['roleType'], { label: string; color: string }> = {
   SYSTEM: { label: '系统角色', color: 'red' },
@@ -107,6 +102,7 @@ const RolePermissionConfig: React.FC = () => {
   const rolesQuery = useRolesQuery({});
   const roleResourcesQuery = useRoleResourcesQuery(roleIdNum);
   const putRoleResourcesMutation = usePutRoleResourcesMutation(roleIdNum);
+  const permissionActionsQuery = usePermissionActionsQuery();
 
   const [checkedKeys, setCheckedKeys] = useState<React.Key[]>([]);
   const [actionConfigs, setActionConfigs] = useState<Record<number, string[]>>({});
@@ -129,6 +125,24 @@ const RolePermissionConfig: React.FC = () => {
     () => new Set(checkedKeys.map((key) => Number(key))),
     [checkedKeys],
   );
+  const actionCatalog = permissionActionsQuery.data ?? [];
+  const actionOptions = useMemo(
+    () => actionCatalog.map((action) => ({ label: action.name || action.code, value: action.code })),
+    [actionCatalog],
+  );
+  const actionOptionsForResource = useCallback(
+    (resourceId: number) => actionCatalog
+      .filter((action) => action.resourceIds?.includes(resourceId))
+      .map((action) => ({ label: action.name || action.code, value: action.code })),
+    [actionCatalog],
+  );
+  const bulkActionOptions = useMemo(() => {
+    const selectedIds = checkedKeys.map(Number);
+    if (!selectedIds.length) return actionOptions;
+    return actionCatalog
+      .filter((action) => selectedIds.every((id) => action.resourceIds?.includes(id)))
+      .map((action) => ({ label: action.name || action.code, value: action.code }));
+  }, [actionCatalog, actionOptions, checkedKeys]);
 
   const filteredResources = useMemo(() => {
     const list = resourcesQuery.data ?? [];
@@ -333,7 +347,7 @@ const RolePermissionConfig: React.FC = () => {
     onBack: () => navigate('/admin/auth-center/roles'),
   };
 
-  if (resourcesQuery.isLoading || rolesQuery.isLoading || roleResourcesQuery.isLoading) {
+  if (resourcesQuery.isLoading || rolesQuery.isLoading || roleResourcesQuery.isLoading || permissionActionsQuery.isLoading) {
     return (
       <PageContainer header={pageHeader}>
         <main className="role-page-state">
@@ -343,7 +357,7 @@ const RolePermissionConfig: React.FC = () => {
     );
   }
 
-  if (resourcesQuery.isError || rolesQuery.isError || roleResourcesQuery.isError) {
+  if (resourcesQuery.isError || rolesQuery.isError || roleResourcesQuery.isError || permissionActionsQuery.isError) {
     return (
       <PageContainer header={pageHeader}>
         <main className="role-page-state">
@@ -559,7 +573,7 @@ const RolePermissionConfig: React.FC = () => {
                     </div>
                     <Checkbox.Group
                       disabled={readOnly}
-                      options={ACTION_OPTIONS}
+                      options={bulkActionOptions}
                       value={bulkActions}
                       onChange={(values) => setBulkActions(values as string[])}
                     />
@@ -598,7 +612,7 @@ const RolePermissionConfig: React.FC = () => {
                           </div>
                           <Checkbox.Group
                             disabled={readOnly}
-                            options={ACTION_OPTIONS}
+                            options={actionOptionsForResource(resource.id)}
                             value={actions}
                             onChange={(values) =>
                               updateActionConfig(resource.id, values as string[])

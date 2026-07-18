@@ -37,17 +37,13 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
     private final ObjectMapper objectMapper;
     private final ExternalApiTokenService externalApiTokenService;
     private final ClientIpResolver clientIpResolver;
+    private final DatabasePermissionService permissionService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String uri = getApplicationPath(request);
-        if (!isExternalApiRequest(uri)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        if (isTokenEndpoint(uri)) {
+        if (!permissionService.matchesExternalResource(request)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -210,21 +206,6 @@ public class ExternalApiAuthenticationFilter extends OncePerRequestFilter {
         } catch (Exception e) {
             log.warn("外部 API 审计记录失败: {}", e.getMessage());
         }
-    }
-
-    private boolean isExternalApiRequest(String uri) {
-        return isPathOrChild(uri, "/openapi")
-                || isPathOrChild(uri, "/v1/payroll")
-                || isPathOrChild(uri, "/v1/payslips")
-                || uri.equals("/v1/ping");
-    }
-
-    private boolean isPathOrChild(String uri, String path) {
-        return uri.equals(path) || uri.startsWith(path + "/");
-    }
-
-    private boolean isTokenEndpoint(String uri) {
-        return uri.equals("/v1/oauth/token") || uri.equals("/api/v1/oauth/token");
     }
 
     private String getApplicationPath(HttpServletRequest request) {

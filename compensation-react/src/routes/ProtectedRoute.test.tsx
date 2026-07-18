@@ -103,19 +103,25 @@ describe('ProtectedRoute', () => {
     };
 
     store.dispatch(login(mockUser));
+    mockGetMeResources.mockResolvedValue({
+      permissionVersion: 1,
+      resources: [],
+      actions: {},
+    });
 
     render(
       <TestWrapper>
-        <ProtectedRoute roles={['ADMIN']}>
+        <ProtectedRoute>
           <div>Admin Content</div>
         </ProtectedRoute>
       </TestWrapper>,
     );
 
-    const navigate = screen.getByTestId('navigate');
-    expect(navigate).toHaveAttribute('data-to', '/403');
-    expect(navigate).toHaveTextContent('Redirecting to /403');
-    expect(mockGetMeResources).not.toHaveBeenCalled();
+    return waitFor(() => {
+      const navigate = screen.getByTestId('navigate');
+      expect(navigate).toHaveAttribute('data-to', '/403');
+      expect(navigate).toHaveTextContent('Redirecting to /403');
+    });
   });
 
   it('应该在有权限时显示内容', async () => {
@@ -129,7 +135,7 @@ describe('ProtectedRoute', () => {
 
     render(
       <TestWrapper>
-        <ProtectedRoute roles={['ADMIN']}>
+        <ProtectedRoute>
           <div>Admin Content</div>
         </ProtectedRoute>
       </TestWrapper>,
@@ -140,7 +146,7 @@ describe('ProtectedRoute', () => {
     expect(mockGetMeResources).toHaveBeenCalledTimes(1);
   });
 
-  it('应该在无角色要求时显示内容（仅需要认证）', async () => {
+  it('应该在服务端资源允许时显示内容', async () => {
     const mockUser = {
       id: '1',
       username: 'testuser',
@@ -262,7 +268,7 @@ describe('ProtectedRoute', () => {
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
   });
 
-  it('管理员在资源尚未初始化时保留基础入口兜底', async () => {
+  it('管理员在资源尚未初始化时也必须拒绝访问', async () => {
     mockGetMeResources.mockResolvedValue({
       permissionVersion: 1,
       resources: [],
@@ -284,7 +290,7 @@ describe('ProtectedRoute', () => {
       </TestWrapper>,
     );
 
-    expect(await screen.findByText('Admin Bootstrap Content')).toBeInTheDocument();
-    expect(screen.queryByTestId('navigate')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByTestId('navigate')).toHaveAttribute('data-to', '/403'));
+    expect(screen.queryByText('Admin Bootstrap Content')).not.toBeInTheDocument();
   });
 });

@@ -9,6 +9,7 @@ import com.yiyundao.compensation.modules.app.service.AppDataGrantService;
 import com.yiyundao.compensation.modules.app.service.AppRegistryService;
 import com.yiyundao.compensation.modules.app.service.impl.AppRateLimitServiceImpl;
 import com.yiyundao.compensation.security.ClientIpResolver;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import com.yiyundao.compensation.security.ExternalApiTokenService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +41,7 @@ public class ExternalOAuthController {
     private final ExternalApiTokenService externalApiTokenService;
     private final ClientIpResolver clientIpResolver;
     private final AppRateLimitService appRateLimitService;
+    private final DatabasePermissionService databasePermissionService;
 
     @PostMapping("/token")
     public ResponseEntity<ApiResponse<ExternalAppTokenResponse>> token(
@@ -84,7 +86,7 @@ public class ExternalOAuthController {
         if (requestedScopes.isEmpty()) {
             return error(ErrorCode.PARAM_INVALID, "请求范围无效");
         }
-        if (requiresPayrollDataGrant(requestedScopes)
+        if (databasePermissionService.requiresDataGrant(requestedScopes)
                 && appDataGrantService.listActiveByAppId(app.getId()).isEmpty()) {
             return error(ErrorCode.FORBIDDEN, "应用未配置薪酬数据范围，禁止签发薪酬访问令牌");
         }
@@ -166,10 +168,6 @@ public class ExternalOAuthController {
         return registeredScopes.stream()
                 .filter(requestedSet::contains)
                 .toList();
-    }
-
-    private boolean requiresPayrollDataGrant(List<String> scopes) {
-        return scopes.stream().anyMatch(item -> "payroll:read".equals(item) || "payslip:read".equals(item));
     }
 
     private record ClientCredentials(String clientId, String clientSecret) {}

@@ -36,6 +36,7 @@ class ExternalApiAuthenticationFilterTest {
     private AuditLogService auditLogService;
     private ExternalApiContext externalApiContext;
     private ExternalApiTokenService tokenService;
+    private DatabasePermissionService permissionService;
     private MockEnvironment environment;
     private ExternalApiAuthenticationFilter filter;
 
@@ -45,6 +46,18 @@ class ExternalApiAuthenticationFilterTest {
         appRateLimitService = mock(AppRateLimitService.class);
         auditLogService = mock(AuditLogService.class);
         externalApiContext = new ExternalApiContext();
+        permissionService = mock(DatabasePermissionService.class);
+        when(permissionService.matchesExternalResource(any())).thenAnswer(invocation -> {
+            jakarta.servlet.http.HttpServletRequest request = invocation.getArgument(0);
+            String uri = request.getRequestURI();
+            String contextPath = request.getContextPath();
+            if (contextPath != null && !contextPath.isBlank() && uri.startsWith(contextPath)) {
+                uri = uri.substring(contextPath.length());
+            }
+            return uri.equals("/v1/payroll") || uri.startsWith("/v1/payroll/")
+                    || uri.equals("/v1/payslips") || uri.startsWith("/v1/payslips/")
+                    || "/v1/ping".equals(uri);
+        });
         environment = new MockEnvironment();
 
         ExternalApiAuthProperties properties = new ExternalApiAuthProperties();
@@ -60,7 +73,8 @@ class ExternalApiAuthenticationFilterTest {
                 externalApiContext,
                 new ObjectMapper().registerModule(new JavaTimeModule()),
                 tokenService,
-                new ClientIpResolver(environment)
+                new ClientIpResolver(environment),
+                permissionService
         );
     }
 
@@ -90,7 +104,8 @@ class ExternalApiAuthenticationFilterTest {
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication().getAuthorities())
                 .extracting("authority")
-                .contains("ROLE_APP", "SCOPE_payroll:read");
+                .contains("SCOPE_payroll:read")
+                .doesNotContain("ROLE_APP");
     }
 
     @Test
@@ -114,7 +129,8 @@ class ExternalApiAuthenticationFilterTest {
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication().getAuthorities())
                 .extracting("authority")
-                .contains("ROLE_APP", "SCOPE_payroll:read");
+                .contains("SCOPE_payroll:read")
+                .doesNotContain("ROLE_APP");
     }
 
     @Test

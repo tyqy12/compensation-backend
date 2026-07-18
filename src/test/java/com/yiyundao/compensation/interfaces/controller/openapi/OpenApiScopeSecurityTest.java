@@ -6,7 +6,10 @@ import com.yiyundao.compensation.modules.app.service.AppRateLimitService;
 import com.yiyundao.compensation.modules.app.service.AppRegistryService;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.payroll.service.ExternalPayrollQueryService;
+import com.yiyundao.compensation.modules.rbac.entity.SysResource;
+import com.yiyundao.compensation.infrastructure.dao.SysResourceMapper;
 import com.yiyundao.compensation.security.ExternalApiTokenService;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -15,6 +18,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 
@@ -35,6 +40,12 @@ class OpenApiScopeSecurityTest {
 
     @Autowired
     private ExternalApiTokenService externalApiTokenService;
+
+    @Autowired
+    private DatabasePermissionService databasePermissionService;
+
+    @Autowired
+    private SysResourceMapper sysResourceMapper;
 
     @MockBean
     private AppRegistryService appRegistryService;
@@ -61,6 +72,35 @@ class OpenApiScopeSecurityTest {
         when(appRegistryService.getById(100L)).thenReturn(app);
         when(appRegistryService.isIpAllowed(eq(app), anyString())).thenReturn(true);
         when(appRegistryService.resolveScopes(app)).thenReturn(List.of("payroll:read", "payslip:read"));
+    }
+
+    @Test
+    void databaseResourceMatcherShouldClassifyPayrollEndpointAsExternal() {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/v1/payroll/batches");
+        SysResource resource = sysResourceMapper.selectList(null).stream()
+                .filter(item -> "rbac.external.payroll".equals(item.getCode()))
+                .findFirst()
+                .orElseThrow();
+
+        org.assertj.core.api.Assertions.assertThat(resource.getPath()).isEqualTo("/v1/payroll/**");
+        Object matchingPattern = ReflectionTestUtils.invokeMethod(databasePermissionService, "matchingPattern", resource,
+                request.getRequestURI(), request.getServletPath(), request.getContextPath());
+        org.assertj.core.api.Assertions.assertThat(matchingPattern == null ? null : matchingPattern.toString())
+                .isEqualTo("/v1/payroll/**");
+        org.assertj.core.api.Assertions.assertThat(databasePermissionService.matchesExternalResource(request))
+                .isTrue();
+    }
+
+    @Test
+    void databaseResourceMatcherShouldKeepContextPrefixedApiPath() {
+        SysResource resource = new SysResource();
+        resource.setPath("/api/employee");
+
+        Object matchingPattern = ReflectionTestUtils.invokeMethod(databasePermissionService, "matchingPattern", resource,
+                "/api/employee", "/employee", "/api");
+
+        org.assertj.core.api.Assertions.assertThat(matchingPattern == null ? null : matchingPattern.toString())
+                .isEqualTo("/api/employee");
     }
 
     @Test

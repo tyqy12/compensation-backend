@@ -4,15 +4,15 @@ import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollBatchCreateRequest;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollBatchUpdateRequest;
 import com.yiyundao.compensation.modules.payroll.service.PayrollCalculationService;
-import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.lang.reflect.Method;
 
@@ -69,14 +69,12 @@ class PayrollBatchControllerSecurityTest {
     void managerReviewShouldForceManagerScopeToCurrentEmployee() {
         PayrollCalculationService calculationService = mock(PayrollCalculationService.class);
         SysUserService sysUserService = mock(SysUserService.class);
-        UserRoleService userRoleService = mock(UserRoleService.class);
-        PayrollBatchController controller = controller(calculationService, sysUserService, userRoleService);
+        DatabasePermissionService permissionService = mock(DatabasePermissionService.class);
+        PayrollBatchController controller = controller(calculationService, sysUserService, permissionService);
         SysUser manager = user("manager", 10L, 100L);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("manager", "n/a"));
         when(sysUserService.findByUsername("manager")).thenReturn(manager);
-        when(userRoleService.hasAnyRole(10L, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE))
-                .thenReturn(false);
 
         controller.managerReview(7L, "Engineering", 999L, "alice");
 
@@ -87,14 +85,13 @@ class PayrollBatchControllerSecurityTest {
     void managerReviewShouldKeepRequestedScopeForFinanceOrAdmin() {
         PayrollCalculationService calculationService = mock(PayrollCalculationService.class);
         SysUserService sysUserService = mock(SysUserService.class);
-        UserRoleService userRoleService = mock(UserRoleService.class);
-        PayrollBatchController controller = controller(calculationService, sysUserService, userRoleService);
+        DatabasePermissionService permissionService = mock(DatabasePermissionService.class);
+        PayrollBatchController controller = controller(calculationService, sysUserService, permissionService);
         SysUser finance = user("finance", 11L, null);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("finance", "n/a"));
         when(sysUserService.findByUsername("finance")).thenReturn(finance);
-        when(userRoleService.hasAnyRole(11L, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE))
-                .thenReturn(true);
+        when(permissionService.hasCurrentRequestScope(11L, "ALL")).thenReturn(true);
 
         controller.managerReview(8L, null, 999L, null);
 
@@ -105,14 +102,12 @@ class PayrollBatchControllerSecurityTest {
     void managerReviewShouldRejectManagerWithoutEmployeeBinding() {
         PayrollCalculationService calculationService = mock(PayrollCalculationService.class);
         SysUserService sysUserService = mock(SysUserService.class);
-        UserRoleService userRoleService = mock(UserRoleService.class);
-        PayrollBatchController controller = controller(calculationService, sysUserService, userRoleService);
+        DatabasePermissionService permissionService = mock(DatabasePermissionService.class);
+        PayrollBatchController controller = controller(calculationService, sysUserService, permissionService);
         SysUser manager = user("manager", 12L, null);
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("manager", "n/a"));
         when(sysUserService.findByUsername("manager")).thenReturn(manager);
-        when(userRoleService.hasAnyRole(12L, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE))
-                .thenReturn(false);
 
         assertThatThrownBy(() -> controller.managerReview(9L, null, null, null))
                 .isInstanceOf(BusinessException.class);
@@ -126,17 +121,18 @@ class PayrollBatchControllerSecurityTest {
 
     private static PayrollBatchController controller(PayrollCalculationService calculationService,
                                                      SysUserService sysUserService,
-                                                     UserRoleService userRoleService) {
-        return new PayrollBatchController(
+                                                     DatabasePermissionService permissionService) {
+        PayrollBatchController controller = new PayrollBatchController(
                 null,
                 calculationService,
                 null,
                 null,
                 null,
                 sysUserService,
-                userRoleService,
+                permissionService,
                 null
         );
+        return controller;
     }
 
     private static SysUser user(String username, Long id, Long employeeId) {

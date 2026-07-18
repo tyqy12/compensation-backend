@@ -17,6 +17,7 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import com.yiyundao.compensation.service.EncryptionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,6 +28,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -55,6 +57,8 @@ class PayslipServiceImplTest {
     private UserRoleService userRoleService;
     @Mock
     private EncryptionService encryptionService;
+    @Mock
+    private DatabasePermissionService databasePermissionService;
 
     @InjectMocks
     private PayslipServiceImpl payslipService;
@@ -68,6 +72,7 @@ class PayslipServiceImplTest {
         employeeUser.setUsername("alice");
         employeeUser.setRoles("ROLE_EMPLOYEE");
         employeeUser.setEmployeeId(99L);
+        ReflectionTestUtils.setField(payslipService, "databasePermissionService", databasePermissionService);
     }
 
     @Test
@@ -364,7 +369,7 @@ class PayslipServiceImplTest {
         batch.setStatus(PayrollBatchStatus.LOCKED);
         batch.setConfirmationRequired(Boolean.FALSE);
 
-        Mockito.when(userRoleService.hasAnyRole(2L, "ROLE_ADMIN", "ROLE_FINANCE")).thenReturn(true);
+        Mockito.when(databasePermissionService.hasCurrentRequestScope(2L, "ALL")).thenReturn(true);
         Mockito.when(payrollLineService.getById(13L)).thenReturn(line);
         Mockito.when(payrollBatchService.getById(24L)).thenReturn(batch);
         Mockito.when(objectMapper.readValue(Mockito.eq("[]"), ArgumentMatchers.<TypeReference<List<PayrollPreviewDto.PayrollPreviewItemDto>>>any()))
@@ -399,7 +404,7 @@ class PayslipServiceImplTest {
         batch.setStatus(PayrollBatchStatus.LOCKED);
         batch.setConfirmationRequired(Boolean.FALSE);
 
-        Mockito.when(userRoleService.hasAnyRole(3L, "ROLE_ADMIN", "ROLE_FINANCE")).thenReturn(true);
+        Mockito.when(databasePermissionService.hasCurrentRequestScope(3L, "ALL")).thenReturn(true);
         Mockito.when(payrollLineService.getById(15L)).thenReturn(line);
         Mockito.when(payrollBatchService.getById(26L)).thenReturn(batch);
         Mockito.when(objectMapper.readValue(Mockito.eq("[]"), ArgumentMatchers.<TypeReference<List<PayrollPreviewDto.PayrollPreviewItemDto>>>any()))
@@ -414,6 +419,6 @@ class PayslipServiceImplTest {
 
         assertThat(detail).isNotNull();
         assertThat(detail.getLineId()).isEqualTo(15L);
-        Mockito.verify(userRoleService, Mockito.atLeastOnce()).hasAnyRole(3L, "ROLE_ADMIN", "ROLE_FINANCE");
+        Mockito.verify(databasePermissionService, Mockito.atLeastOnce()).hasCurrentRequestScope(3L, "ALL");
     }
 }

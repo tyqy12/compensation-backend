@@ -21,9 +21,8 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayslipService;
 import com.yiyundao.compensation.modules.payroll.support.CsvExportUtils;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
-import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import com.yiyundao.compensation.service.EncryptionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -87,7 +86,7 @@ public class PayslipServiceImpl implements PayslipService {
     private final EmployeeService employeeService;
     private final ObjectMapper objectMapper;
     private final PayrollValidationIssueSupport validationIssueSupport;
-    private final UserRoleService userRoleService;
+    private final DatabasePermissionService databasePermissionService;
     private final EncryptionService encryptionService;
 
     @Override
@@ -102,7 +101,7 @@ public class PayslipServiceImpl implements PayslipService {
         long pageSize = safeSize(size);
         LambdaQueryWrapper<PayrollLine> wrapper = new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getEmployeeId, targetEmployeeId);
-        if (!hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+        if (!hasGlobalScope(currentUser)) {
             wrapper.exists(EMPLOYEE_VISIBLE_BATCH_EXISTS_SQL);
         }
         wrapper.orderByDesc(PayrollLine::getId);
@@ -283,7 +282,7 @@ public class PayslipServiceImpl implements PayslipService {
 
     private Long resolveTargetEmployee(SysUser currentUser, Long requestedEmployee) {
         if (requestedEmployee != null) {
-            if (hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+            if (hasGlobalScope(currentUser)) {
                 return requestedEmployee;
             }
             Long owned = currentUser.getEmployeeId();
@@ -295,7 +294,7 @@ public class PayslipServiceImpl implements PayslipService {
         if (currentUser.getEmployeeId() != null) {
             return currentUser.getEmployeeId();
         }
-        if (hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+        if (hasGlobalScope(currentUser)) {
             return null;
         }
         throw new AccessDeniedException("当前账号未绑定员工信息");
@@ -313,14 +312,14 @@ public class PayslipServiceImpl implements PayslipService {
                 && employeeId.equals(line.getConfirmationAssigneeEmployeeId())) {
             return;
         }
-        if (hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+        if (hasGlobalScope(currentUser)) {
             return;
         }
         throw new AccessDeniedException("无权查看该工资条");
     }
 
     private void ensureBatchVisibleToCurrentUser(SysUser currentUser, PayrollBatch batch) {
-        if (hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+        if (hasGlobalScope(currentUser)) {
             return;
         }
         if (!isEmployeeVisibleBatch(batch)) {
@@ -405,11 +404,9 @@ public class PayslipServiceImpl implements PayslipService {
         }
     }
 
-    private boolean hasAnyRole(SysUser user, String... roles) {
-        if (user == null || user.getId() == null || roles == null) {
-            return false;
-        }
-        return userRoleService.hasAnyRole(user.getId(), roles);
+    private boolean hasGlobalScope(SysUser user) {
+        return user != null && user.getId() != null
+                && databasePermissionService.hasCurrentRequestScope(user.getId(), "ALL");
     }
 
     private String maskEncryptedBankAccount(String encryptedBankAccount) {

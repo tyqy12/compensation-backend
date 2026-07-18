@@ -40,7 +40,7 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
-    void shouldSkipExternalApiBearerToken() throws Exception {
+    void shouldLeaveInvalidExternalApiBearerTokenUnauthenticated() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/v1/payroll/batches");
         request.addHeader("Authorization", "Bearer external-api-token");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -48,13 +48,13 @@ class JwtAuthenticationFilterTest {
 
         filter.doFilter(request, response, chain);
 
-        verify(tokenProvider, never()).validateToken(anyString());
+        verify(tokenProvider).validateToken("external-api-token");
         verify(chain).doFilter(request, response);
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }
 
     @Test
-    void shouldSkipExternalApiBearerTokenUnderServletContextPath() throws Exception {
+    void shouldLeaveInvalidExternalApiBearerTokenUnauthenticatedUnderServletContextPath() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/payroll/batches");
         request.setContextPath("/api");
         request.addHeader("Authorization", "Bearer external-api-token");
@@ -63,7 +63,7 @@ class JwtAuthenticationFilterTest {
 
         filter.doFilter(request, response, chain);
 
-        verify(tokenProvider, never()).validateToken(anyString());
+        verify(tokenProvider).validateToken("external-api-token");
         verify(chain).doFilter(request, response);
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
     }

@@ -20,10 +20,9 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollProcessManager;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
-import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -72,8 +71,6 @@ class PayrollBatchServiceImplTest {
     @Mock
     private PayrollPaymentService payrollPaymentService;
     @Mock
-    private UserRoleService userRoleService;
-    @Mock
     private AuditLogService auditLogService;
     @Mock
     private PayrollValidationIssueSupport validationIssueSupport;
@@ -85,6 +82,8 @@ class PayrollBatchServiceImplTest {
     private PayrollApprovalProjectionService approvalProjectionService;
     @Mock
     private PayrollProcessManager payrollProcessManager;
+    @Mock
+    private DatabasePermissionService databasePermissionService;
 
     @AfterEach
     void tearDown() {
@@ -200,7 +199,6 @@ class PayrollBatchServiceImplTest {
         currentUser.setId(100L);
         currentUser.setUsername("finance_user");
         when(sysUserService.findByUsername("finance_user")).thenReturn(currentUser);
-        when(userRoleService.hasRole(100L, SecurityConstants.ROLE_ADMIN)).thenReturn(false);
         when(approvalEngine.startWorkflow(
                 eq(WorkflowType.PAYROLL_DISTRIBUTION),
                 eq("payroll_distribution:300"),
@@ -335,7 +333,6 @@ class PayrollBatchServiceImplTest {
         currentUser.setId(100L);
         currentUser.setUsername("finance_user");
         when(sysUserService.findByUsername("finance_user")).thenReturn(currentUser);
-        when(userRoleService.hasRole(100L, SecurityConstants.ROLE_ADMIN)).thenReturn(false);
 
         when(approvalEngine.startWorkflow(
                 eq(WorkflowType.PAYROLL_DISTRIBUTION),
@@ -391,7 +388,6 @@ class PayrollBatchServiceImplTest {
         currentUser.setId(100L);
         currentUser.setUsername("finance_user");
         when(sysUserService.findByUsername("finance_user")).thenReturn(currentUser);
-        when(userRoleService.hasRole(100L, SecurityConstants.ROLE_ADMIN)).thenReturn(false);
         when(approvalEngine.startWorkflow(
                 eq(WorkflowType.PAYROLL_DISTRIBUTION),
                 eq("payroll_distribution:306"),
@@ -445,7 +441,7 @@ class PayrollBatchServiceImplTest {
         currentUser.setId(1L);
         currentUser.setUsername("admin_user");
         when(sysUserService.findByUsername("admin_user")).thenReturn(currentUser);
-        when(userRoleService.hasRole(1L, SecurityConstants.ROLE_ADMIN)).thenReturn(true);
+        when(databasePermissionService.hasCurrentRequestScope(1L, "ALL")).thenReturn(true);
 
         assertThat(service.submitForApproval(7L)).isTrue();
 
@@ -471,12 +467,12 @@ class PayrollBatchServiceImplTest {
     }
 
     private PayrollBatchServiceImpl newService() {
-        return spy(new PayrollBatchServiceImpl(
+        PayrollBatchServiceImpl service = spy(new PayrollBatchServiceImpl(
                 approvalEngine,
                 sysUserService,
                 payrollLineService,
                 payrollPaymentService,
-                userRoleService,
+                databasePermissionService,
                 auditLogService,
                 validationIssueSupport,
                 confirmationAggregateService,
@@ -484,5 +480,6 @@ class PayrollBatchServiceImplTest {
                 approvalProjectionService,
                 payrollProcessManager
         ));
+        return service;
     }
 }

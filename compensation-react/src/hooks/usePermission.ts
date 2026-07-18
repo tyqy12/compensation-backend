@@ -60,7 +60,7 @@ export function usePermission(): PermissionContextValue {
       }
       return data.data;
     },
-    staleTime: 5 * 60 * 1000, // 5分钟内不重新请求
+    staleTime: 0,
   });
 
   // 权限版本

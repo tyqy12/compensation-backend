@@ -1,5 +1,4 @@
 import type { SysResource } from '@types/api';
-import { normalizeRoles } from '@utils/rbac';
 
 export type SimpleMenuItem = {
   key: string;
@@ -34,17 +33,10 @@ function isEnabledResource(resource: SysResource): boolean {
   return resource.status == null || resource.status === 'enabled' || resource.status === 1;
 }
 
-// 标准侧边菜单构建规则：
-// - 仅 MENU 类型参与菜单
-// - 按 parentId 组装层级、orderNum 升序
-// - 支持 meta.hidden、meta.roles 过滤
-// - 支持后端返回的 _children 嵌套结构
+// 标准侧边菜单构建规则：资源可见性完全来自后端返回的资源状态和元数据。
 export function buildMenuFromResources(
   resources: SysResource[],
-  opts?: { userRoles?: string[]; respectRoles?: boolean },
 ) {
-  const userRoles = normalizeRoles(opts?.userRoles || []);
-
   // 检查是否已包含实际的嵌套节点；_children 仅是旧版ID元数据。
   const hasNestedStructure = (resources as MenuNode[]).some((resource) => Array.isArray(resource.children));
 
@@ -53,12 +45,7 @@ export function buildMenuFromResources(
     .filter(isEnabledResource)
     .filter((r) => {
       const meta = parseMeta((r as any).meta ?? (r as any).propsJson);
-      if (meta?.hidden) return false;
-      if (opts?.respectRoles && Array.isArray(meta?.roles) && meta.roles.length > 0) {
-        const rr = normalizeRoles(meta.roles);
-        return rr.some((x) => userRoles.includes(x));
-      }
-      return true;
+      return !meta?.hidden;
     });
 
   if (hasNestedStructure) {

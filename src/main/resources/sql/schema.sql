@@ -1128,6 +1128,7 @@ CREATE TABLE `sys_resource` (
   `path` varchar(255) DEFAULT NULL COMMENT '路由或接口路径',
   `component` varchar(255) DEFAULT NULL COMMENT '前端组件',
   `icon` varchar(100) DEFAULT NULL COMMENT '图标',
+  `access_mode` varchar(20) NOT NULL DEFAULT 'USER' COMMENT '访问模式: PUBLIC/USER/EXTERNAL',
   `parent_id` bigint DEFAULT NULL COMMENT '父资源ID',
   `order_num` int DEFAULT '0' COMMENT '排序号',
   `props_json` json DEFAULT NULL COMMENT '扩展元信息(JSON)',
@@ -1143,6 +1144,87 @@ CREATE TABLE `sys_resource` (
   KEY `idx_sys_resource_type` (`type`),
   KEY `idx_sys_resource_parent_order` (`parent_id`, `order_num`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='系统资源表';
+
+CREATE TABLE `sys_permission_action` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(100) NOT NULL,
+  `name` varchar(100) NOT NULL,
+  `description` varchar(255) DEFAULT NULL,
+  `http_methods` varchar(100) DEFAULT NULL,
+  `authority` varchar(150) DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'enabled',
+  `order_num` int NOT NULL DEFAULT '0',
+  `props_json` text,
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_permission_action_code` (`code`),
+  KEY `idx_permission_action_status` (`status`,`deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='权限操作目录';
+
+CREATE TABLE `sys_resource_action` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `resource_id` bigint NOT NULL,
+  `action_id` bigint NOT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'enabled',
+  `props_json` text,
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_resource_action` (`resource_id`,`action_id`),
+  KEY `idx_resource_action_resource` (`resource_id`,`status`,`deleted`),
+  KEY `idx_resource_action_action` (`action_id`,`status`,`deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='资源可用操作';
+
+CREATE TABLE `sys_role_permission` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `role_id` bigint NOT NULL,
+  `resource_id` bigint NOT NULL,
+  `action_id` bigint NOT NULL,
+  `effect` varchar(10) NOT NULL DEFAULT 'ALLOW',
+  `scope_json` text,
+  `condition_json` text,
+  `status` varchar(20) NOT NULL DEFAULT 'enabled',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_role_permission` (`role_id`,`resource_id`,`action_id`),
+  KEY `idx_role_permission_subject` (`role_id`,`status`,`deleted`),
+  KEY `idx_role_permission_resource` (`resource_id`,`action_id`,`status`,`deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色-资源-操作权限';
+
+CREATE TABLE `sys_user_permission` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `user_id` bigint NOT NULL,
+  `resource_id` bigint NOT NULL,
+  `action_id` bigint NOT NULL,
+  `effect` varchar(10) NOT NULL DEFAULT 'ALLOW',
+  `scope_json` text,
+  `condition_json` text,
+  `status` varchar(20) NOT NULL DEFAULT 'enabled',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_user_permission` (`user_id`,`resource_id`,`action_id`),
+  KEY `idx_user_permission_subject` (`user_id`,`status`,`deleted`),
+  KEY `idx_user_permission_resource` (`resource_id`,`action_id`,`status`,`deleted`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户-资源-操作权限';
 
 DROP TABLE IF EXISTS `sys_role`;
 CREATE TABLE `sys_role` (
@@ -1419,7 +1501,13 @@ INSERT INTO `sys_config` (`config_key`, `config_value`, `config_type`, `config_d
 ('payment.daily.limit', '10000.00', 'number', '单人单日支付限额(元)'),
 ('payment.batch.max.size', '1000', 'number', '批量支付最大笔数'),
 ('approval.timeout.hours', '24', 'number', '审批超时时间(小时)'),
-('payroll.dispute.approval.flow', '', 'json', '薪酬异议审批流程配置(JSON，空值使用默认链路)'),
+('payroll.approval.flow', '[{"stepNo":1,"stepName":"部门负责人审批","role":"ROLE_MANAGER","approverType":"EMPLOYEE_MANAGER","timeoutHours":24,"optional":false},{"stepNo":2,"stepName":"财务负责人审批","role":"ROLE_FINANCE","timeoutHours":24,"optional":false},{"stepNo":3,"stepName":"总监审批","role":"ROLE_ADMIN","timeoutHours":48,"optional":false,"finalStep":true}]', 'json', '薪资批次/发放审批流程配置(JSON)'),
+('adhoc.approval.flow', '[{"stepNo":1,"stepName":"直接上级审批","role":"ROLE_MANAGER","timeoutHours":24,"optional":false},{"stepNo":2,"stepName":"财务审批","role":"ROLE_FINANCE","timeoutHours":24,"optional":false,"finalStep":true}]', 'json', '临时支付审批流程配置(JSON)'),
+('offline.approval.flow', '[{"stepNo":1,"stepName":"管理员审批","role":"ROLE_ADMIN","timeoutHours":24,"optional":false,"finalStep":true}]', 'json', '架构外员工审批流程配置(JSON)'),
+('employee.profile-change.approval.flow', '[{"stepNo":1,"stepName":"管理员审批","role":"ROLE_ADMIN","timeoutHours":24,"optional":false,"finalStep":true}]', 'json', '员工资料变更审批流程配置(JSON)'),
+('platform.bind.approval.flow', '[{"stepNo":1,"stepName":"管理员审批","role":"ROLE_ADMIN","timeoutHours":24,"optional":false,"finalStep":true}]', 'json', '平台账号绑定审批流程配置(JSON)'),
+('permission.approval.flow', '[{"stepNo":1,"stepName":"管理员审批","role":"ROLE_ADMIN","timeoutHours":24,"optional":false,"finalStep":true}]', 'json', '权限授权审批流程配置(JSON)'),
+('payroll.dispute.approval.flow', '[{"stepNo":1,"stepName":"负责人核实","role":"ROLE_MANAGER","timeoutHours":24,"optional":false},{"stepNo":2,"stepName":"财务复核","role":"ROLE_FINANCE","timeoutHours":24,"optional":false},{"stepNo":3,"stepName":"老板终审","role":"ROLE_ADMIN","timeoutHours":48,"optional":true,"finalStep":true}]', 'json', '薪酬异议审批流程配置(JSON)'),
 ('notification.retry.max', '3', 'number', '通知重试最大次数'),
 ('audit.log.retention.days', '1825', 'number', '审计日志保留天数(5年)');
 
@@ -1439,6 +1527,50 @@ SELECT u.id, r.id, u.id, NOW(), 0, NOW(), 'system'
 FROM `sys_user` u
 JOIN `sys_role` r ON r.code = 'ADMIN'
 WHERE u.username = 'admin';
+
+-- 数据库驱动权限目录基础操作。业务可在权限操作管理中增删改，不在前端写死。
+INSERT INTO `sys_permission_action` (`code`,`name`,`description`,`http_methods`,`authority`,`status`,`order_num`,`create_by`)
+VALUES
+('read','读取','读取资源数据','GET,HEAD',NULL,'enabled',10,'system'),
+('write','写入','创建或更新资源数据','POST,PUT,PATCH',NULL,'enabled',20,'system'),
+('delete','删除','删除资源数据','DELETE',NULL,'enabled',30,'system'),
+('execute','执行','执行非CRUD业务动作','POST,PUT,PATCH',NULL,'enabled',40,'system'),
+('payroll:read','外部薪酬读取','外部应用读取薪酬数据','GET','SCOPE_payroll:read','enabled',100,'system'),
+('payslip:read','外部工资条读取','外部应用读取工资条','GET','SCOPE_payslip:read','enabled',110,'system'),
+('app:ping','外部应用探活','外部应用探活接口','GET',NULL,'enabled',120,'system');
+
+INSERT INTO `sys_resource` (`type`,`code`,`name`,`path`,`access_mode`,`status`,`create_time`,`update_time`,`create_by`,`update_by`,`deleted`,`version`)
+VALUES
+('API','rbac.public.auth.login','登录','/auth/login','PUBLIC','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.public.auth.refresh','刷新令牌','/auth/refresh','PUBLIC','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.public.auth.oauth','认证回调','/auth/oauth/**','PUBLIC','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.user.auth.me','当前用户权限','/auth/me/**','USER','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.public.system.health','系统健康检查','/system/health','PUBLIC','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.public.actuator.health','Actuator健康检查','/actuator/health','PUBLIC','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.public.favicon','站点图标','/favicon.ico','PUBLIC','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.public.external.token','外部应用令牌','/v1/oauth/token','PUBLIC','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.public.payment.notify','支付通知','/alipay/notify','PUBLIC','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.public.settlement.callback','结算回调','/v1/settlement/callback/**','PUBLIC','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.external.payroll','外部薪酬接口','/v1/payroll/**','EXTERNAL','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.external.payslip','外部工资条接口','/v1/payslips/**','EXTERNAL','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.external.ping','外部应用探活','/v1/ping','EXTERNAL','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.admin.permission.actions','权限操作目录','/admin/permission-actions','USER','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.admin.permission.action-items','权限操作明细','/admin/permission-actions/**','USER','enabled',NOW(),NOW(),'system','system',0,0),
+('API','rbac.admin.permission.resource-actions','资源操作绑定','/admin/permission-actions/resources/*','USER','enabled',NOW(),NOW(),'system','system',0,0);
+
+INSERT INTO `sys_resource_action` (`resource_id`,`action_id`,`status`,`create_time`,`update_time`,`create_by`,`update_by`,`deleted`,`version`)
+SELECT r.id,a.id,'enabled',NOW(),NOW(),'system','system',0,0
+FROM `sys_resource` r JOIN `sys_permission_action` a
+WHERE (r.code IN ('rbac.public.auth.login','rbac.public.auth.refresh','rbac.public.external.token','rbac.public.payment.notify') AND a.code='write')
+   OR (r.code IN ('rbac.public.auth.oauth','rbac.public.system.health','rbac.public.actuator.health','rbac.public.favicon') AND a.code='read')
+   OR (r.code='rbac.public.settlement.callback' AND a.code='write')
+   OR (r.code='rbac.user.auth.me' AND a.code='read')
+   OR (r.code='rbac.external.payroll' AND a.code='payroll:read')
+   OR (r.code='rbac.external.payslip' AND a.code='payslip:read')
+   OR (r.code='rbac.external.ping' AND a.code='app:ping')
+   OR (r.code='rbac.admin.permission.actions' AND a.code IN ('read','write','delete'))
+   OR (r.code='rbac.admin.permission.action-items' AND a.code IN ('read','write','delete'))
+   OR (r.code='rbac.admin.permission.resource-actions' AND a.code IN ('read','write'));
 
 INSERT INTO `sys_role_resource` (`role_id`, `resource_id`, `actions_json`, `create_time`, `create_by`)
 SELECT r.id, res.id, '["*"]', NOW(), 'system'

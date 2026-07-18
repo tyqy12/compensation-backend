@@ -10,6 +10,12 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
 import java.sql.ResultSet;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 @Slf4j
 @Component
@@ -428,8 +434,10 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         migratePayrollComplianceResources();
         retireLegacyPayrollContent();
         migrateFrontendRouteResources();
+        migrateDatabaseDrivenPermissions();
         // Approval workflow incremental columns
         migrateApprovalWorkflowColumns();
+        migrateApprovalFlowConfigs();
         log.info("DB migrations finished.");
     }
 
@@ -484,6 +492,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  `path` varchar(255) DEFAULT NULL COMMENT '路由或接口路径',\n" +
                 "  `component` varchar(255) DEFAULT NULL COMMENT '前端组件',\n" +
                 "  `icon` varchar(100) DEFAULT NULL COMMENT '图标',\n" +
+                "  `access_mode` varchar(20) NOT NULL DEFAULT 'USER' COMMENT '访问模式: PUBLIC/USER/EXTERNAL',\n" +
                 "  `parent_id` bigint DEFAULT NULL COMMENT '父资源ID',\n" +
                 "  `order_num` int DEFAULT '0' COMMENT '排序号',\n" +
                 "  `props_json` json DEFAULT NULL COMMENT '扩展元信息(JSON)',\n" +
@@ -597,6 +606,8 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "ALTER TABLE sys_user ADD COLUMN `permission_version` int DEFAULT '0' COMMENT '权限版本'");
 
         addBaseEntityColumnsIfMissing("sys_resource");
+        addColumnIfMissing("sys_resource", "access_mode",
+                "ALTER TABLE sys_resource ADD COLUMN `access_mode` varchar(20) NOT NULL DEFAULT 'USER' COMMENT '访问模式: PUBLIC/USER/EXTERNAL'");
         addBaseEntityColumnsIfMissing("sys_role");
         addBaseEntityColumnsIfMissing("sys_role_resource");
         addBaseEntityColumnsIfMissing("sys_user_resource");
@@ -1182,6 +1193,46 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
     }
 
     /**
+     * 审批链属于数据库配置。首次部署只补齐缺失或历史空占位配置，管理员已经维护过的配置不覆盖。
+     */
+    private void migrateApprovalFlowConfigs() {
+        ensureJsonConfig("payroll.approval.flow",
+                "[{\"stepNo\":1,\"stepName\":\"部门负责人审批\",\"role\":\"ROLE_MANAGER\",\"approverType\":\"EMPLOYEE_MANAGER\",\"timeoutHours\":24,\"optional\":false},{\"stepNo\":2,\"stepName\":\"财务负责人审批\",\"role\":\"ROLE_FINANCE\",\"timeoutHours\":24,\"optional\":false},{\"stepNo\":3,\"stepName\":\"总监审批\",\"role\":\"ROLE_ADMIN\",\"timeoutHours\":48,\"optional\":false,\"finalStep\":true}]",
+                "薪资批次/发放审批流程配置(JSON)");
+        ensureJsonConfig("adhoc.approval.flow",
+                "[{\"stepNo\":1,\"stepName\":\"直接上级审批\",\"role\":\"ROLE_MANAGER\",\"timeoutHours\":24,\"optional\":false},{\"stepNo\":2,\"stepName\":\"财务审批\",\"role\":\"ROLE_FINANCE\",\"timeoutHours\":24,\"optional\":false,\"finalStep\":true}]",
+                "临时支付审批流程配置(JSON)");
+        ensureJsonConfig("offline.approval.flow",
+                "[{\"stepNo\":1,\"stepName\":\"管理员审批\",\"role\":\"ROLE_ADMIN\",\"timeoutHours\":24,\"optional\":false,\"finalStep\":true}]",
+                "架构外员工审批流程配置(JSON)");
+        ensureJsonConfig("employee.profile-change.approval.flow",
+                "[{\"stepNo\":1,\"stepName\":\"管理员审批\",\"role\":\"ROLE_ADMIN\",\"timeoutHours\":24,\"optional\":false,\"finalStep\":true}]",
+                "员工资料变更审批流程配置(JSON)");
+        ensureJsonConfig("platform.bind.approval.flow",
+                "[{\"stepNo\":1,\"stepName\":\"管理员审批\",\"role\":\"ROLE_ADMIN\",\"timeoutHours\":24,\"optional\":false,\"finalStep\":true}]",
+                "平台账号绑定审批流程配置(JSON)");
+        ensureJsonConfig("permission.approval.flow",
+                "[{\"stepNo\":1,\"stepName\":\"管理员审批\",\"role\":\"ROLE_ADMIN\",\"timeoutHours\":24,\"optional\":false,\"finalStep\":true}]",
+                "权限授权审批流程配置(JSON)");
+        ensureJsonConfig("payroll.dispute.approval.flow",
+                "[{\"stepNo\":1,\"stepName\":\"负责人核实\",\"role\":\"ROLE_MANAGER\",\"timeoutHours\":24,\"optional\":false},{\"stepNo\":2,\"stepName\":\"财务复核\",\"role\":\"ROLE_FINANCE\",\"timeoutHours\":24,\"optional\":false},{\"stepNo\":3,\"stepName\":\"老板终审\",\"role\":\"ROLE_ADMIN\",\"timeoutHours\":48,\"optional\":true,\"finalStep\":true}]",
+                "薪酬异议审批流程配置(JSON)");
+    }
+
+    private void ensureJsonConfig(String key, String value, String description) {
+        String escapedKey = key.replace("'", "''");
+        String escapedValue = value.replace("'", "''");
+        String escapedDescription = description.replace("'", "''");
+        executeSqlSafely("UPDATE sys_config SET config_value='" + escapedValue + "', config_type='json', "
+                + "config_desc='" + escapedDescription + "', update_time=NOW() "
+                + "WHERE config_key='" + escapedKey + "' AND deleted=0 "
+                + "AND (config_value IS NULL OR TRIM(config_value)='')");
+        executeSqlSafely("INSERT INTO sys_config(config_key, config_value, config_type, config_desc, create_time, update_time) "
+                + "SELECT '" + escapedKey + "', '" + escapedValue + "', 'json', '" + escapedDescription + "', NOW(), NOW() "
+                + "WHERE NOT EXISTS (SELECT 1 FROM sys_config WHERE config_key='" + escapedKey + "' AND deleted=0)");
+    }
+
+    /**
      * 薪酬合规基础表。生产环境默认只在显式开启 migration.runner 时执行，所有 DDL 均幂等。
      */
     private void migratePayrollComplianceFoundation() {
@@ -1410,6 +1461,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
      */
     private void migrateFrontendRouteResources() {
         boolean changed = false;
+        boolean bootstrapGrants = !frontendRouteMigrationMarkerExists();
 
         changed |= ensureFrontendResource("MENU", "dashboard", "工作台", "/", "dashboard/Dashboard", "dashboard",
                 null, 1, "{\"roles\":[\"ADMIN\",\"FINANCE\",\"HR\"],\"keepAlive\":true,\"affix\":true}");
@@ -1476,43 +1528,46 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         changed |= ensureFrontendResource("VIEW", "view.payroll.pt-readonly", "兼职薪酬查询", "/payroll/pt-readonly", "payroll/PartTimeReadonly", "search",
                 "menu.system.payroll", 44, "{\"roles\":[\"ADMIN\",\"FINANCE\"],\"keepAlive\":true}");
 
-        changed |= grantAllEnabledFrontendResourcesToAdmin();
-        changed |= grantFrontendResource("FINANCE", "dashboard");
-        changed |= grantFrontendResource("FINANCE", "employees");
-        changed |= grantFrontendResource("FINANCE", "payments");
-        changed |= grantFrontendResource("FINANCE", "payments.batches");
-        changed |= grantFrontendResource("FINANCE", "menu.approval");
-        changed |= grantFrontendResource("FINANCE", "menu.system.payroll");
-        changed |= grantFrontendResource("FINANCE", "menu.payroll.batches");
-        changed |= grantFrontendResource("FINANCE", "view.payroll.batch.entry");
-        changed |= grantFrontendResource("FINANCE", "view.payroll.compliance");
-        changed |= grantFrontendResource("FINANCE", "view.payroll.rules");
-        changed |= grantFrontendResource("FINANCE", "view.payroll.calendar");
-        changed |= grantFrontendResource("FINANCE", "view.payroll.confirmations");
-        changed |= grantFrontendResource("FINANCE", "view.payroll.distributions");
-        changed |= grantFrontendResource("FINANCE", "view.payroll.reconciliations");
-        changed |= grantFrontendResource("FINANCE", "view.payroll.batch.ledger");
-        changed |= grantFrontendResource("FINANCE", "view.payroll.batch.manager");
-        changed |= grantFrontendResource("FINANCE", "view.payroll.pt-readonly");
+        if (bootstrapGrants) {
+            changed |= grantAllEnabledFrontendResourcesToAdmin();
+            changed |= grantFrontendResource("FINANCE", "dashboard");
+            changed |= grantFrontendResource("FINANCE", "employees");
+            changed |= grantFrontendResource("FINANCE", "payments");
+            changed |= grantFrontendResource("FINANCE", "payments.batches");
+            changed |= grantFrontendResource("FINANCE", "menu.approval");
+            changed |= grantFrontendResource("FINANCE", "menu.system.payroll");
+            changed |= grantFrontendResource("FINANCE", "menu.payroll.batches");
+            changed |= grantFrontendResource("FINANCE", "view.payroll.batch.entry");
+            changed |= grantFrontendResource("FINANCE", "view.payroll.compliance");
+            changed |= grantFrontendResource("FINANCE", "view.payroll.rules");
+            changed |= grantFrontendResource("FINANCE", "view.payroll.calendar");
+            changed |= grantFrontendResource("FINANCE", "view.payroll.confirmations");
+            changed |= grantFrontendResource("FINANCE", "view.payroll.distributions");
+            changed |= grantFrontendResource("FINANCE", "view.payroll.reconciliations");
+            changed |= grantFrontendResource("FINANCE", "view.payroll.batch.ledger");
+            changed |= grantFrontendResource("FINANCE", "view.payroll.batch.manager");
+            changed |= grantFrontendResource("FINANCE", "view.payroll.pt-readonly");
 
-        changed |= grantFrontendResource("HR", "dashboard");
-        changed |= grantFrontendResource("HR", "employees");
-        changed |= grantFrontendResource("HR", "menu.system.payroll");
-        changed |= grantFrontendResource("HR", "menu.payroll.batches");
-        changed |= grantFrontendResource("HR", "view.payroll.batch.entry");
-        changed |= grantFrontendResource("HR", "view.payroll.rules");
-        changed |= grantFrontendResource("HR", "view.payroll.calendar");
-        changed |= grantFrontendResource("HR", "view.payroll.confirmations");
+            changed |= grantFrontendResource("HR", "dashboard");
+            changed |= grantFrontendResource("HR", "employees");
+            changed |= grantFrontendResource("HR", "menu.system.payroll");
+            changed |= grantFrontendResource("HR", "menu.payroll.batches");
+            changed |= grantFrontendResource("HR", "view.payroll.batch.entry");
+            changed |= grantFrontendResource("HR", "view.payroll.rules");
+            changed |= grantFrontendResource("HR", "view.payroll.calendar");
+            changed |= grantFrontendResource("HR", "view.payroll.confirmations");
 
-        changed |= grantFrontendResource("MANAGER", "menu.approval");
-        changed |= grantFrontendResource("MANAGER", "menu.system.payroll");
-        changed |= grantFrontendResource("MANAGER", "menu.payroll.batches");
-        changed |= grantFrontendResource("MANAGER", "view.payroll.confirmations");
-        changed |= grantFrontendResource("MANAGER", "view.payroll.batch.ledger");
-        changed |= grantFrontendResource("MANAGER", "view.payroll.batch.manager");
+            changed |= grantFrontendResource("MANAGER", "menu.approval");
+            changed |= grantFrontendResource("MANAGER", "menu.system.payroll");
+            changed |= grantFrontendResource("MANAGER", "menu.payroll.batches");
+            changed |= grantFrontendResource("MANAGER", "view.payroll.confirmations");
+            changed |= grantFrontendResource("MANAGER", "view.payroll.batch.ledger");
+            changed |= grantFrontendResource("MANAGER", "view.payroll.batch.manager");
 
-        changed |= grantFrontendResource("EMPLOYEE", "view.employees.me");
-        changed |= grantFrontendResource("EMPLOYEE", "view.payroll.confirmations");
+            changed |= grantFrontendResource("EMPLOYEE", "view.employees.me");
+            changed |= grantFrontendResource("EMPLOYEE", "view.payroll.confirmations");
+            markFrontendRouteMigrationComplete();
+        }
 
         if (changed) {
             executeSqlSafely("UPDATE sys_user SET permission_version=COALESCE(permission_version,0)+1, update_by='frontend_route_alignment', update_time=NOW() " +
@@ -1522,6 +1577,12 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
 
     private boolean ensureFrontendResource(String type, String code, String name, String path, String component, String icon,
                                            String parentCode, int orderNum, String propsJson) {
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_resource WHERE code=?", Integer.class, code);
+        if (existing != null && existing > 0) {
+            // 菜单和组件是数据库运营配置。启动时只补缺失项，不覆盖停用、改名或组件替换。
+            return false;
+        }
         String codeSql = sqlLiteral(code);
         Long parentId = null;
         if (parentCode != null) {
@@ -1595,6 +1656,405 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
 
     private String sqlLiteral(String value) {
         return value == null ? "NULL" : "'" + value.replace("'", "''") + "'";
+    }
+
+    /**
+     * 创建数据库驱动的权限目录，并把旧资源授权一次性迁移到角色-资源-操作关系。
+     *
+     * <p>这里的角色编码和默认操作只属于数据库初始化数据，不参与运行时权限判断。运行时决策只能读取
+     * sys_permission_action、sys_resource_action、sys_role_permission 和 sys_user_permission。</p>
+     */
+    private void migrateDatabaseDrivenPermissions() {
+        boolean initialized = permissionMigrationMarkerExists();
+        addColumnIfMissing("sys_resource", "access_mode",
+                "ALTER TABLE sys_resource ADD COLUMN `access_mode` varchar(20) NOT NULL DEFAULT 'USER' COMMENT '访问模式: PUBLIC/USER/EXTERNAL'");
+
+        createTableIfMissing("sys_permission_action", """
+                CREATE TABLE `sys_permission_action` (
+                  `id` bigint NOT NULL AUTO_INCREMENT,
+                  `code` varchar(100) NOT NULL,
+                  `name` varchar(100) NOT NULL,
+                  `description` varchar(255) DEFAULT NULL,
+                  `http_methods` varchar(100) DEFAULT NULL,
+                  `authority` varchar(150) DEFAULT NULL,
+                  `status` varchar(20) NOT NULL DEFAULT 'enabled',
+                  `order_num` int NOT NULL DEFAULT '0',
+                  `props_json` text,
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  `create_by` varchar(50) DEFAULT NULL,
+                  `update_by` varchar(50) DEFAULT NULL,
+                  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+                  `version` int NOT NULL DEFAULT '0',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_permission_action_code` (`code`),
+                  KEY `idx_permission_action_status` (`status`,`deleted`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='权限操作目录';
+                """);
+        createTableIfMissing("sys_resource_action", """
+                CREATE TABLE `sys_resource_action` (
+                  `id` bigint NOT NULL AUTO_INCREMENT,
+                  `resource_id` bigint NOT NULL,
+                  `action_id` bigint NOT NULL,
+                  `status` varchar(20) NOT NULL DEFAULT 'enabled',
+                  `props_json` text,
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  `create_by` varchar(50) DEFAULT NULL,
+                  `update_by` varchar(50) DEFAULT NULL,
+                  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+                  `version` int NOT NULL DEFAULT '0',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_resource_action` (`resource_id`,`action_id`),
+                  KEY `idx_resource_action_resource` (`resource_id`,`status`,`deleted`),
+                  KEY `idx_resource_action_action` (`action_id`,`status`,`deleted`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='资源可用操作';
+                """);
+        createTableIfMissing("sys_role_permission", """
+                CREATE TABLE `sys_role_permission` (
+                  `id` bigint NOT NULL AUTO_INCREMENT,
+                  `role_id` bigint NOT NULL,
+                  `resource_id` bigint NOT NULL,
+                  `action_id` bigint NOT NULL,
+                  `effect` varchar(10) NOT NULL DEFAULT 'ALLOW',
+                  `scope_json` text,
+                  `condition_json` text,
+                  `status` varchar(20) NOT NULL DEFAULT 'enabled',
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  `create_by` varchar(50) DEFAULT NULL,
+                  `update_by` varchar(50) DEFAULT NULL,
+                  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+                  `version` int NOT NULL DEFAULT '0',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_role_permission` (`role_id`,`resource_id`,`action_id`),
+                  KEY `idx_role_permission_subject` (`role_id`,`status`,`deleted`),
+                  KEY `idx_role_permission_resource` (`resource_id`,`action_id`,`status`,`deleted`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='角色-资源-操作权限';
+                """);
+        createTableIfMissing("sys_user_permission", """
+                CREATE TABLE `sys_user_permission` (
+                  `id` bigint NOT NULL AUTO_INCREMENT,
+                  `user_id` bigint NOT NULL,
+                  `resource_id` bigint NOT NULL,
+                  `action_id` bigint NOT NULL,
+                  `effect` varchar(10) NOT NULL DEFAULT 'ALLOW',
+                  `scope_json` text,
+                  `condition_json` text,
+                  `status` varchar(20) NOT NULL DEFAULT 'enabled',
+                  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+                  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                  `create_by` varchar(50) DEFAULT NULL,
+                  `update_by` varchar(50) DEFAULT NULL,
+                  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+                  `version` int NOT NULL DEFAULT '0',
+                  PRIMARY KEY (`id`),
+                  UNIQUE KEY `uk_user_permission` (`user_id`,`resource_id`,`action_id`),
+                  KEY `idx_user_permission_subject` (`user_id`,`status`,`deleted`),
+                  KEY `idx_user_permission_resource` (`resource_id`,`action_id`,`status`,`deleted`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户-资源-操作权限';
+                """);
+
+        if (!initialized) {
+            seedPermissionAction("read", "读取", "读取资源数据", "GET,HEAD", null, 10);
+            seedPermissionAction("write", "写入", "创建或更新资源数据", "POST,PUT,PATCH", null, 20);
+            seedPermissionAction("delete", "删除", "删除资源数据", "DELETE", null, 30);
+            seedPermissionAction("execute", "执行", "执行非CRUD业务动作", "POST,PUT,PATCH", null, 40);
+            seedPermissionAction("payroll:read", "外部薪酬读取", "外部应用读取薪酬数据", "GET", "SCOPE_payroll:read", 100);
+            seedPermissionAction("payslip:read", "外部工资条读取", "外部应用读取工资条", "GET", "SCOPE_payslip:read", 110);
+            seedPermissionAction("app:ping", "外部应用探活", "外部应用探活接口", "GET", null, 120);
+            executeSqlSafely("UPDATE sys_permission_action SET authority=NULL, update_by='rbac_migration', update_time=NOW() " +
+                    "WHERE code='app:ping' AND authority IN ('ROLE_APP','SCOPE_app:ping') AND deleted=0");
+            importLegacyPermissionActions();
+        }
+
+        ensurePolicyResource("rbac.public.auth.login", "登录", "/auth/login", "PUBLIC");
+        ensurePolicyResource("rbac.public.auth.refresh", "刷新令牌", "/auth/refresh", "PUBLIC");
+        ensurePolicyResource("rbac.public.auth.oauth", "认证回调", "/auth/oauth/**", "PUBLIC");
+        ensurePolicyResource("rbac.user.auth.me", "当前用户权限", "/auth/me/**", "USER");
+        ensurePolicyResource("rbac.public.system.health", "系统健康检查", "/system/health", "PUBLIC");
+        ensurePolicyResource("rbac.public.actuator.health", "Actuator健康检查", "/actuator/health", "PUBLIC");
+        ensurePolicyResource("rbac.public.favicon", "站点图标", "/favicon.ico", "PUBLIC");
+        ensurePolicyResource("rbac.public.external.token", "外部应用令牌", "/v1/oauth/token", "PUBLIC");
+        ensurePolicyResource("rbac.public.payment.notify", "支付通知", "/alipay/notify", "PUBLIC");
+        ensurePolicyResource("rbac.public.settlement.callback", "结算回调", "/v1/settlement/callback/**", "PUBLIC");
+        ensurePolicyResource("rbac.external.payroll", "外部薪酬接口", "/v1/payroll/**", "EXTERNAL");
+        ensurePolicyResource("rbac.external.payslip", "外部工资条接口", "/v1/payslips/**", "EXTERNAL");
+        ensurePolicyResource("rbac.external.ping", "外部应用探活", "/v1/ping", "EXTERNAL");
+        ensurePolicyResource("rbac.admin.permission.actions", "权限操作目录", "/admin/permission-actions", "USER");
+        boolean permissionActionItemsCreated = ensurePolicyResource(
+                "rbac.admin.permission.action-items", "权限操作明细", "/admin/permission-actions/**", "USER");
+        ensurePolicyResource("rbac.admin.permission.resource-actions", "资源操作绑定", "/admin/permission-actions/resources/*", "USER");
+
+        if (permissionActionItemsCreated) {
+            Long resourceId = policyResourceId("rbac.admin.permission.action-items");
+            ensureResourceActions(resourceId, actionIds("read", "write", "delete"));
+            grantAdminResource("rbac.admin.permission.action-items");
+            backfillNewPolicyResourcePermission("rbac.admin.permission.action-items");
+        }
+
+        if (!initialized) {
+            executeSqlSafely("UPDATE sys_resource SET access_mode='EXTERNAL', update_by='rbac_migration', update_time=NOW() " +
+                    "WHERE deleted=0 AND access_mode='USER' AND (path LIKE '/v1/payroll%' " +
+                    "OR path LIKE '/v1/payslips%' OR path='/v1/ping' OR path LIKE '/openapi%')");
+            List<Long> baseActions = actionIds("read", "write", "delete", "execute");
+            List<Long> apiResources = jdbcTemplate.query(
+                    "SELECT id FROM sys_resource WHERE type IN ('MENU','VIEW','ACTION','API') " +
+                            "AND status='enabled' AND deleted=0",
+                    (rs, rowNum) -> rs.getLong(1));
+            for (Long resourceId : apiResources) {
+                ensureResourceActions(resourceId, baseActions);
+            }
+
+            ensureExternalResourceAction("rbac.external.payroll", "payroll:read");
+            ensureExternalResourceAction("rbac.external.payslip", "payslip:read");
+            ensureExternalResourceAction("rbac.external.ping", "app:ping");
+            ensureExternalResourceActionsByPath("/v1/payroll", "payroll:read");
+            ensureExternalResourceActionsByPath("/v1/payslips", "payslip:read");
+            ensureExternalResourceActionsByPath("/v1/ping", "app:ping");
+            grantAdminResource("rbac.admin.permission.actions");
+            grantAdminResource("rbac.admin.permission.resource-actions");
+            executeSqlSafely("UPDATE sys_resource_action SET status='disabled', deleted=1, " +
+                    "update_by='rbac_migration', update_time=NOW() WHERE deleted=0 " +
+                    "AND resource_id IN (SELECT id FROM sys_resource WHERE access_mode='EXTERNAL' AND deleted=0) " +
+                    "AND action_id IN (SELECT id FROM sys_permission_action WHERE code IN " +
+                    "('read','write','delete','execute') AND deleted=0)");
+
+            backfillPermissionTable("sys_role_resource", "sys_role_permission", "role_id");
+            backfillPermissionTable("sys_user_resource", "sys_user_permission", "user_id");
+            markPermissionMigrationComplete();
+        }
+    }
+
+    private void seedPermissionAction(String code, String name, String description, String methods,
+                                       String authority, int orderNum) {
+        jdbcTemplate.update("INSERT INTO sys_permission_action " +
+                        "(code,name,description,http_methods,authority,status,order_num,create_time,create_by,deleted,version) " +
+                        "SELECT ?,?,?,?,?, 'enabled', ?, NOW(), 'rbac_migration', 0, 0 " +
+                        "WHERE NOT EXISTS (SELECT 1 FROM sys_permission_action WHERE code = ?)",
+                code, name, description, methods, authority, orderNum, code);
+    }
+
+    private boolean ensurePolicyResource(String code, String name, String path, String accessMode) {
+        Integer count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_resource WHERE code=?", Integer.class, code);
+        if (count != null && count > 0) {
+            // 资源策略属于数据库配置。启动迁移只补充缺失资源，不覆盖管理员的停用、路径或访问模式调整。
+            return false;
+        }
+        jdbcTemplate.update("INSERT INTO sys_resource " +
+                        "(type,code,name,path,access_mode,status,create_time,update_time,create_by,update_by,deleted,version) " +
+                "VALUES ('API',?,?,? ,?,'enabled',NOW(),NOW(),'rbac_migration','rbac_migration',0,0)",
+                code, name, path, accessMode);
+        return true;
+    }
+
+    private Long policyResourceId(String code) {
+        return jdbcTemplate.queryForObject(
+                "SELECT id FROM sys_resource WHERE code=? AND deleted=0", Long.class, code);
+    }
+
+    private void backfillNewPolicyResourcePermission(String resourceCode) {
+        Long resourceId = policyResourceId(resourceCode);
+        if (resourceId == null) {
+            return;
+        }
+        List<Long> roleIds = jdbcTemplate.query(
+                "SELECT id FROM sys_role WHERE code='ADMIN' AND status='enabled' AND deleted=0",
+                (rs, rowNum) -> rs.getLong(1));
+        List<Long> actionIds = jdbcTemplate.query(
+                "SELECT action_id FROM sys_resource_action WHERE resource_id=? AND status='enabled' AND deleted=0",
+                (rs, rowNum) -> rs.getLong(1), resourceId);
+        for (Long roleId : roleIds) {
+            for (Long actionId : actionIds) {
+                restoreOrInsertPermission("sys_role_permission", "role_id", roleId, resourceId, actionId);
+            }
+        }
+    }
+
+    private void ensureResourceActions(Long resourceId, List<Long> actionIds) {
+        if (resourceId == null || actionIds == null) {
+            return;
+        }
+        for (Long actionId : actionIds) {
+            if (actionId == null) {
+                continue;
+            }
+            int restored = jdbcTemplate.update("UPDATE sys_resource_action SET status='enabled', deleted=0, " +
+                    "update_by='rbac_migration', update_time=NOW() WHERE resource_id=? AND action_id=?",
+                    resourceId, actionId);
+            if (restored == 0) {
+                jdbcTemplate.update("INSERT INTO sys_resource_action " +
+                                "(resource_id,action_id,status,create_time,update_time,create_by,update_by,deleted,version) " +
+                                "SELECT ?,?,'enabled',NOW(),NOW(),'rbac_migration','rbac_migration',0,0 " +
+                                "WHERE NOT EXISTS (SELECT 1 FROM sys_resource_action WHERE resource_id=? AND action_id=?)",
+                        resourceId, actionId, resourceId, actionId);
+            }
+        }
+    }
+
+    private void ensureExternalResourceAction(String resourceCode, String actionCode) {
+        Long resourceId = jdbcTemplate.queryForObject(
+                "SELECT id FROM sys_resource WHERE code=? AND deleted=0", Long.class, resourceCode);
+        Long actionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM sys_permission_action WHERE code=? AND deleted=0", Long.class, actionCode);
+        ensureResourceActions(resourceId, actionId == null ? List.of() : List.of(actionId));
+    }
+
+    private void ensureExternalResourceActionsByPath(String pathPrefix, String actionCode) {
+        List<Long> resourceIds = jdbcTemplate.query(
+                "SELECT id FROM sys_resource WHERE type='API' AND access_mode='EXTERNAL' " +
+                        "AND deleted=0 AND (path=? OR path LIKE ?)",
+                (rs, rowNum) -> rs.getLong(1), pathPrefix, pathPrefix + "/%");
+        Long actionId = jdbcTemplate.queryForObject(
+                "SELECT id FROM sys_permission_action WHERE code=? AND status='enabled' AND deleted=0",
+                Long.class, actionCode);
+        if (actionId == null) {
+            return;
+        }
+        for (Long resourceId : resourceIds) {
+            ensureResourceActions(resourceId, List.of(actionId));
+        }
+    }
+
+    private void grantAdminResource(String resourceCode) {
+        executeSqlSafely("INSERT INTO sys_role_resource (role_id,resource_id,actions_json,create_time,create_by,deleted,version) " +
+                "SELECT role.id,resource.id,'[\"*\"]',NOW(),'rbac_migration',0,0 " +
+                "FROM sys_role role JOIN sys_resource resource ON resource.code=" + sqlLiteral(resourceCode) +
+                " AND resource.status='enabled' AND resource.deleted=0 " +
+                "WHERE role.code='ADMIN' AND role.status='enabled' AND role.deleted=0 " +
+                "AND NOT EXISTS (SELECT 1 FROM sys_role_resource existing WHERE existing.role_id=role.id " +
+                "AND existing.resource_id=resource.id AND existing.deleted=0)");
+    }
+
+    private List<Long> actionIds(String... codes) {
+        if (codes == null || codes.length == 0) {
+            return List.of();
+        }
+        return jdbcTemplate.query("SELECT id FROM sys_permission_action WHERE code IN (" +
+                        String.join(",", Collections.nCopies(codes.length, "?")) + ") AND status='enabled' AND deleted=0",
+                (rs, rowNum) -> rs.getLong(1), (Object[]) codes);
+    }
+
+    private void backfillPermissionTable(String sourceTable, String targetTable, String subjectColumn) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT " + subjectColumn + " AS subject_id, resource_id, actions_json FROM " + sourceTable +
+                        " WHERE deleted=0");
+        for (Map<String, Object> row : rows) {
+            Number subjectId = (Number) row.get("subject_id");
+            Number resourceId = (Number) row.get("resource_id");
+            if (subjectId == null || resourceId == null) {
+                continue;
+            }
+            String actionsJson = row.get("actions_json") == null ? null : String.valueOf(row.get("actions_json"));
+            Set<String> actionCodes = parseLegacyActions(actionsJson);
+            List<Long> actionIds = actionCodes.contains("*")
+                    ? actionIds("read", "write", "delete", "execute")
+                    : actionIds(actionCodes.toArray(String[]::new));
+            if (!actionCodes.contains("*")) {
+                ensureResourceActions(resourceId.longValue(), actionIds);
+            }
+            for (Long actionId : actionIds) {
+                Integer bound = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM sys_resource_action WHERE resource_id=? AND action_id=? AND status='enabled' AND deleted=0",
+                        Integer.class, resourceId.longValue(), actionId);
+                if (bound == null || bound == 0) {
+                    continue;
+                }
+                restoreOrInsertPermission(targetTable, subjectColumn, subjectId.longValue(), resourceId.longValue(), actionId);
+            }
+        }
+    }
+
+    private void importLegacyPermissionActions() {
+        for (String table : List.of("sys_role_resource", "sys_user_resource")) {
+            List<String> legacyValues = jdbcTemplate.query(
+                    "SELECT actions_json FROM " + table + " WHERE deleted=0 AND actions_json IS NOT NULL",
+                    (rs, rowNum) -> rs.getString(1));
+            for (String actionsJson : legacyValues) {
+                for (String code : parseLegacyActions(actionsJson)) {
+                    if ("*".equals(code) || !code.matches("[A-Za-z0-9][A-Za-z0-9_.:-]{0,99}")) {
+                        continue;
+                    }
+                    seedPermissionAction(code, code, "从旧版资源授权迁移的操作", null, null, 500);
+                }
+            }
+        }
+    }
+
+    private void restoreOrInsertPermission(String table, String subjectColumn, long subjectId,
+                                           long resourceId, long actionId) {
+        int restored = jdbcTemplate.update("UPDATE " + table + " SET effect='ALLOW', scope_json='{" +
+                        "\"mode\":\"ALL\"}', status='enabled', deleted=0, update_by='rbac_migration', update_time=NOW() " +
+                        "WHERE " + subjectColumn + "=? AND resource_id=? AND action_id=?",
+                subjectId, resourceId, actionId);
+        if (restored == 0) {
+            jdbcTemplate.update("INSERT INTO " + table + " (" + subjectColumn + ",resource_id,action_id,effect,scope_json,status,create_time,update_time,create_by,update_by,deleted,version) " +
+                            "SELECT ?,?,?, 'ALLOW','{\"mode\":\"ALL\"}','enabled',NOW(),NOW(),'rbac_migration','rbac_migration',0,0 " +
+                            "WHERE NOT EXISTS (SELECT 1 FROM " + table + " WHERE " + subjectColumn + "=? AND resource_id=? AND action_id=?)",
+                    subjectId, resourceId, actionId, subjectId, resourceId, actionId);
+        }
+    }
+
+    private Set<String> parseLegacyActions(String actionsJson) {
+        if (actionsJson == null || actionsJson.isBlank()) {
+            return Set.of("*");
+        }
+        String text = actionsJson.trim();
+        if (text.startsWith("[") && text.endsWith("]")) {
+            text = text.substring(1, text.length() - 1);
+        }
+        if (text.isBlank()) {
+            return Set.of("*");
+        }
+        Set<String> result = new LinkedHashSet<>();
+        Arrays.stream(text.split(","))
+                .map(value -> value.trim().replaceAll("^[\\\"']|[\\\"']$", ""))
+                .filter(value -> !value.isBlank())
+                .map(String::toLowerCase)
+                .forEach(result::add);
+        return result.isEmpty() ? Set.of("*") : result;
+    }
+
+    private boolean permissionMigrationMarkerExists() {
+        try {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM sys_config WHERE config_key='rbac.database.permission.migrated' AND deleted=0",
+                    Integer.class);
+            return count != null && count > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private boolean frontendRouteMigrationMarkerExists() {
+        try {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM sys_config WHERE config_key='rbac.frontend.route.aligned.v2' AND deleted=0",
+                    Integer.class);
+            return count != null && count > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private void markFrontendRouteMigrationComplete() {
+        int updated = executeSqlSafely("UPDATE sys_config SET config_value='true',config_type='boolean'," +
+                "update_by='frontend_route_alignment',update_time=NOW() " +
+                "WHERE config_key='rbac.frontend.route.aligned.v2' AND deleted=0");
+        if (updated == 0) {
+            executeSqlSafely("INSERT INTO sys_config (config_key,config_value,config_type,config_desc,create_time,update_time,create_by,update_by,deleted,version) " +
+                    "VALUES ('rbac.frontend.route.aligned.v2','true','boolean','前端路由资源仅初始化一次，后续由数据库运营',NOW(),NOW(),'frontend_route_alignment','frontend_route_alignment',0,0)");
+        }
+    }
+
+    private void markPermissionMigrationComplete() {
+        int updated = executeSqlSafely("UPDATE sys_config SET config_value='true', config_type='boolean', " +
+                "update_by='rbac_migration', update_time=NOW() WHERE config_key='rbac.database.permission.migrated' AND deleted=0");
+        if (updated == 0) {
+            executeSqlSafely("INSERT INTO sys_config (config_key,config_value,config_type,config_desc,create_time,update_time,create_by,update_by,deleted,version) " +
+                    "VALUES ('rbac.database.permission.migrated','true','boolean','数据库驱动权限目录已完成迁移',NOW(),NOW(),'rbac_migration','rbac_migration',0,0)");
+        }
     }
 
     private void addColumnIfMissing(String table, String column, String ddl) {

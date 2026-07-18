@@ -3,7 +3,6 @@ package com.yiyundao.compensation.modules.approval.config;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.yiyundao.compensation.enums.WorkflowType;
-import com.yiyundao.compensation.security.SecurityConstants;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -39,105 +38,8 @@ public class ApprovalFlowConfigManager {
      * 初始化默认审批流程
      */
     private void initializeDefaultFlows() {
-        // 批量支付审批流程 - 默认三审制
-        List<ApprovalStepConfig> payrollApprovalSteps = List.of(
-                ApprovalStepConfig.builder()
-                        .stepNo(1)
-                        .stepName("部门负责人审批")
-                        .role(SecurityConstants.ROLE_MANAGER)
-                        .timeoutHours(24)
-                        .optional(false)
-                        .build(),
-                ApprovalStepConfig.builder()
-                        .stepNo(2)
-                        .stepName("财务负责人审批")
-                        .role(SecurityConstants.ROLE_FINANCE)
-                        .timeoutHours(24)
-                        .optional(false)
-                        .build(),
-                ApprovalStepConfig.builder()
-                        .stepNo(3)
-                        .stepName("总监审批")
-                        .role(SecurityConstants.ROLE_ADMIN)
-                        .timeoutHours(48)
-                        .optional(false)
-                        .finalStep(true)
-                        .build()
-        );
-        defaultFlowConfigs.put(WorkflowType.BATCH, payrollApprovalSteps);
-        defaultFlowConfigs.put(WorkflowType.PAYROLL_DISTRIBUTION, payrollApprovalSteps);
-
-        // 临时支付审批流程 - 两审制
-        defaultFlowConfigs.put(WorkflowType.ADHOC, List.of(
-                ApprovalStepConfig.builder()
-                        .stepNo(1)
-                        .stepName("直接上级审批")
-                        .role(SecurityConstants.ROLE_MANAGER)
-                        .timeoutHours(24)
-                        .optional(false)
-                        .build(),
-                ApprovalStepConfig.builder()
-                        .stepNo(2)
-                        .stepName("财务审批")
-                        .role(SecurityConstants.ROLE_FINANCE)
-                        .timeoutHours(24)
-                        .optional(false)
-                        .finalStep(true)
-                        .build()
-        ));
-
-        // 架构外员工审批流程 - 仅管理员审批
-        defaultFlowConfigs.put(WorkflowType.OFFLINE, List.of(
-                ApprovalStepConfig.builder()
-                        .stepNo(1)
-                        .stepName("管理员审批")
-                        .role(SecurityConstants.ROLE_ADMIN)
-                        .timeoutHours(24)
-                        .optional(false)
-                        .finalStep(true)
-                        .build()
-        ));
-
-        defaultFlowConfigs.put(WorkflowType.EMPLOYEE_PROFILE_CHANGE, defaultFlowConfigs.get(WorkflowType.OFFLINE));
-        defaultFlowConfigs.put(WorkflowType.PLATFORM_BIND, defaultFlowConfigs.get(WorkflowType.OFFLINE));
-
-        // 权限授权审批流程 - 仅管理员审批
-        defaultFlowConfigs.put(WorkflowType.PERMISSION, List.of(
-                ApprovalStepConfig.builder()
-                        .stepNo(1)
-                        .stepName("管理员审批")
-                        .role(SecurityConstants.ROLE_ADMIN)
-                        .timeoutHours(24)
-                        .optional(false)
-                        .finalStep(true)
-                        .build()
-        ));
-
-        // 薪酬异议审批流程 - 负责人 -> 财务 -> 老板（可通过配置覆盖）
-        defaultFlowConfigs.put(WorkflowType.PAYROLL_DISPUTE, List.of(
-                ApprovalStepConfig.builder()
-                        .stepNo(1)
-                        .stepName("负责人核实")
-                        .role(SecurityConstants.ROLE_MANAGER)
-                        .timeoutHours(24)
-                        .optional(false)
-                        .build(),
-                ApprovalStepConfig.builder()
-                        .stepNo(2)
-                        .stepName("财务复核")
-                        .role(SecurityConstants.ROLE_FINANCE)
-                        .timeoutHours(24)
-                        .optional(false)
-                        .build(),
-                ApprovalStepConfig.builder()
-                        .stepNo(3)
-                        .stepName("老板终审")
-                        .role(SecurityConstants.ROLE_ADMIN)
-                        .timeoutHours(48)
-                        .optional(true)
-                        .finalStep(true)
-                        .build()
-        ));
+        // 审批链由 sys_config 管理。缺少配置时保持空结果，由流程创建方阻断，不能静默使用代码角色默认值。
+        defaultFlowConfigs.clear();
     }
 
     /**
@@ -204,6 +106,9 @@ public class ApprovalFlowConfigManager {
         @JsonProperty("approverUsername")
         private String approverUsername;
 
+        @JsonProperty("approverType")
+        private String approverType;
+
         /**
          * 超时时间（小时）
          */
@@ -250,6 +155,11 @@ public class ApprovalFlowConfigManager {
 
             public Builder approverUsername(String approverUsername) {
                 config.approverUsername = approverUsername;
+                return this;
+            }
+
+            public Builder approverType(String approverType) {
+                config.approverType = approverType;
                 return this;
             }
 

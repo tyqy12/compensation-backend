@@ -121,7 +121,6 @@ const ResourceManager: React.FC = () => {
       keepAlive: meta.keepAlive ? true : undefined,
       affix: meta.affix ? true : undefined,
       hidden: typeof meta.hidden === 'boolean' ? meta.hidden : undefined,
-      roles: Array.isArray(meta.roles) && meta.roles.length > 0 ? meta.roles : undefined,
       method: meta.method,
     });
     setEditOpen(true);
@@ -133,7 +132,6 @@ const ResourceManager: React.FC = () => {
     if (v.keepAlive) meta.keepAlive = true;
     if (v.affix) meta.affix = true;
     if (typeof v.hidden === 'boolean') meta.hidden = v.hidden;
-    if (v.roles && Array.isArray(v.roles) && v.roles.length > 0) meta.roles = v.roles;
     if (v.method) meta.method = v.method;
 
     const payload = {
@@ -707,13 +705,6 @@ const ResourceManager: React.FC = () => {
                 />
               </Form.Item>
 
-              <Form.Item name="roles" label="可见角色" tooltip="设置后只有指定角色可以看到此菜单，留空则所有角色可见">
-                <Select
-                  mode="tags"
-                  tokenSeparators={[',']}
-                  placeholder="输入角色标识并回车"
-                />
-              </Form.Item>
             </>
           )}
 

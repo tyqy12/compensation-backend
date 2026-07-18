@@ -22,7 +22,6 @@ import com.yiyundao.compensation.modules.payroll.entity.PayCycle;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.modules.payroll.service.PayCycleService;
-import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollCalculationService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentService;
@@ -31,7 +30,7 @@ import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.security.SecurityAnnotations;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -61,7 +60,7 @@ public class PayrollBatchController {
     private final PayrollPaymentService payrollPaymentService;
     private final PayrollProcessManager payrollProcessManager;
     private final SysUserService sysUserService;
-    private final UserRoleService userRoleService;
+    private final DatabasePermissionService databasePermissionService;
     private final PayCycleService payCycleService;
 
     @PostMapping
@@ -386,7 +385,7 @@ public class PayrollBatchController {
         if (currentUser == null || currentUser.getId() == null) {
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "未登录或用户不存在");
         }
-        if (hasAnyRole(currentUser, SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+        if (databasePermissionService.hasCurrentRequestScope(currentUser.getId(), "ALL")) {
             return requestedManagerId;
         }
         if (currentUser.getEmployeeId() == null) {
@@ -403,10 +402,4 @@ public class PayrollBatchController {
         return sysUserService.findByUsername(authentication.getName());
     }
 
-    private boolean hasAnyRole(SysUser user, String... roleCodes) {
-        if (user == null || user.getId() == null || roleCodes == null) {
-            return false;
-        }
-        return userRoleService.hasAnyRole(user.getId(), roleCodes);
-    }
 }

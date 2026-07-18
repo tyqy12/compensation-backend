@@ -55,7 +55,7 @@ class PayrollBatchControllerResponseTest {
                 payrollPaymentService,
                 null,
                 null,
-                null,
+                org.mockito.Mockito.mock(com.yiyundao.compensation.security.DatabasePermissionService.class),
                 payCycleService
         );
         objectMapper = new ObjectMapper();

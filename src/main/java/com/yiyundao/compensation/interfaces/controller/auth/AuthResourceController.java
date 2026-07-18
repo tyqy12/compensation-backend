@@ -91,6 +91,7 @@ public class AuthResourceController {
                     m.put("icon", r.getIcon());
                     m.put("parentId", r.getParentId());
                     m.put("orderNum", r.getOrderNum());
+                    m.put("accessMode", r.getAccessMode());
                     m.put("meta", parseJsonOrEmpty(r.getPropsJson()));
                     return m;
                 }).collect(Collectors.toList());
@@ -139,7 +140,7 @@ public class AuthResourceController {
 
     private List<String> toRoleList(Long userId) {
         java.util.Set<String> roleCodes = userRoleService.getUserRoleCodes(userId);
-        if (roleCodes == null || roleCodes.isEmpty()) return List.of("ROLE_USER");
+        if (roleCodes == null || roleCodes.isEmpty()) return List.of();
         List<String> out = new ArrayList<>();
         for (String r : roleCodes) {
             if (r != null && !r.isBlank()) {
@@ -148,7 +149,7 @@ public class AuthResourceController {
                 out.add(role);
             }
         }
-        return out.isEmpty() ? List.of("ROLE_USER") : out;
+        return out;
     }
 
     private Map<String, Object> parseJsonOrEmpty(String json) {

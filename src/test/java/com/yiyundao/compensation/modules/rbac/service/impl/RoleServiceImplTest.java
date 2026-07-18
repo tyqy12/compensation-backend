@@ -10,6 +10,8 @@ import com.yiyundao.compensation.infrastructure.dao.SysUserRoleMapper;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.rbac.entity.SysRole;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
+import com.yiyundao.compensation.security.DatabasePermissionAssignmentService;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
@@ -41,6 +43,10 @@ class RoleServiceImplTest {
     private SysUserService sysUserService;
     @Mock
     private AuditLogService auditLogService;
+    @Mock
+    private DatabasePermissionAssignmentService databasePermissionAssignmentService;
+    @Mock
+    private DatabasePermissionService databasePermissionService;
 
     @Test
     void getRoleResourcesShouldRejectMissingRoleBeforeReturningEmptyPermissions() {
@@ -62,11 +68,11 @@ class RoleServiceImplTest {
         SysRole role = new SysRole();
         role.setId(10L);
         doReturn(role).when(service).getById(10L);
-        when(roleResourceMapper.selectList(any())).thenReturn(List.of());
+        when(databasePermissionService.getRoleActionCodes(10L)).thenReturn(java.util.Map.of());
 
         assertThat(service.getRoleResources(10L)).isEmpty();
 
-        verify(roleResourceMapper).selectList(any());
+        verify(roleResourceMapper, never()).selectList(any());
     }
 
     private RoleServiceImpl service() {
@@ -77,7 +83,9 @@ class RoleServiceImplTest {
                 resourceMapper,
                 sysUserService,
                 auditLogService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                databasePermissionAssignmentService,
+                databasePermissionService
         ));
     }
 }

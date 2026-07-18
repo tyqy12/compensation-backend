@@ -22,10 +22,9 @@ import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
 import com.yiyundao.compensation.modules.payroll.service.impl.PayrollBatchServiceImpl;
 import com.yiyundao.compensation.modules.payroll.service.impl.PayrollConfirmationServiceImpl;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
-import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -208,7 +207,7 @@ class PayrollConfirmationFlowIntegrationTest {
         ctx.approvalEngine = mock(ApprovalEngine.class);
         ctx.sysUserService = mock(SysUserService.class);
         ctx.employeeService = mock(EmployeeService.class);
-        ctx.userRoleService = mock(UserRoleService.class);
+        ctx.databasePermissionService = mock(DatabasePermissionService.class);
         ctx.payrollPaymentService = mock(PayrollPaymentService.class);
         ctx.auditLogService = mock(AuditLogService.class);
         ctx.validationIssueSupport = mock(PayrollValidationIssueSupport.class);
@@ -228,8 +227,7 @@ class PayrollConfirmationFlowIntegrationTest {
         );
         when(ctx.sysUserService.findByUsername(ctx.operator.getUsername())).thenReturn(ctx.operator);
         when(ctx.sysUserService.findByUsername("admin")).thenReturn(ctx.operator);
-        when(ctx.userRoleService.hasRole(ctx.operator.getId(), SecurityConstants.ROLE_ADMIN)).thenReturn(false);
-        when(ctx.userRoleService.hasRole(eq(ctx.operator.getId()), anyString())).thenReturn(false);
+        when(ctx.databasePermissionService.hasCurrentRequestScope(ctx.operator.getId(), "ALL")).thenReturn(false);
 
         ctx.batch = new PayrollBatch();
         ctx.batch.setId(5001L);
@@ -282,7 +280,7 @@ class PayrollConfirmationFlowIntegrationTest {
                 ctx.approvalEngine,
                 ctx.sysUserService,
                 ctx.employeeService,
-                ctx.userRoleService,
+                ctx.databasePermissionService,
                 new ObjectMapper(),
                 ctx.confirmationAggregateService,
                 ctx.payrollProcessManager
@@ -294,7 +292,7 @@ class PayrollConfirmationFlowIntegrationTest {
                 ctx.sysUserService,
                 ctx.payrollLineService,
                 ctx.payrollPaymentService,
-                ctx.userRoleService,
+                ctx.databasePermissionService,
                 ctx.auditLogService,
                 ctx.validationIssueSupport,
                 ctx.confirmationAggregateService,
@@ -313,7 +311,7 @@ class PayrollConfirmationFlowIntegrationTest {
         private ApprovalEngine approvalEngine;
         private SysUserService sysUserService;
         private EmployeeService employeeService;
-        private UserRoleService userRoleService;
+        private DatabasePermissionService databasePermissionService;
         private PayrollPaymentService payrollPaymentService;
         private AuditLogService auditLogService;
         private PayrollValidationIssueSupport validationIssueSupport;

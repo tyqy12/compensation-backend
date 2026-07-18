@@ -1,5 +1,4 @@
 import type { SysResource } from '@types/api';
-import { normalizeRoles } from '@utils/rbac';
 
 export interface MenuNode extends SysResource {
   children?: MenuNode[];
@@ -14,8 +13,6 @@ function parseProps(json: any): any {
 }
 
 export type BuildOpts = {
-  userRoles?: string[];
-  respectRoles?: boolean;
   /** Navigation callers hide disabled resources by default. */
   includeDisabled?: boolean;
   /** Navigation callers hide metadata-hidden resources by default. */
@@ -33,21 +30,12 @@ export function isEnabledResource(resource: SysResource): boolean {
   return resource.status == null || resource.status === 'enabled' || resource.status === 1;
 }
 
-function isAllowedByRoles(resource: SysResource, opts?: BuildOpts): boolean {
-  if (!opts?.respectRoles) return true;
-  const roles = getResourceMeta(resource).roles;
-  if (!Array.isArray(roles) || roles.length === 0) return true;
-  const requiredRoles = normalizeRoles(roles.filter((role): role is string => typeof role === 'string'));
-  const userRoles = normalizeRoles(opts.userRoles || []);
-  return requiredRoles.length === 0 || requiredRoles.some((role) => userRoles.includes(role));
-}
-
 function isVisibleInTree(resource: SysResource, opts?: BuildOpts): boolean {
   if (!opts?.includeDisabled && !isEnabledResource(resource)) return false;
   const meta = getResourceMeta(resource);
   if (!opts?.includeHidden && meta.hidden) return false;
   if (!opts?.includeRouteParams && hasRouteParams(resource.path)) return false;
-  return isAllowedByRoles(resource, opts);
+  return true;
 }
 
 /**

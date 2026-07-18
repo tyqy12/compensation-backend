@@ -269,7 +269,8 @@ class EmployeeServiceImplBatchImportTest {
                     mock(PaymentRecordService.class),
                     mock(VOConverter.class),
                     new ObjectMapper(),
-                    employeeDepartmentService
+                    employeeDepartmentService,
+                    mock(com.yiyundao.compensation.security.DatabasePermissionService.class)
             );
             this.existingEmployeeIds = new HashSet<>(existingEmployeeIds);
         }

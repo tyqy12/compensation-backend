@@ -75,6 +75,12 @@ vi.mock('@services/queries/employee', () => ({
   useEmployeesQuery: () => ({ data: { records: [] }, isFetching: false }),
 }));
 
+vi.mock('@hooks/usePermission', () => ({
+  usePermission: () => ({
+    checkPermission: () => true,
+  }),
+}));
+
 const renderPage = () =>
   render(
     <Provider store={store}>

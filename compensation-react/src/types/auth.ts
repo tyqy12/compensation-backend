@@ -49,12 +49,8 @@ export interface ResourceMeta {
   hidden?: boolean;           // 是否隐藏（不在菜单显示）
   affix?: boolean;            // 是否固定在标签栏
   icon?: string;              // 图标覆盖
-  // 权限属性
-  roles?: string[];           // 角色限制
-  permissionCode?: string;    // 所需权限码
   // API属性
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'; // HTTP方法
-  requireAllPermissions?: boolean; // 是否需要全部权限
 }
 
 // ==================== 角色资源关联 ====================

@@ -54,8 +54,7 @@ import {
 } from '@services/queries/payroll';
 import type { PayrollBatchDetailDto } from '@services/queries/payroll';
 import { useEmployeesQuery, type Employee } from '@services/queries/employee';
-import type { RootState } from '@services/stores/authSlice';
-import { hasAnyRole } from '@utils/rbac';
+import { usePermission } from '@hooks/usePermission';
 import {
   getBatchRevisionText,
   getCalculationStatusMeta,
@@ -137,8 +136,8 @@ const PayrollBatchEntry: React.FC = () => {
   const [manualForm] = Form.useForm<ManualFormValues>();
   const [editForm] = Form.useForm<EditFormValues>();
 
-  const roles = useSelector((state: RootState) => state.auth.user?.roles ?? state.auth.roles ?? []);
-  const canManage = useMemo(() => hasAnyRole(roles, ['ADMIN', 'FINANCE']), [roles]);
+  const { checkPermission } = usePermission();
+  const canManage = checkPermission('view.payroll.batch.entry', 'write');
   const detailQuery = usePayrollBatchDetailQuery(batchId, {
     enabled: Number.isFinite(batchId) && batchId > 0,
   });

@@ -42,7 +42,7 @@ describe('permission resource tree', () => {
     expect(tree[0].children?.map((node) => node.code)).toEqual(['enabled']);
   });
 
-  it('reads role metadata from the backend propsJson compatibility field', () => {
+  it('does not perform a second role decision from resource metadata', () => {
     const financeResource = resource({
       id: 2,
       code: 'finance-page',
@@ -51,8 +51,7 @@ describe('permission resource tree', () => {
       ...( { propsJson: JSON.stringify({ roles: ['FINANCE'] }) } as any),
     });
 
-    expect(buildResourceTree([financeResource], { respectRoles: true, userRoles: ['HR'] })).toHaveLength(0);
-    expect(buildResourceTree([financeResource], { respectRoles: true, userRoles: ['FINANCE'] })).toHaveLength(1);
+    expect(buildResourceTree([financeResource], { includeHidden: true })).toHaveLength(1);
   });
 
   it('does not authorize disabled routes and de-duplicates equivalent paths', () => {

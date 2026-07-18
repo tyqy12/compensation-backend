@@ -27,10 +27,9 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollBatchService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollConfirmationAggregateService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollProcessManager;
-import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Assertions;
@@ -56,7 +55,7 @@ class PayrollConfirmationServiceImplTest {
         ApprovalEngine approvalEngine = Mockito.mock(ApprovalEngine.class);
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         EmployeeService employeeService = Mockito.mock(EmployeeService.class);
-        UserRoleService userRoleService = Mockito.mock(UserRoleService.class);
+        DatabasePermissionService databasePermissionService = Mockito.mock(DatabasePermissionService.class);
         PayrollConfirmationAggregateService confirmationAggregateService = Mockito.mock(PayrollConfirmationAggregateService.class);
         PayrollProcessManager payrollProcessManager = Mockito.mock(PayrollProcessManager.class);
 
@@ -66,7 +65,7 @@ class PayrollConfirmationServiceImplTest {
                 approvalEngine,
                 sysUserService,
                 employeeService,
-                userRoleService,
+                databasePermissionService,
                 new ObjectMapper(),
                 confirmationAggregateService,
                 payrollProcessManager
@@ -168,7 +167,7 @@ class PayrollConfirmationServiceImplTest {
         ApprovalEngine approvalEngine = Mockito.mock(ApprovalEngine.class);
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         EmployeeService employeeService = Mockito.mock(EmployeeService.class);
-        UserRoleService userRoleService = Mockito.mock(UserRoleService.class);
+        DatabasePermissionService databasePermissionService = Mockito.mock(DatabasePermissionService.class);
         PayrollConfirmationAggregateService confirmationAggregateService = Mockito.mock(PayrollConfirmationAggregateService.class);
         PayrollProcessManager payrollProcessManager = Mockito.mock(PayrollProcessManager.class);
 
@@ -178,7 +177,7 @@ class PayrollConfirmationServiceImplTest {
                 approvalEngine,
                 sysUserService,
                 employeeService,
-                userRoleService,
+                databasePermissionService,
                 new ObjectMapper(),
                 confirmationAggregateService,
                 payrollProcessManager
@@ -246,7 +245,6 @@ class PayrollConfirmationServiceImplTest {
 
         Mockito.when(ctx.lineService.getById(300L)).thenReturn(line);
         Mockito.when(ctx.batchService.getById(200L)).thenReturn(batch);
-        Mockito.when(ctx.userRoleService.hasRole(31L, SecurityConstants.ROLE_HR)).thenReturn(true);
 
         BusinessException exception = Assertions.assertThrows(BusinessException.class,
                 () -> ctx.service.confirmPayslip(300L, hr, request));
@@ -358,7 +356,6 @@ class PayrollConfirmationServiceImplTest {
 
         Mockito.when(ctx.batchService.getById(201L)).thenReturn(batch);
         Mockito.when(ctx.lineService.list(Mockito.any(LambdaQueryWrapper.class))).thenReturn(List.of(line));
-        Mockito.when(ctx.userRoleService.hasRole(32L, SecurityConstants.ROLE_HR)).thenReturn(true);
 
         int affected = ctx.service.batchConfirm(201L, hr, request);
 
@@ -378,7 +375,7 @@ class PayrollConfirmationServiceImplTest {
         request.setAssigneeEmployeeId(901L);
         request.setLineIds(List.of(306L));
 
-        Mockito.when(ctx.userRoleService.hasRole(37L, SecurityConstants.ROLE_FINANCE)).thenReturn(true);
+        Mockito.when(ctx.databasePermissionService.hasCurrentRequestScope(37L, "ALL")).thenReturn(true);
         Mockito.when(ctx.sysUserService.findByEmployeeId(901L)).thenReturn(assignee);
         Mockito.when(ctx.batchService.getById(206L)).thenReturn(batch);
         Mockito.when(ctx.lineService.list(Mockito.any(LambdaQueryWrapper.class))).thenReturn(List.of(line));
@@ -412,7 +409,7 @@ class PayrollConfirmationServiceImplTest {
         request.setAssigneeEmployeeId(902L);
         request.setLineIds(List.of(307L));
 
-        Mockito.when(ctx.userRoleService.hasRole(39L, SecurityConstants.ROLE_FINANCE)).thenReturn(true);
+        Mockito.when(ctx.databasePermissionService.hasCurrentRequestScope(39L, "ALL")).thenReturn(true);
         Mockito.when(ctx.sysUserService.findByEmployeeId(902L)).thenReturn(assignee);
         Mockito.when(ctx.batchService.getById(207L)).thenReturn(batch);
         Mockito.when(ctx.lineService.list(Mockito.any(LambdaQueryWrapper.class))).thenReturn(List.of(line));
@@ -432,7 +429,7 @@ class PayrollConfirmationServiceImplTest {
         ApprovalEngine approvalEngine = Mockito.mock(ApprovalEngine.class);
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         EmployeeService employeeService = Mockito.mock(EmployeeService.class);
-        UserRoleService userRoleService = Mockito.mock(UserRoleService.class);
+        DatabasePermissionService databasePermissionService = Mockito.mock(DatabasePermissionService.class);
         PayrollConfirmationAggregateService confirmationAggregateService = Mockito.mock(PayrollConfirmationAggregateService.class);
         PayrollProcessManager payrollProcessManager = Mockito.mock(PayrollProcessManager.class);
 
@@ -442,7 +439,7 @@ class PayrollConfirmationServiceImplTest {
                 approvalEngine,
                 sysUserService,
                 employeeService,
-                userRoleService,
+                databasePermissionService,
                 new ObjectMapper(),
                 confirmationAggregateService,
                 payrollProcessManager
@@ -489,7 +486,7 @@ class PayrollConfirmationServiceImplTest {
         ApprovalEngine approvalEngine = Mockito.mock(ApprovalEngine.class);
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         EmployeeService employeeService = Mockito.mock(EmployeeService.class);
-        UserRoleService userRoleService = Mockito.mock(UserRoleService.class);
+        DatabasePermissionService databasePermissionService = Mockito.mock(DatabasePermissionService.class);
         PayrollConfirmationAggregateService confirmationAggregateService = Mockito.mock(PayrollConfirmationAggregateService.class);
         PayrollProcessManager payrollProcessManager = Mockito.mock(PayrollProcessManager.class);
 
@@ -499,7 +496,7 @@ class PayrollConfirmationServiceImplTest {
                 approvalEngine,
                 sysUserService,
                 employeeService,
-                userRoleService,
+                databasePermissionService,
                 new ObjectMapper(),
                 confirmationAggregateService,
                 payrollProcessManager
@@ -629,7 +626,7 @@ class PayrollConfirmationServiceImplTest {
     void pagePendingConfirmationsShouldClampPageAndSizeBeforeQuerying() {
         TestContext ctx = newTestContext();
         SysUser admin = user(1L, null, "admin");
-        Mockito.when(ctx.userRoleService.hasRole(1L, SecurityConstants.ROLE_FINANCE)).thenReturn(true);
+        Mockito.when(ctx.databasePermissionService.hasCurrentRequestScope(1L, "ALL")).thenReturn(true);
         Page<PayrollLine> linePage = new Page<>(1, 200, 0);
         linePage.setRecords(List.of());
         Mockito.when(ctx.lineService.page(Mockito.any(Page.class), Mockito.any(Wrapper.class))).thenReturn(linePage);
@@ -648,7 +645,7 @@ class PayrollConfirmationServiceImplTest {
     void pagePendingConfirmationsShouldFilterBatchesToConfirmationWindow() {
         TestContext ctx = newTestContext();
         SysUser admin = user(2L, null, "admin2");
-        Mockito.when(ctx.userRoleService.hasRole(2L, SecurityConstants.ROLE_FINANCE)).thenReturn(true);
+        Mockito.when(ctx.databasePermissionService.hasCurrentRequestScope(2L, "ALL")).thenReturn(true);
         Page<PayrollLine> linePage = new Page<>(1, 10, 0);
         linePage.setRecords(List.of());
         Mockito.when(ctx.lineService.page(Mockito.any(Page.class), Mockito.any(Wrapper.class))).thenReturn(linePage);
@@ -674,7 +671,7 @@ class PayrollConfirmationServiceImplTest {
         ApprovalEngine approvalEngine = Mockito.mock(ApprovalEngine.class);
         SysUserService sysUserService = Mockito.mock(SysUserService.class);
         EmployeeService employeeService = Mockito.mock(EmployeeService.class);
-        UserRoleService userRoleService = Mockito.mock(UserRoleService.class);
+        DatabasePermissionService databasePermissionService = Mockito.mock(DatabasePermissionService.class);
         PayrollConfirmationAggregateService confirmationAggregateService = Mockito.mock(PayrollConfirmationAggregateService.class);
         PayrollProcessManager payrollProcessManager = Mockito.mock(PayrollProcessManager.class);
         PayrollConfirmationServiceImpl service = new PayrollConfirmationServiceImpl(
@@ -683,13 +680,13 @@ class PayrollConfirmationServiceImplTest {
                 approvalEngine,
                 sysUserService,
                 employeeService,
-                userRoleService,
+                databasePermissionService,
                 new ObjectMapper(),
                 confirmationAggregateService,
                 payrollProcessManager
         );
-        return new TestContext(lineService, batchService, approvalEngine, sysUserService, userRoleService,
-                confirmationAggregateService, payrollProcessManager, service);
+        return new TestContext(lineService, batchService, approvalEngine, sysUserService,
+                databasePermissionService, confirmationAggregateService, payrollProcessManager, service);
     }
 
     private PayrollBatch confirmableBatch(Long batchId) {
@@ -723,7 +720,7 @@ class PayrollConfirmationServiceImplTest {
         private final PayrollBatchService batchService;
         private final ApprovalEngine approvalEngine;
         private final SysUserService sysUserService;
-        private final UserRoleService userRoleService;
+        private final DatabasePermissionService databasePermissionService;
         private final PayrollConfirmationAggregateService confirmationAggregateService;
         private final PayrollProcessManager payrollProcessManager;
         private final PayrollConfirmationServiceImpl service;
@@ -732,7 +729,7 @@ class PayrollConfirmationServiceImplTest {
                             PayrollBatchService batchService,
                             ApprovalEngine approvalEngine,
                             SysUserService sysUserService,
-                            UserRoleService userRoleService,
+                            DatabasePermissionService databasePermissionService,
                             PayrollConfirmationAggregateService confirmationAggregateService,
                             PayrollProcessManager payrollProcessManager,
                             PayrollConfirmationServiceImpl service) {
@@ -740,7 +737,7 @@ class PayrollConfirmationServiceImplTest {
             this.batchService = batchService;
             this.approvalEngine = approvalEngine;
             this.sysUserService = sysUserService;
-            this.userRoleService = userRoleService;
+            this.databasePermissionService = databasePermissionService;
             this.confirmationAggregateService = confirmationAggregateService;
             this.payrollProcessManager = payrollProcessManager;
             this.service = service;

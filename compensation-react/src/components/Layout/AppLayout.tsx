@@ -115,9 +115,6 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
   const { pathname } = useLocation();
   const logout = useLogoutMutation();
   const username = useSelector((state: RootState) => state.auth.user?.username);
-  const userRoles = useSelector(
-    (state: RootState) => state.auth.user?.roles ?? state.auth.roles ?? [],
-  );
   const theme = useUIStore((state) => state.theme);
   const collapsed = useUIStore((state) => state.collapsed);
   const setCollapsed = useUIStore((state) => state.setCollapsed);
@@ -184,7 +181,7 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
 
   const { data: meRes, isLoading: permLoading } = useMeResourcesQuery();
   const { menuItems, selectedMenuKey } = useMemo(() => {
-    const tree = buildResourceTree(meRes?.resources || [], { userRoles, respectRoles: true });
+    const tree = buildResourceTree(meRes?.resources || []);
     const pathToKey = new Map<string, string>();
     const toMenuItems = (nodes: any[]): any[] =>
       nodes.map((node) => {
@@ -205,7 +202,7 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
       menuItems: dynamicItems,
       selectedMenuKey: getSelectedMenuKey(pathname, pathToKey),
     };
-  }, [meRes?.resources, pathname, userRoles]);
+  }, [meRes?.resources, pathname]);
 
   return (
     <Layout className="app-shell">

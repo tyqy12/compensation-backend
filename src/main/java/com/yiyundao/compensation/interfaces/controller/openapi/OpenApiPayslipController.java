@@ -30,10 +30,9 @@ public class OpenApiPayslipController {
     private final ExternalApiContext externalApiContext;
 
     @GetMapping
-    @PreAuthorize("hasAuthority('SCOPE_payslip:read')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     public ApiResponse<List<OpenApiPayslipDto>> queryPayslips(@RequestParam("employeeRef") String employeeRef,
                                                               @RequestParam("period") String period) {
-        ensureScope("payslip:read");
         if (!StringUtils.hasText(employeeRef) || !StringUtils.hasText(period)) {
             return ApiResponse.error(ErrorCode.PARAM_MISSING, "employeeRef 与 period 不能为空");
         }
@@ -45,10 +44,9 @@ public class OpenApiPayslipController {
     }
 
     @GetMapping("/{payslipId}")
-    @PreAuthorize("hasAuthority('SCOPE_payslip:read')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     public ApiResponse<OpenApiPayslipDto> getPayslip(@PathVariable("payslipId") Long payslipId,
                                                      @RequestParam("employeeRef") String employeeRef) {
-        ensureScope("payslip:read");
         if (!StringUtils.hasText(employeeRef)) {
             return ApiResponse.error(ErrorCode.PARAM_MISSING, "employeeRef 不能为空");
         }
@@ -57,13 +55,6 @@ public class OpenApiPayslipController {
             return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "工资条不存在或不属于 PT 范围");
         }
         return ApiResponse.success(dto);
-    }
-
-    private void ensureScope(String scope) {
-        ExternalApiContext.ExternalApiClient client = externalApiContext.current();
-        if (client == null || client.getScopes() == null || !client.getScopes().contains(scope)) {
-            throw new org.springframework.security.access.AccessDeniedException("缺少访问范围" + scope);
-        }
     }
 
     private boolean isYearMonth(String value) {

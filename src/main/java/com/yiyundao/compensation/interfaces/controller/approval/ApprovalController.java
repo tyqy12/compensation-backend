@@ -19,11 +19,10 @@ import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.service.ApprovalEngine;
 import com.yiyundao.compensation.modules.approval.service.ApprovalStepService;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
-import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
-import com.yiyundao.compensation.security.SecurityConstants;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -52,7 +51,7 @@ public class ApprovalController {
     private final ApprovalWorkflowMapper approvalWorkflowMapper;
     private final SysUserService sysUserService;
     private final AuditLogService auditLogService;
-    private final UserRoleService userRoleService;
+    private final DatabasePermissionService databasePermissionService;
 
     // ==================== 查询接口 ====================
 
@@ -79,7 +78,7 @@ public class ApprovalController {
         if (currentUser == null || currentUser.getId() == null) {
             return ApiResponse.error(ErrorCode.UNAUTHORIZED, "未登录");
         }
-        if (!userRoleService.hasAnyRole(currentUser.getId(), SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+        if (!databasePermissionService.hasCurrentRequestScope(currentUser.getId(), "ALL")) {
             restrictToReadableWorkflows(queryWrapper, currentUser.getId());
         }
 
@@ -446,7 +445,7 @@ public class ApprovalController {
         if (workflow == null || user == null || user.getId() == null) {
             return false;
         }
-        if (userRoleService.hasAnyRole(user.getId(), SecurityConstants.ROLE_ADMIN, SecurityConstants.ROLE_FINANCE)) {
+        if (databasePermissionService.hasCurrentRequestScope(user.getId(), "ALL")) {
             return true;
         }
         if (user.getId().equals(workflow.getInitiatorId())) {

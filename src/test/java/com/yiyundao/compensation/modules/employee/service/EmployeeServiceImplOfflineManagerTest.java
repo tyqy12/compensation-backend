@@ -21,6 +21,9 @@ import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.service.EncryptionService;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.HashMap;
@@ -37,6 +40,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class EmployeeServiceImplOfflineManagerTest {
+
+    @AfterEach
+    void tearDown() {
+        SecurityContextHolder.clearContext();
+    }
 
     @Test
     void setOfflineManagerShouldThrowWhenEmployeeMissing() {
@@ -103,12 +111,38 @@ class EmployeeServiceImplOfflineManagerTest {
 
     @Test
     void pageEmployeesShouldClampPageAndSize() {
-        TestableEmployeeServiceImpl service = new TestableEmployeeServiceImpl();
+        TestableEmployeeServiceImpl service = authenticatedService();
 
         service.pageEmployees(-1, 1000, null, null, null, null, null, null, "createTime", "desc");
 
         assertThat(service.lastPage.getCurrent()).isEqualTo(1);
         assertThat(service.lastPage.getSize()).isEqualTo(200);
+    }
+
+    private TestableEmployeeServiceImpl authenticatedService() {
+        SysUserService sysUserService = mock(SysUserService.class);
+        SysUser tester = user(1L);
+        tester.setEmployeeId(100L);
+        when(sysUserService.findByUsername("tester")).thenReturn(tester);
+        when(sysUserService.getById(1L)).thenReturn(tester);
+        com.yiyundao.compensation.security.DatabasePermissionService permissionService =
+                mock(com.yiyundao.compensation.security.DatabasePermissionService.class);
+        when(permissionService.hasCurrentRequestScope(1L, "ASSIGNED")).thenReturn(true);
+        SecurityContextHolder.getContext().setAuthentication(
+                new UsernamePasswordAuthenticationToken("tester", "n/a"));
+        TestableEmployeeServiceImpl service = new TestableEmployeeServiceImpl(
+                mock(EncryptionService.class), sysUserService, permissionService);
+        Employee currentEmployee = new Employee();
+        currentEmployee.setId(100L);
+        service.employees.put(100L, currentEmployee);
+        return service;
+    }
+
+    private SysUser user(Long id) {
+        SysUser user = new SysUser();
+        user.setId(id);
+        user.setUsername("tester");
+        return user;
     }
 
     @Test
@@ -387,6 +421,13 @@ class EmployeeServiceImplOfflineManagerTest {
 
         private TestableEmployeeServiceImpl(EncryptionService encryptionService,
                                             SysUserService sysUserService) {
+            this(encryptionService, sysUserService,
+                    mock(com.yiyundao.compensation.security.DatabasePermissionService.class));
+        }
+
+        private TestableEmployeeServiceImpl(EncryptionService encryptionService,
+                                            SysUserService sysUserService,
+                                            com.yiyundao.compensation.security.DatabasePermissionService permissionService) {
             super(
                     encryptionService,
                     mock(ObjectProvider.class),
@@ -400,7 +441,8 @@ class EmployeeServiceImplOfflineManagerTest {
                     mock(PaymentRecordService.class),
                     mock(VOConverter.class),
                     new ObjectMapper(),
-                    mock(EmployeeDepartmentService.class)
+                    mock(EmployeeDepartmentService.class),
+                    permissionService
             );
             this.encryptionService = encryptionService;
         }

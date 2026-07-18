@@ -41,6 +41,7 @@ import {
   useUserResourcesQuery,
   useUserAggregateResourcesQuery,
   usePutUserResourcesMutation,
+  usePermissionActionsQuery,
 } from '@services/queries/adminAuth';
 import { useRolesQuery } from '@services/queries/roles';
 import type { SysResource } from '@types/api';
@@ -70,15 +71,6 @@ const RESOURCE_TYPE_COLOR: Record<string, string> = {
   ACTION: 'orange',
   API: 'purple',
 };
-
-const ACTION_OPTIONS: Array<{ label: string; value: string }> = [
-  { label: '查看数据', value: 'read' },
-  { label: '新增/编辑', value: 'write' },
-  { label: '删除数据', value: 'delete' },
-  { label: '全部权限', value: 'admin' },
-  { label: '导出Excel', value: 'export' },
-  { label: '导入数据', value: 'import' },
-];
 
 const parseActions = (actions?: string[] | null, actionsJson?: string | null): string[] => {
   if (Array.isArray(actions)) {
@@ -123,6 +115,7 @@ const UserPermissionConfig: React.FC = () => {
   const userResourcesQuery = useUserResourcesQuery(userIdNum);
   const userAggregateResourcesQuery = useUserAggregateResourcesQuery(userIdNum);
   const putUserResourcesMutation = usePutUserResourcesMutation(userIdNum);
+  const permissionActionsQuery = usePermissionActionsQuery();
   const rolesQuery = useRolesQuery({});
 
   // 状态
@@ -134,6 +127,27 @@ const UserPermissionConfig: React.FC = () => {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [leafOnlyCheckable, setLeafOnlyCheckable] = useState(true);
   const [bulkActions, setBulkActions] = useState<string[]>([]);
+
+  const actionCatalog = permissionActionsQuery.data ?? [];
+  const actionOptions = useMemo(
+    () => actionCatalog.map((action) => ({ label: action.name || action.code, value: action.code })),
+    [actionCatalog],
+  );
+  const actionOptionsForResource = useCallback(
+    (resourceId: number) => actionCatalog
+      .filter((action) => action.resourceIds?.includes(resourceId))
+      .map((action) => ({ label: action.name || action.code, value: action.code })),
+    [actionCatalog],
+  );
+  const bulkActionOptions = useMemo(() => {
+    const selectedIds = checkedKeys
+      .map(Number)
+      .filter((id) => !inheritedResourceIdSet.has(id));
+    if (!selectedIds.length) return actionOptions;
+    return actionCatalog
+      .filter((action) => selectedIds.every((id) => action.resourceIds?.includes(id)))
+      .map((action) => ({ label: action.name || action.code, value: action.code }));
+  }, [actionCatalog, actionOptions, checkedKeys, inheritedResourceIdSet]);
 
   // 动态创建角色代码到名称的映射表
   const roleNameMap = useMemo(() => {
@@ -475,7 +489,8 @@ const UserPermissionConfig: React.FC = () => {
     resourcesQuery.isLoading ||
     userQuery.isLoading ||
     userResourcesQuery.isLoading ||
-    userAggregateResourcesQuery.isLoading
+    userAggregateResourcesQuery.isLoading ||
+    permissionActionsQuery.isLoading
   ) {
     return (
       <PageContainer>
@@ -667,7 +682,7 @@ const UserPermissionConfig: React.FC = () => {
                   >
                     <Text type="secondary">批量设置操作（仅作用于可编辑资源）</Text>
                     <Checkbox.Group
-                      options={ACTION_OPTIONS}
+                      options={bulkActionOptions}
                       value={bulkActions}
                       onChange={(values) => setBulkActions(values as string[])}
                     />
@@ -719,7 +734,7 @@ const UserPermissionConfig: React.FC = () => {
                           ),
                           children: (
                             <Checkbox.Group
-                              options={ACTION_OPTIONS}
+                              options={actionOptionsForResource(res.id)}
                               value={actions}
                               disabled={isInheritedOnly}
                               onChange={(checkedValues) =>

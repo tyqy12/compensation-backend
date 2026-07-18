@@ -54,7 +54,8 @@ class ExternalApiTokenServiceTest {
         assertThat(parsed.scopes()).containsExactlyInAnyOrder("payroll:read", "payslip:read");
         assertThat(parsed.toAuthorities())
                 .extracting(SimpleGrantedAuthority::getAuthority)
-                .contains("ROLE_APP", "SCOPE_payroll:read", "SCOPE_payslip:read");
+                .contains("SCOPE_payroll:read", "SCOPE_payslip:read")
+                .doesNotContain("ROLE_APP");
         assertThat(parsed.authorities()).isNull();
     }
 
@@ -77,7 +78,8 @@ class ExternalApiTokenServiceTest {
         assertThat(parsed.authorities()).contains("SCOPE_payslip:read");
         assertThat(parsed.toAuthorities())
                 .extracting(SimpleGrantedAuthority::getAuthority)
-                .contains("ROLE_APP", "SCOPE_payroll:read")
+                .contains("SCOPE_payroll:read")
+                .doesNotContain("ROLE_APP")
                 .doesNotContain("SCOPE_payslip:read");
     }
 

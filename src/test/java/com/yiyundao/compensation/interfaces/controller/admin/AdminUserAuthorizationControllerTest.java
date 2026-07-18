@@ -14,7 +14,7 @@ import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.security.SecurityAnnotations;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -25,6 +25,7 @@ import org.springframework.security.core.context.SecurityContextHolder;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -53,6 +54,8 @@ class AdminUserAuthorizationControllerTest {
     private UserRoleService userRoleService;
     @Mock
     private UserResourceService userResourceService;
+    @Mock
+    private DatabasePermissionService databasePermissionService;
 
     @AfterEach
     void tearDown() {
@@ -78,7 +81,8 @@ class AdminUserAuthorizationControllerTest {
     @Test
     void updateUserResourcesShouldRequireApprovalWhenActionsAreExpanded() {
         mockOperator("manager", "ROLE_MANAGER");
-        when(userResourceMapper.selectList(any())).thenReturn(List.of(userResource(10L, 20L, "[\"read\"]")));
+        when(databasePermissionService.getUserDirectActionCodes(10L))
+                .thenReturn(Map.of(20L, Set.of("read")));
         when(approvalWorkflowMapper.selectCount(any())).thenReturn(0L);
         when(approvalEngine.startWorkflow(any(), any(), any(), anyLong(), any())).thenReturn(9001L);
 
@@ -105,7 +109,8 @@ class AdminUserAuthorizationControllerTest {
     @Test
     void updateUserResourcesShouldApplyDirectlyWhenActionsAreReduced() {
         mockOperator("manager", "ROLE_MANAGER");
-        when(userResourceMapper.selectList(any())).thenReturn(List.of(userResource(10L, 20L, "[\"read\",\"write\"]")));
+        when(databasePermissionService.getUserDirectActionCodes(10L))
+                .thenReturn(Map.of(20L, Set.of("read", "write")));
 
         AdminUserAuthorizationController.UserGrantRequest request = new AdminUserAuthorizationController.UserGrantRequest();
         request.setResourceIds(List.of(20L));
@@ -130,7 +135,8 @@ class AdminUserAuthorizationControllerTest {
     @Test
     void updateUserResourcesShouldApplyDirectlyWhenWildcardActionsAreReduced() {
         mockOperator("manager", "ROLE_MANAGER");
-        when(userResourceMapper.selectList(any())).thenReturn(List.of(userResource(10L, 20L, "[\"*\"]")));
+        when(databasePermissionService.getUserDirectActionCodes(10L))
+                .thenReturn(Map.of(20L, Set.of("*")));
 
         AdminUserAuthorizationController.UserGrantRequest request = new AdminUserAuthorizationController.UserGrantRequest();
         request.setResourceIds(List.of(20L));
@@ -152,7 +158,8 @@ class AdminUserAuthorizationControllerTest {
     @Test
     void updateUserResourcesShouldRejectWhenPendingGrantExists() {
         mockOperator("manager", "ROLE_MANAGER");
-        when(userResourceMapper.selectList(any())).thenReturn(List.of(userResource(10L, 20L, "[\"read\"]")));
+        when(databasePermissionService.getUserDirectActionCodes(10L))
+                .thenReturn(Map.of(20L, Set.of("read")));
         when(approvalWorkflowMapper.selectCount(any())).thenReturn(1L);
 
         AdminUserAuthorizationController.UserGrantRequest request = new AdminUserAuthorizationController.UserGrantRequest();
@@ -169,7 +176,7 @@ class AdminUserAuthorizationControllerTest {
     @Test
     void updateUserResourcesShouldApplyDirectlyForAdminRoleFromUserRoleTableEvenWhenLegacyRolesEmpty() {
         mockOperator("admin", null);
-        when(userRoleService.hasRole(100L, SecurityConstants.ROLE_ADMIN)).thenReturn(true);
+        when(databasePermissionService.hasCurrentRequestScope(100L, "ALL")).thenReturn(true);
 
         AdminUserAuthorizationController.UserGrantRequest request = new AdminUserAuthorizationController.UserGrantRequest();
         request.setResourceIds(List.of(20L, 21L));
@@ -193,7 +200,7 @@ class AdminUserAuthorizationControllerTest {
     }
 
     private AdminUserAuthorizationController controller() {
-        return new AdminUserAuthorizationController(
+        AdminUserAuthorizationController controller = new AdminUserAuthorizationController(
                 userResourceMapper,
                 userRoleMapper,
                 roleResourceMapper,
@@ -202,8 +209,10 @@ class AdminUserAuthorizationControllerTest {
                 sysUserService,
                 new ObjectMapper(),
                 userRoleService,
-                userResourceService
+                userResourceService,
+                databasePermissionService
         );
+        return controller;
     }
 
     private void mockOperator(String username, String roles) {
@@ -217,11 +226,4 @@ class AdminUserAuthorizationControllerTest {
         when(sysUserService.findByUsername(username)).thenReturn(operator);
     }
 
-    private SysUserResource userResource(Long userId, Long resourceId, String actionsJson) {
-        SysUserResource resource = new SysUserResource();
-        resource.setUserId(userId);
-        resource.setResourceId(resourceId);
-        resource.setActionsJson(actionsJson);
-        return resource;
-    }
 }

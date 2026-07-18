@@ -10,7 +10,8 @@ import java.lang.annotation.Target;
 /**
  * 权限注解常量引用
  * <p>
- * 提供类型安全的权限注解，避免硬编码字符串
+ * 提供兼容旧代码的注解名称。所有注解都委托同一个数据库权限决策器，
+ * 注解名称本身不再代表任何角色或权限策略。
  * </p>
  *
  * @author 芙宁娜
@@ -27,7 +28,7 @@ public final class SecurityAnnotations {
     /**
      * 已认证用户
      */
-    @PreAuthorize("isAuthenticated()")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface IsAuthenticated {
@@ -36,7 +37,7 @@ public final class SecurityAnnotations {
     /**
      * 管理员专有
      */
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface IsAdmin {
@@ -45,7 +46,7 @@ public final class SecurityAnnotations {
     /**
      * 经理角色
      */
-    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface IsManagerOrAdmin {
@@ -54,7 +55,7 @@ public final class SecurityAnnotations {
     /**
      * 财务角色
      */
-    @PreAuthorize("hasAnyRole('ADMIN', 'FINANCE')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface IsFinanceOrAdmin {
@@ -63,7 +64,7 @@ public final class SecurityAnnotations {
     /**
      * HR角色
      */
-    @PreAuthorize("hasAnyRole('ADMIN', 'HR')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface IsHrOrAdmin {
@@ -72,7 +73,7 @@ public final class SecurityAnnotations {
     /**
      * 财务或HR
      */
-    @PreAuthorize("hasAnyRole('ADMIN', 'FINANCE', 'HR')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface IsFinanceOrHrOrAdmin {
@@ -81,7 +82,7 @@ public final class SecurityAnnotations {
     /**
      * 经理或财务
      */
-    @PreAuthorize("hasAnyRole('ADMIN', 'FINANCE', 'MANAGER')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface IsFinanceOrManagerOrAdmin {
@@ -90,7 +91,7 @@ public final class SecurityAnnotations {
     /**
      * 财务或HR或经理
      */
-    @PreAuthorize("hasAnyRole('ADMIN', 'FINANCE', 'HR', 'MANAGER')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface IsFinanceOrHrOrManagerOrAdmin {
@@ -99,7 +100,7 @@ public final class SecurityAnnotations {
     /**
      * 员工
      */
-    @PreAuthorize("hasAnyRole('ADMIN', 'FINANCE', 'EMPLOYEE')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface IsEmployeeOrFinanceOrAdmin {
@@ -110,7 +111,7 @@ public final class SecurityAnnotations {
     /**
      * 组织同步权限
      */
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('org:sync')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface HasOrgSyncPermission {
@@ -119,7 +120,7 @@ public final class SecurityAnnotations {
     /**
      * 组织读取权限
      */
-    @PreAuthorize("hasAnyRole('ADMIN', 'MANAGER') or hasAuthority('org:read')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface HasOrgReadPermission {
@@ -128,7 +129,7 @@ public final class SecurityAnnotations {
     /**
      * 组织同步管理读取权限
      */
-    @PreAuthorize("hasRole('ADMIN') or hasAuthority('org:read')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface HasOrgAdminReadPermission {
@@ -139,7 +140,7 @@ public final class SecurityAnnotations {
     /**
      * 外部应用访问权限
      */
-    @PreAuthorize("hasAuthority('ROLE_APP')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface IsApp {
@@ -148,7 +149,7 @@ public final class SecurityAnnotations {
     /**
      * OpenAPI 工资条读取权限
      */
-    @PreAuthorize("hasAuthority('SCOPE_payslip:read')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface HasPayslipReadScope {
@@ -157,48 +158,10 @@ public final class SecurityAnnotations {
     /**
      * OpenAPI 薪酬读取权限
      */
-    @PreAuthorize("hasAuthority('SCOPE_payroll:read')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     @Target({ElementType.METHOD, ElementType.TYPE})
     @Retention(RetentionPolicy.RUNTIME)
     public @interface HasPayrollReadScope {
     }
 
-    // ==================== 表达式辅助方法 ====================
-
-    /**
-     * 生成角色表达式
-     *
-     * @param roles 角色数组
-     * @return SpEL 表达式
-     */
-    public static String hasAnyRole(String... roles) {
-        StringBuilder sb = new StringBuilder("hasAnyRole(");
-        for (int i = 0; i < roles.length; i++) {
-            if (i > 0) sb.append(", ");
-            String role = roles[i];
-            // 确保角色名不带 ROLE_ 前缀（Spring Security 要求）
-            if (role.startsWith("ROLE_")) {
-                role = role.substring(5);
-            }
-            sb.append("'").append(role).append("'");
-        }
-        sb.append(")");
-        return sb.toString();
-    }
-
-    /**
-     * 生成权限表达式
-     *
-     * @param authorities 权限数组
-     * @return SpEL 表达式
-     */
-    public static String hasAnyAuthority(String... authorities) {
-        StringBuilder sb = new StringBuilder("hasAnyAuthority(");
-        for (int i = 0; i < authorities.length; i++) {
-            if (i > 0) sb.append(", ");
-            sb.append("'").append(authorities[i]).append("'");
-        }
-        sb.append(")");
-        return sb.toString();
-    }
 }

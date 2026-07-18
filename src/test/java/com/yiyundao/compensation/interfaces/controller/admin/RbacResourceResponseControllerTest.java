@@ -18,6 +18,7 @@ import com.yiyundao.compensation.modules.rbac.service.UserResourceService;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.context.ApplicationEventPublisher;
@@ -85,7 +86,9 @@ class RbacResourceResponseControllerTest {
     @Test
     void userResourcesShouldReturnResponseWithoutPersistenceFields() throws Exception {
         SysUserResourceMapper userResourceMapper = mock(SysUserResourceMapper.class);
-        when(userResourceMapper.selectList(any())).thenReturn(List.of(userResource()));
+        DatabasePermissionService permissionService = mock(DatabasePermissionService.class);
+        when(permissionService.getUserDirectActionCodes(10L))
+                .thenReturn(java.util.Map.of(20L, java.util.Set.of("read", "write")));
         AdminUserAuthorizationController controller = new AdminUserAuthorizationController(
                 userResourceMapper,
                 mock(SysUserRoleMapper.class),
@@ -95,7 +98,8 @@ class RbacResourceResponseControllerTest {
                 mock(SysUserService.class),
                 objectMapper,
                 mock(UserRoleService.class),
-                mock(UserResourceService.class)
+                mock(UserResourceService.class),
+                permissionService
         );
 
         ApiResponse<List<UserResourceResponseDto>> response = controller.userResources(10L);

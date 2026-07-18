@@ -221,7 +221,8 @@ class EmployeeServiceImplProfileChangeTest {
                     mock(PaymentRecordService.class),
                     mock(VOConverter.class),
                     new ObjectMapper(),
-                    mock(EmployeeDepartmentService.class)
+                    mock(EmployeeDepartmentService.class),
+                    mock(com.yiyundao.compensation.security.DatabasePermissionService.class)
             );
         }
 

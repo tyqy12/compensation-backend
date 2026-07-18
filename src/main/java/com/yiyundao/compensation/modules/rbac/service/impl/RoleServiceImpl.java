@@ -24,6 +24,8 @@ import com.yiyundao.compensation.modules.rbac.entity.SysRoleResource;
 import com.yiyundao.compensation.modules.rbac.entity.SysUserRole;
 import com.yiyundao.compensation.modules.rbac.service.RoleService;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
+import com.yiyundao.compensation.security.DatabasePermissionAssignmentService;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -53,6 +55,9 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
     private final SysUserService sysUserService;
     private final AuditLogService auditLogService;
     private final ObjectMapper objectMapper;
+
+    private final DatabasePermissionAssignmentService databasePermissionAssignmentService;
+    private final DatabasePermissionService databasePermissionService;
 
     // ==================== 角色 CRUD ====================
 
@@ -196,6 +201,7 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
         // 删除角色资源关联
         roleResourceMapper.delete(new LambdaQueryWrapper<SysRoleResource>()
                 .eq(SysRoleResource::getRoleId, id));
+        databasePermissionAssignmentService.revokeRolePermissions(id, null, operatorId);
 
         // 删除角色
         removeById(id);
@@ -395,6 +401,19 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
             revokeResources(roleId, null, operatorId);
         }
 
+        Map<Long, List<String>> requestedPermissions = request.getResources().stream()
+                .collect(Collectors.toMap(
+                        RoleResourceAssignRequest.ResourceAssignment::getResourceId,
+                        RoleResourceAssignRequest.ResourceAssignment::getActions,
+                        (left, right) -> right,
+                        LinkedHashMap::new));
+        if (Boolean.TRUE.equals(request.getReplaceExisting())) {
+            databasePermissionAssignmentService.replaceRolePermissions(
+                    roleId, requestedPermissions.keySet(), requestedPermissions, operatorId);
+        } else {
+            databasePermissionAssignmentService.upsertRolePermissions(roleId, requestedPermissions, operatorId);
+        }
+
         // 批量分配
         for (RoleResourceAssignRequest.ResourceAssignment assignment : request.getResources()) {
             List<String> actions = assignment.getActions();
@@ -431,6 +450,7 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
         }
 
         roleResourceMapper.delete(wrapper);
+        databasePermissionAssignmentService.revokeRolePermissions(roleId, resourceIds, operatorId);
 
         // 清除关联用户的权限缓存
         invalidateUserCaches(roleId);
@@ -448,30 +468,20 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
         Assert.notNull(roleId, "角色ID不能为空");
         getByIdOrThrow(roleId);
 
-        List<SysRoleResource> assignments = roleResourceMapper.selectList(
-                new LambdaQueryWrapper<SysRoleResource>().eq(SysRoleResource::getRoleId, roleId));
-
-        if (assignments.isEmpty()) {
+        Map<Long, Set<String>> actionMap = databasePermissionService.getRoleActionCodes(roleId);
+        if (actionMap.isEmpty()) {
             return Map.of();
         }
-
-        Set<Long> resourceIds = assignments.stream()
-                .map(SysRoleResource::getResourceId)
-                .collect(Collectors.toSet());
-
-        List<SysResource> resources = resourceMapper.selectBatchIds(resourceIds);
+        List<SysResource> resources = resourceMapper.selectBatchIds(actionMap.keySet());
         Map<Long, SysResource> resourceMap = resources.stream()
                 .collect(Collectors.toMap(SysResource::getId, r -> r));
-
         Map<SysResource, Set<String>> result = new LinkedHashMap<>();
-        for (SysRoleResource assignment : assignments) {
-            SysResource resource = resourceMap.get(assignment.getResourceId());
-            if (resource != null) {
-                Set<String> actions = parseActions(assignment.getActionsJson());
+        actionMap.forEach((resourceId, actions) -> {
+            SysResource resource = resourceMap.get(resourceId);
+            if (resource != null && "enabled".equalsIgnoreCase(resource.getStatus())) {
                 result.put(resource, actions);
             }
-        }
-
+        });
         return result;
     }
 
@@ -480,22 +490,7 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
         Assert.notNull(roleId, "角色ID不能为空");
         Assert.notNull(resourceId, "资源ID不能为空");
 
-        SysRoleResource assignment = roleResourceMapper.selectOne(
-                new LambdaQueryWrapper<SysRoleResource>()
-                        .eq(SysRoleResource::getRoleId, roleId)
-                        .eq(SysRoleResource::getResourceId, resourceId));
-
-        if (assignment == null) {
-            return false;
-        }
-
-        // 如果没有指定操作，或者权限为 *，则视为拥有
-        if (!StringUtils.hasText(action)) {
-            return true;
-        }
-
-        Set<String> actions = parseActions(assignment.getActionsJson());
-        return actions.isEmpty() || actions.contains("*") || actions.contains(action);
+        return databasePermissionService.hasRolePermission(roleId, resourceId, action);
     }
 
     // ==================== 私有辅助方法 ====================
@@ -564,6 +559,12 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
         for (Long resourceId : resourceIds) {
             assignResourcesInternal(roleId, resourceId, actionsJson, operatorId);
         }
+        Map<Long, List<String>> permissions = resourceIds.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(resourceId -> resourceId, resourceId -> actions,
+                        (left, right) -> right, LinkedHashMap::new));
+        databasePermissionAssignmentService.replaceRolePermissions(
+                roleId, permissions.keySet(), permissions, operatorId);
     }
 
     private void invalidateUserCaches(Long roleId) {

@@ -20,12 +20,12 @@ class DashboardControllerSecurityTest {
     }
 
     @Test
-    void dashboardShouldRequireGlobalOperationalRoles() {
+    void dashboardShouldUseDatabaseDrivenAuthorization() {
         assertThat(DashboardController.class
                 .isAnnotationPresent(SecurityAnnotations.IsFinanceOrHrOrAdmin.class)).isTrue();
         assertThat(DashboardController.class
                 .isAnnotationPresent(SecurityAnnotations.IsFinanceOrHrOrManagerOrAdmin.class)).isFalse();
-        assertThat(preAuthorize.value()).contains("FINANCE", "HR", "ADMIN");
-        assertThat(preAuthorize.value()).doesNotContain("MANAGER");
+        assertThat(preAuthorize.value())
+                .isEqualTo("@databaseMethodAuthorizationEvaluator.check(authentication)");
     }
 }

@@ -16,6 +16,8 @@ import com.yiyundao.compensation.modules.rbac.service.ResourceCacheService;
 import com.yiyundao.compensation.modules.rbac.service.UserResourceService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
+import com.yiyundao.compensation.security.DatabasePermissionAssignmentService;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -42,6 +44,9 @@ public class UserResourceServiceImpl extends ServiceImpl<SysUserResourceMapper, 
     private final ResourceCacheService resourceCacheService;
     private final ObjectMapper objectMapper;
 
+    private final DatabasePermissionAssignmentService databasePermissionAssignmentService;
+    private final DatabasePermissionService databasePermissionService;
+
     @Override
     @Transactional(rollbackFor = Exception.class)
     public void assignResources(Long userId, List<Long> resourceIds, Map<Long, List<String>> actionsMap, Long operatorId) {
@@ -57,6 +62,9 @@ public class UserResourceServiceImpl extends ServiceImpl<SysUserResourceMapper, 
         }
         List<Long> normalizedResourceIds = normalizeResourceIds(resourceIds);
         ensureResourcesEnabled(normalizedResourceIds);
+
+        databasePermissionAssignmentService.replaceUserPermissions(userId, normalizedResourceIds,
+                actionsMap, operatorId);
 
         // 先删除用户的所有资源
         userResourceMapper.delete(new LambdaQueryWrapper<SysUserResource>()
@@ -97,6 +105,10 @@ public class UserResourceServiceImpl extends ServiceImpl<SysUserResourceMapper, 
         }
         List<Long> normalizedResourceIds = normalizeResourceIds(resourceIds);
         ensureResourcesEnabled(normalizedResourceIds);
+
+        if (actionsMap != null) {
+            databasePermissionAssignmentService.upsertUserPermissions(userId, actionsMap, operatorId);
+        }
 
         // 获取已存在的资源
         Set<Long> existingResourceIds = getExistingResourceIds(userId);
@@ -142,6 +154,8 @@ public class UserResourceServiceImpl extends ServiceImpl<SysUserResourceMapper, 
 
         userResourceMapper.delete(wrapper);
 
+        databasePermissionAssignmentService.revokeUserPermissions(userId, resourceIds, operatorId);
+
         // 清除用户缓存
         clearUserCache(userId);
         log.info("用户资源撤销成功: userId={}, resourceCount={}, operatorId={}",
@@ -154,17 +168,7 @@ public class UserResourceServiceImpl extends ServiceImpl<SysUserResourceMapper, 
             return Map.of();
         }
 
-        List<SysUserResource> resources = userResourceMapper.selectList(
-                new LambdaQueryWrapper<SysUserResource>()
-                        .eq(SysUserResource::getUserId, userId));
-
-        Map<Long, Set<String>> result = new HashMap<>();
-        for (SysUserResource ur : resources) {
-            Set<String> actions = parseActions(ur.getActionsJson());
-            result.put(ur.getResourceId(), actions);
-        }
-
-        return result;
+        return databasePermissionService.getUserDirectActionCodes(userId);
     }
 
     @Override

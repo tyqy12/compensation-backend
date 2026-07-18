@@ -25,8 +25,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ExternalApiTokenService {
 
-    private static final String ROLE_APP = "ROLE_APP";
-
     private final ExternalApiAuthProperties properties;
     private final SecretKeyPolicy secretKeyPolicy;
 
@@ -142,7 +140,6 @@ public class ExternalApiTokenService {
 
         public List<org.springframework.security.core.authority.SimpleGrantedAuthority> toAuthorities() {
             List<org.springframework.security.core.authority.SimpleGrantedAuthority> grantedAuthorities = new ArrayList<>();
-            grantedAuthorities.add(new org.springframework.security.core.authority.SimpleGrantedAuthority(ROLE_APP));
             if (scopes != null) {
                 scopes.stream()
                         .filter(scope -> scope != null && !scope.isBlank())

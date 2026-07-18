@@ -277,15 +277,11 @@ public class AuthController {
         } else {
             roleCodes = Collections.emptySet();
         }
-        if (roleCodes.isEmpty()) {
-            list.add(new SimpleGrantedAuthority("ROLE_USER"));
-        } else {
-            for (String r : roleCodes) {
-                if (StringUtils.hasText(r)) {
-                    String role = r.trim();
-                    if (!role.startsWith("ROLE_")) role = "ROLE_" + role;
-                    list.add(new SimpleGrantedAuthority(role));
-                }
+        for (String r : roleCodes) {
+            if (StringUtils.hasText(r)) {
+                String role = r.trim();
+                if (!role.startsWith("ROLE_")) role = "ROLE_" + role;
+                list.add(new SimpleGrantedAuthority(role));
             }
         }
         return list;

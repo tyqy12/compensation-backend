@@ -487,6 +487,7 @@ class ApprovalEngineTest {
                 .stepNo(1)
                 .stepName("部门负责人审批")
                 .role("ROLE_MANAGER")
+                .approverType("EMPLOYEE_MANAGER")
                 .optional(false)
                 .build();
         when(sysConfigService.getString(any(), any())).thenReturn(null);
@@ -529,6 +530,7 @@ class ApprovalEngineTest {
                 .stepNo(1)
                 .stepName("部门负责人审批")
                 .role("ROLE_MANAGER")
+                .approverType("EMPLOYEE_MANAGER")
                 .optional(false)
                 .build();
         when(sysConfigService.getString(any(), any())).thenReturn(null);

@@ -43,21 +43,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final SysUserService sysUserService;
 
     @Override
-    protected boolean shouldNotFilter(HttpServletRequest request) {
-        String uri = getApplicationPath(request);
-        return isPathOrChild(uri, "/openapi")
-                || isPathOrChild(uri, "/v1/payroll")
-                || isPathOrChild(uri, "/v1/payslips")
-                || uri.equals("/v1/ping")
-                || uri.equals("/v1/oauth/token")
-                || uri.equals("/api/v1/oauth/token");
-    }
-
-    private boolean isPathOrChild(String uri, String path) {
-        return uri.equals(path) || uri.startsWith(path + "/");
-    }
-
-    @Override
     protected void doFilterInternal(HttpServletRequest request,
                                     HttpServletResponse response,
                                     FilterChain filterChain) throws ServletException, IOException {
@@ -95,8 +80,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                             })
                             .collect(Collectors.toList());
                 } else {
-                    // 如果没有角色，授予默认 USER 角色
-                    grantedAuthorities = List.of(new SimpleGrantedAuthority("ROLE_USER"));
+                    // 没有角色时不生成任何角色权限，最终决策由数据库授权关系决定。
+                    grantedAuthorities = List.of();
                 }
 
                 log.debug("JwtAuthenticationFilter: user={}, authorities={} (from DB)", username, grantedAuthorities);
@@ -131,12 +116,4 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         return null;
     }
 
-    private String getApplicationPath(HttpServletRequest request) {
-        String uri = request.getRequestURI();
-        String contextPath = request.getContextPath();
-        if (StringUtils.hasText(contextPath) && uri.startsWith(contextPath + "/")) {
-            return uri.substring(contextPath.length());
-        }
-        return uri;
-    }
 }

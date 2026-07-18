@@ -41,21 +41,21 @@ class UserResourceServiceImplTest {
     }
 
     @Test
-    void getUserResourcesShouldParseLegacyListToStringActions() {
+    void getUserResourcesShouldReadActionsFromDatabasePermissionTable() {
         SysUserResourceMapper userResourceMapper = mock(SysUserResourceMapper.class);
-        SysUserResource resource = new SysUserResource();
-        resource.setUserId(10L);
-        resource.setResourceId(20L);
-        resource.setActionsJson("[read, write]");
-
-        when(userResourceMapper.selectList(any(LambdaQueryWrapper.class))).thenReturn(List.of(resource));
+        com.yiyundao.compensation.security.DatabasePermissionService permissionService =
+                mock(com.yiyundao.compensation.security.DatabasePermissionService.class);
+        when(permissionService.getUserDirectActionCodes(10L))
+                .thenReturn(Map.of(20L, Set.of("read", "write")));
 
         UserResourceServiceImpl service = new UserResourceServiceImpl(
                 userResourceMapper,
                 mock(SysResourceMapper.class),
                 mock(SysUserService.class),
                 mock(ResourceCacheService.class),
-                new ObjectMapper()
+                new ObjectMapper(),
+                mock(com.yiyundao.compensation.security.DatabasePermissionAssignmentService.class),
+                permissionService
         );
 
         Map<Long, Set<String>> result = service.getUserResources(10L);
@@ -74,7 +74,9 @@ class UserResourceServiceImplTest {
                 resourceMapper,
                 sysUserService,
                 resourceCacheService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                mock(com.yiyundao.compensation.security.DatabasePermissionAssignmentService.class),
+                mock(com.yiyundao.compensation.security.DatabasePermissionService.class)
         );
         when(sysUserService.getById(10L)).thenReturn(user(10L));
         when(resourceMapper.selectBatchIds(List.of(20L, 21L))).thenReturn(List.of(
@@ -110,7 +112,9 @@ class UserResourceServiceImplTest {
                 resourceMapper,
                 sysUserService,
                 mock(ResourceCacheService.class),
-                new ObjectMapper()
+                new ObjectMapper(),
+                mock(com.yiyundao.compensation.security.DatabasePermissionAssignmentService.class),
+                mock(com.yiyundao.compensation.security.DatabasePermissionService.class)
         );
 
         assertThatThrownBy(() -> service.assignResources(10L, List.of(20L), Map.of(), 100L))
@@ -134,7 +138,9 @@ class UserResourceServiceImplTest {
                 resourceMapper,
                 sysUserService,
                 mock(ResourceCacheService.class),
-                new ObjectMapper()
+                new ObjectMapper(),
+                mock(com.yiyundao.compensation.security.DatabasePermissionAssignmentService.class),
+                mock(com.yiyundao.compensation.security.DatabasePermissionService.class)
         );
         when(sysUserService.getById(10L)).thenReturn(user(10L));
         when(resourceMapper.selectBatchIds(List.of(20L, 21L))).thenReturn(List.of(resource(20L, "enabled")));
@@ -159,7 +165,9 @@ class UserResourceServiceImplTest {
                 mock(SysResourceMapper.class),
                 sysUserService,
                 resourceCacheService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                mock(com.yiyundao.compensation.security.DatabasePermissionAssignmentService.class),
+                mock(com.yiyundao.compensation.security.DatabasePermissionService.class)
         );
         when(sysUserService.getById(10L)).thenReturn(user(10L));
 

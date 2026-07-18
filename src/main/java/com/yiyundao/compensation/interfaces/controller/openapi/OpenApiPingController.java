@@ -19,7 +19,7 @@ public class OpenApiPingController {
     private final ExternalApiContext externalApiContext;
 
     @GetMapping("/ping")
-    @PreAuthorize("hasAuthority('ROLE_APP')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     public ApiResponse<Map<String, Object>> ping() {
         Map<String, Object> payload = new HashMap<>();
         payload.put("status", "ok");
@@ -33,4 +33,3 @@ public class OpenApiPingController {
         return ApiResponse.success(payload);
     }
 }
-

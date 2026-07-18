@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
@@ -19,6 +20,9 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -28,6 +32,8 @@ class AppRegistryServiceImplTest {
 
     @Mock
     private AppRegistryMapper appRegistryMapper;
+    @Mock
+    private JdbcTemplate jdbcTemplate;
 
     private PasswordEncoder passwordEncoder;
     private ObjectMapper objectMapper;
@@ -38,8 +44,13 @@ class AppRegistryServiceImplTest {
     void setUp() {
         passwordEncoder = new BCryptPasswordEncoder();
         objectMapper = new ObjectMapper();
-        service = new AppRegistryServiceImpl(passwordEncoder, objectMapper);
+        service = new AppRegistryServiceImpl(passwordEncoder, objectMapper, jdbcTemplate);
         ReflectionTestUtils.setField(service, "baseMapper", appRegistryMapper);
+        lenient().when(jdbcTemplate.queryForObject(anyString(), eq(Integer.class), any(Object[].class)))
+                .thenAnswer(invocation -> {
+                    String scope = invocation.getArgument(2, String.class);
+                    return "payroll:read".equals(scope) || "payslip:read".equals(scope) ? 1 : 0;
+                });
     }
 
     @Test

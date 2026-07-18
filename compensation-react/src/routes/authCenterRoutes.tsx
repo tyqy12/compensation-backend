@@ -53,7 +53,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><UserList /></Suspense>,
     meta: {
       title: '用户授权',
-      roles: ['ADMIN'],
     },
   },
   {
@@ -61,7 +60,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><UserRoleAssign /></Suspense>,
     meta: {
       title: '分配角色',
-      roles: ['ADMIN'],
     },
   },
   {
@@ -69,7 +67,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><UserPermissionConfig /></Suspense>,
     meta: {
       title: '配置权限',
-      roles: ['ADMIN'],
     },
   },
   {
@@ -77,7 +74,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><UserPermissionView /></Suspense>,
     meta: {
       title: '查看权限',
-      roles: ['ADMIN'],
     },
   },
 
@@ -87,7 +83,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><RoleList /></Suspense>,
     meta: {
       title: '角色管理',
-      roles: ['ADMIN'],
     },
   },
   {
@@ -95,7 +90,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><RoleEdit /></Suspense>,
     meta: {
       title: '新建角色',
-      roles: ['ADMIN'],
     },
   },
   {
@@ -103,7 +97,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><RoleEdit /></Suspense>,
     meta: {
       title: '编辑角色',
-      roles: ['ADMIN'],
     },
   },
   {
@@ -111,7 +104,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><RolePermissionConfig /></Suspense>,
     meta: {
       title: '角色权限配置',
-      roles: ['ADMIN'],
     },
   },
   {
@@ -119,7 +111,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><RoleMembers /></Suspense>,
     meta: {
       title: '角色成员',
-      roles: ['ADMIN'],
     },
   },
 
@@ -129,7 +120,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><ResourceList /></Suspense>,
     meta: {
       title: '资源管理',
-      roles: ['ADMIN'],
     },
   },
   {
@@ -137,7 +127,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><ResourceEdit /></Suspense>,
     meta: {
       title: '新建资源',
-      roles: ['ADMIN'],
     },
   },
   {
@@ -145,7 +134,6 @@ export const authCenterRoutes = [
     element: <Suspense fallback={<Loading />}><ResourceEdit /></Suspense>,
     meta: {
       title: '编辑资源',
-      roles: ['ADMIN'],
     },
   },
 ];
@@ -193,7 +181,7 @@ export const AUTH_CENTER_PATHS = {
  *       // 授权中心路由（新架构）
  *       ...authCenterRoutes.map(route => ({
  *         ...route,
- *         element: withGuard(route.element, route.meta.roles)
+ *         element: withGuard(route.element)
  *       })),
  *     ],
  *   },

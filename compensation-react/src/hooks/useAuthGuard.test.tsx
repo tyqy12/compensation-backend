@@ -4,6 +4,17 @@ import { Provider } from 'react-redux';
 import { store } from '../services/stores/authSlice';
 import { useAuthGuard } from './useAuthGuard';
 import { login } from '../services/stores/authSlice';
+import { vi } from 'vitest';
+
+vi.mock('@hooks/usePermission', () => ({
+  usePermission: () => ({
+    isLoading: false,
+    error: null,
+    checkPermission: () => false,
+    hasAnyPermission: () => false,
+    hasAllPermissions: () => false,
+  }),
+}));
 
 // 测试包装器
 const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -21,8 +32,8 @@ describe('useAuthGuard hook', () => {
 
     expect(result.current.isAuthenticated).toBe(false);
     expect(result.current.user).toBeNull();
-    expect(result.current.hasRole('admin')).toBe(false);
-    expect(result.current.hasAnyRole(['admin', 'user'])).toBe(false);
+    expect(result.current.checkPermission('admin', 'read')).toBe(false);
+    expect(result.current.hasAnyPermission([{ resourceCode: 'admin', action: 'read' }])).toBe(false);
   });
 
   it('应该正确处理认证状态', () => {
@@ -38,9 +49,7 @@ describe('useAuthGuard hook', () => {
 
     expect(result.current.isAuthenticated).toBe(true);
     expect(result.current.user).toEqual(mockUser);
-    expect(result.current.hasRole('admin')).toBe(true);
-    expect(result.current.hasRole('guest')).toBe(false);
-    expect(result.current.hasAnyRole(['admin', 'guest'])).toBe(true);
-    expect(result.current.hasAnyRole(['guest', 'visitor'])).toBe(false);
+    expect(result.current.checkPermission('admin', 'read')).toBe(false);
+    expect(result.current.hasAnyPermission([{ resourceCode: 'admin', action: 'read' }])).toBe(false);
   });
 });

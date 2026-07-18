@@ -25,13 +25,12 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollSettlementIntegrityService;
 import com.yiyundao.compensation.modules.payroll.support.PayrollPaymentEligibilitySupport;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
-import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
 import com.yiyundao.compensation.enums.WorkflowType;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.enums.PayrollCalculationStatus;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -50,7 +49,7 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
     private final SysUserService sysUserService;
     private final PayrollLineService payrollLineService;
     private final PayrollPaymentService payrollPaymentService;
-    private final UserRoleService userRoleService;
+    private final DatabasePermissionService databasePermissionService;
     private final AuditLogService auditLogService;
     private final PayrollValidationIssueSupport validationIssueSupport;
     private final PayrollConfirmationAggregateService confirmationAggregateService;
@@ -134,7 +133,7 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
         SysUser currentUser = requireCurrentUser();
         Long initiatorId = currentUser.getId();
 
-        if (hasAdminRole(currentUser)) {
+        if (databasePermissionService.hasCurrentRequestScope(currentUser.getId(), "ALL")) {
             log.info("Admin user bypass approval, batch={}, username={}", batchId,
                     currentUser != null ? currentUser.getUsername() : "unknown");
             recordAdminBypassAudit(currentUser, b, "APPROVAL_BYPASS");
@@ -291,14 +290,6 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
             throw new BusinessException(ErrorCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         return currentUser;
-    }
-
-    private boolean hasAdminRole(SysUser user) {
-        if (user == null) {
-            return false;
-        }
-        // 使用 UserRoleService 检查角色（带缓存）
-        return userRoleService.hasRole(user.getId(), SecurityConstants.ROLE_ADMIN);
     }
 
     private boolean isReadyForApproval(PayrollBatch batch) {

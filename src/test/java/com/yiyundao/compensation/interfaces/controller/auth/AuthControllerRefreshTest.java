@@ -154,7 +154,7 @@ class AuthControllerRefreshTest {
         assertThat(response.getData().getToken()).isEqualTo("new-access");
         assertThat(response.getData().getRefreshToken()).isEqualTo("new-refresh");
         assertThat(response.getData().getUsername()).isEqualTo("alice");
-        assertThat(response.getData().getRoles()).containsExactly("ROLE_USER");
+        assertThat(response.getData().getRoles()).isEmpty();
         verify(authTokenService).consumeRefreshToken("old-refresh");
         verify(authTokenService, never()).getRefreshOwner(anyString());
         verify(authTokenService, never()).deleteRefreshToken("old-refresh");

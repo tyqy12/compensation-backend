@@ -29,10 +29,9 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollConfirmationAggr
 import com.yiyundao.compensation.modules.payroll.service.PayrollConfirmationService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollProcessManager;
-import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -77,7 +76,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
     private final ApprovalEngine approvalEngine;
     private final SysUserService sysUserService;
     private final EmployeeService employeeService;
-    private final UserRoleService userRoleService;
+    private final DatabasePermissionService databasePermissionService;
     private final ObjectMapper objectMapper;
     private final PayrollConfirmationAggregateService confirmationAggregateService;
     private final PayrollProcessManager payrollProcessManager;
@@ -205,7 +204,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
     @Transactional
     public int assignConfirmationAssignee(Long batchId, SysUser currentUser, PayrollConfirmationAssignRequest request) {
         SysUser operator = requireAuthenticated(currentUser);
-        if (!isFinanceOrAdmin(operator)) {
+        if (!hasGlobalScope(operator)) {
             throw new BusinessException(ErrorCode.ACCESS_DENIED, "仅财务或管理员可分配确认负责人");
         }
         if (request == null || request.getAssigneeEmployeeId() == null) {
@@ -617,22 +616,16 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
     }
 
     private boolean canOperateAnyConfirmationLine(SysUser user) {
-        return isFinanceOrAdmin(user);
+        return hasGlobalScope(user);
     }
 
     private boolean canViewAllPendingConfirmations(SysUser user) {
-        return isFinanceOrAdmin(user) || hasRole(user, SecurityConstants.ROLE_HR);
+        return hasGlobalScope(user);
     }
 
-    private boolean isFinanceOrAdmin(SysUser user) {
-        return hasRole(user, SecurityConstants.ROLE_FINANCE) || hasRole(user, SecurityConstants.ROLE_ADMIN);
-    }
-
-    private boolean hasRole(SysUser user, String roleCode) {
-        if (user == null || user.getId() == null || !StringUtils.hasText(roleCode)) {
-            return false;
-        }
-        return userRoleService.hasRole(user.getId(), roleCode);
+    private boolean hasGlobalScope(SysUser user) {
+        return user != null && user.getId() != null
+                && databasePermissionService.hasCurrentRequestScope(user.getId(), "ALL");
     }
 
     private static String sqlStatusCodes(List<PayrollBatchStatus> statuses) {

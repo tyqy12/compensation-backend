@@ -29,6 +29,7 @@ public class ResourceResponseDto {
     @JsonProperty("_children")
     private List<Long> childrenIds;
     private String status;
+    private String accessMode;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 
@@ -50,6 +51,7 @@ public class ResourceResponseDto {
                 .meta(meta)
                 .childrenIds(extractChildrenIds(meta))
                 .status(resource.getStatus())
+                .accessMode(resource.getAccessMode())
                 .createTime(resource.getCreateTime())
                 .updateTime(resource.getUpdateTime())
                 .build();

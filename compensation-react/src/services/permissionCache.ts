@@ -15,8 +15,8 @@ const CACHE_KEYS = {
 };
 
 const CACHE_TTL = {
-  MEMORY: 5 * 60 * 1000, // 5分钟内存缓存
-  SESSION: 30 * 60 * 1000, // 30分钟会话缓存
+  MEMORY: 0,
+  SESSION: 0,
 };
 
 /**
@@ -84,14 +84,6 @@ export class PermissionCacheService {
     } catch (error) {
       console.error('Failed to fetch permission config:', error);
 
-      // 降级：使用会话缓存（即使过期）
-      if (sessionCached) {
-        try {
-          return JSON.parse(sessionCached).data;
-        } catch {
-          return null;
-        }
-      }
       return null;
     }
   }
@@ -120,12 +112,6 @@ export class PermissionCacheService {
    * 获取权限版本
    */
   async getVersion(): Promise<number> {
-    // 先检查缓存
-    const cached = sessionStorage.getItem(CACHE_KEYS.VERSION);
-    if (cached) {
-      return parseInt(cached, 10);
-    }
-
     // 从服务器获取
     try {
       const config = await this.getConfig();

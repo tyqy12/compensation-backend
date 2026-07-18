@@ -24,6 +24,7 @@ public class ResourceDto {
     private Integer orderNum;
     private Map<String, Object> meta; // propsJson 解析后
     private String status;     // enabled/disabled
+    private String accessMode; // PUBLIC/USER/EXTERNAL
 
     public static ResourceDto from(SysResource r, ObjectMapper om) {
         ResourceDto dto = new ResourceDto();
@@ -37,6 +38,7 @@ public class ResourceDto {
         dto.setParentId(r.getParentId());
         dto.setOrderNum(r.getOrderNum());
         dto.setStatus(r.getStatus());
+        dto.setAccessMode(r.getAccessMode());
         if (StringUtils.hasText(r.getPropsJson())) {
             try {
                 dto.setMeta(om.readValue(r.getPropsJson(), new TypeReference<>() {}));
@@ -57,6 +59,7 @@ public class ResourceDto {
         r.setParentId(getParentId());
         r.setOrderNum(getOrderNum());
         r.setStatus(getStatus());
+        r.setAccessMode(getAccessMode());
         if (meta != null && !meta.isEmpty()) {
             try { r.setPropsJson(om.writeValueAsString(meta)); } catch (Exception ignored) {}
         } else {
@@ -82,4 +85,3 @@ public class ResourceDto {
         return null;
     }
 }
-

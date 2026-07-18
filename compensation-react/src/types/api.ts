@@ -420,6 +420,7 @@ export interface SysResource {
   orderNum?: number | null;
   meta?: Record<string, unknown> | null; // 后端返回的 meta 对象（从 props_json 解析）
   status?: 'enabled' | 'disabled' | number | null;
+  accessMode?: 'PUBLIC' | 'USER' | 'EXTERNAL' | string | null;
   _children?: number[]; // 子资源ID列表（树结构中）
 }
 

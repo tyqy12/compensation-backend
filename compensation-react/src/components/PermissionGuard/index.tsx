@@ -227,79 +227,10 @@ export function PageGuard({
   return <>{children}</>;
 }
 
-// ==================== 角色守卫组件 ====================
-
-/**
- * 角色守卫组件属性
- */
-interface RoleGuardProps {
-  /** 必需的角色列表 */
-  roles: string[];
-  /** 无权限时显示的内容 */
-  fallback?: React.ReactNode;
-  /** 是否显示 403 页面 */
-  showForbidden?: boolean;
-  /** 子组件 */
-  children: React.ReactNode;
-}
-
-/**
- * 角色守卫组件
- * 检查用户是否拥有指定角色之一
- *
- * @example
- * ```tsx
- * <RoleGuard roles={['admin', 'manager']}>
- *   <AdminPanel />
- * </RoleGuard>
- * ```
- */
-export function RoleGuard({
-  roles,
-  fallback = null,
-  showForbidden = false,
-  children,
-}: RoleGuardProps) {
-  const { isLoading } = usePermission();
-
-  // 获取用户角色（从 auth store）
-  const userRoles = React.useMemo(() => {
-    try {
-      const authState = localStorage.getItem('auth-storage');
-      if (authState) {
-        const parsed = JSON.parse(authState);
-        return parsed?.state?.auth?.user?.roles || [];
-      }
-    } catch {
-      // 忽略解析错误
-    }
-    return [];
-  }, []);
-
-  const hasRole = React.useMemo(() => {
-    if (!roles || roles.length === 0) return true;
-    return roles.some((role) => userRoles.includes(role));
-  }, [roles, userRoles]);
-
-  if (isLoading) {
-    return <Spin size="small" />;
-  }
-
-  if (!hasRole) {
-    if (showForbidden) {
-      return <ForbiddenPage />;
-    }
-    return <>{fallback}</>;
-  }
-
-  return <>{children}</>;
-}
-
 // ==================== 导出 ====================
 
 export default {
   PermissionGuard,
   ButtonGuard,
   PageGuard,
-  RoleGuard,
 };

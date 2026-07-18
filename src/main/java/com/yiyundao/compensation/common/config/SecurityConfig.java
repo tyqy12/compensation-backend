@@ -3,7 +3,6 @@ package com.yiyundao.compensation.common.config;
 import com.yiyundao.compensation.security.ApiResourceAuthorizationFilter;
 import com.yiyundao.compensation.security.ExternalApiAuthenticationFilter;
 import com.yiyundao.compensation.security.JwtAuthenticationFilter;
-import com.yiyundao.compensation.security.SecurityConstants;
 import com.yiyundao.compensation.common.handler.GlobalResponseHandler;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
@@ -19,8 +18,6 @@ import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.slf4j.MDC;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.core.annotation.Order;
-import org.springframework.core.env.Environment;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -34,13 +31,12 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 
 import java.io.IOException;
 import java.time.LocalDateTime;
-import java.util.Arrays;
 import java.util.UUID;
 
 /**
  * Spring Security 配置类
  * <p>
- * 集中管理所有安全配置，使用 SecurityConstants 消除硬编码
+ * 集中管理认证管线。具体资源和操作权限由数据库权限决策服务负责。
  * </p>
  *
  * @author 芙宁娜
@@ -54,37 +50,7 @@ public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final ExternalApiAuthenticationFilter externalApiAuthenticationFilter;
-    private final com.yiyundao.compensation.infrastructure.dao.SysResourceMapper sysResourceMapper;
-    private final com.yiyundao.compensation.infrastructure.dao.SysUserMapper sysUserMapper;
-    private final com.yiyundao.compensation.modules.rbac.service.ResourceService resourceService;
-    private final com.yiyundao.compensation.modules.rbac.service.UserRoleService userRoleService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
-    private final Environment environment;
-
-    // ==================== 公共路径配置 ====================
-
-    /**
-     * 获取所有公共路径模式
-     */
-    private String[] getPublicPatterns() {
-        java.util.List<String> patterns = new java.util.ArrayList<>();
-        if (!isProdLikeProfile()) {
-            java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_OPENAPI_DOCS);
-            java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_AUTH_DEV_ONLY);
-        }
-        java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_HEALTH);
-        java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_AUTH_PUBLIC);
-        java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_PAYMENT_NOTIFY);
-        java.util.Collections.addAll(patterns, SecurityConstants.PATTERNS_EXTERNAL_OAUTH_PUBLIC);
-        return patterns.toArray(new String[0]);
-    }
-
-    private boolean isProdLikeProfile() {
-        return Arrays.stream(environment.getActiveProfiles())
-                .anyMatch(profile -> "prod".equalsIgnoreCase(profile)
-                        || "production".equalsIgnoreCase(profile)
-                        || "staging".equalsIgnoreCase(profile));
-    }
 
     // ==================== CORS 过滤器 ====================
 
@@ -124,10 +90,9 @@ public class SecurityConfig {
     // ==================== API 资源授权过滤器 ====================
 
     @Bean
-    public ApiResourceAuthorizationFilter apiResourceAuthorizationFilter() {
-        return new ApiResourceAuthorizationFilter(
-                sysResourceMapper, sysUserMapper, resourceService, userRoleService, objectMapper
-        );
+    public ApiResourceAuthorizationFilter apiResourceAuthorizationFilter(
+            com.yiyundao.compensation.security.DatabasePermissionService permissionService) {
+        return new ApiResourceAuthorizationFilter(permissionService, objectMapper);
     }
 
     @Bean
@@ -138,82 +103,22 @@ public class SecurityConfig {
         return registration;
     }
 
-    // ==================== FilterChain 配置 ====================
+    // ==================== 唯一 FilterChain ====================
 
     /**
-     * 公共资源 FilterChain - 无需认证即可访问
+     * Spring Security 只负责认证和异常出口；是否公开、哪个应用可访问、用户具有什么操作，
+     * 全部交给数据库权限过滤器。
      */
     @Bean
-    @Order(1)
-    public SecurityFilterChain publicFilterChain(HttpSecurity http) throws Exception {
-        http.securityMatcher(getPublicPatterns())
-                .csrf(AbstractHttpConfigurer::disable)
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
-                .addFilterBefore(corsFilter(), UsernamePasswordAuthenticationFilter.class);
-        return http.build();
-    }
-
-    /**
-     * OpenAPI FilterChain - 使用外部API认证
-     */
-    @Bean
-    @Order(2)
-    public SecurityFilterChain openApiFilterChain(HttpSecurity http) throws Exception {
-        http.securityMatcher("/openapi/**", "/v1/payroll/**", "/v1/payslips", "/v1/payslips/**", "/v1/ping")
-                .csrf(AbstractHttpConfigurer::disable)
-                .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers("/v1/payroll/**")
-                                .hasAuthority(SecurityConstants.SCOPE_PAYROLL_READ)
-                        .requestMatchers("/v1/payslips")
-                                .hasAuthority(SecurityConstants.SCOPE_PAYSLIP_READ)
-                        .requestMatchers("/v1/payslips/**")
-                                .hasAuthority(SecurityConstants.SCOPE_PAYSLIP_READ)
-                        .requestMatchers("/v1/ping")
-                                .hasAuthority(SecurityConstants.ROLE_APP)
-                        .anyRequest().authenticated()
-                )
-                .exceptionHandling(ex -> ex
-                        .authenticationEntryPoint(restAuthenticationEntryPoint())
-                        .accessDeniedHandler(restAccessDeniedHandler())
-                )
-                .addFilterBefore(corsFilter(), UsernamePasswordAuthenticationFilter.class)
-                .addFilterBefore(externalApiAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
-        return http.build();
-    }
-
-    /**
-     * API FilterChain - 主业务接口
-     */
-    @Bean
-    @Order(3)
-    public SecurityFilterChain apiFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http,
+                                                   ApiResourceAuthorizationFilter apiResourceAuthorizationFilter)
+            throws Exception {
         http.securityMatcher("/**")
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(org.springframework.http.HttpMethod.OPTIONS, "/**").permitAll()
-                        .requestMatchers(SecurityConstants.PATTERNS_OPENAPI_DOCS)
-                                .hasRole(removeRolePrefix(SecurityConstants.ROLE_ADMIN))
-                        .requestMatchers("/auth/logout").authenticated()
-                        // 使用常量消除硬编码
-                        .requestMatchers(SecurityConstants.PATTERN_SYSTEM_INTEGRATION)
-                                .hasRole(removeRolePrefix(SecurityConstants.ROLE_ADMIN))
-                        .requestMatchers(org.springframework.http.HttpMethod.PUT, "/admin/users/*/resources")
-                                .hasAnyRole(
-                                        removeRolePrefix(SecurityConstants.ROLE_ADMIN),
-                                        removeRolePrefix(SecurityConstants.ROLE_MANAGER)
-                                )
-                        .requestMatchers(SecurityConstants.PATTERN_ADMIN)
-                                .hasRole(removeRolePrefix(SecurityConstants.ROLE_ADMIN))
-                        .requestMatchers(SecurityConstants.PATTERN_MANAGER)
-                                .hasAnyRole(
-                                        removeRolePrefix(SecurityConstants.ROLE_ADMIN),
-                                        removeRolePrefix(SecurityConstants.ROLE_MANAGER)
-                                )
-                        .anyRequest().authenticated()
+                        .anyRequest().permitAll()
                 )
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(restAuthenticationEntryPoint())
@@ -222,18 +127,8 @@ public class SecurityConfig {
                 .addFilterBefore(corsFilter(), UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(externalApiAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterAfter(apiResourceAuthorizationFilter(), JwtAuthenticationFilter.class);
+                .addFilterAfter(apiResourceAuthorizationFilter, JwtAuthenticationFilter.class);
         return http.build();
-    }
-
-    /**
-     * 移除 ROLE_ 前缀（Spring Security hasRole 要求）
-     */
-    private String removeRolePrefix(String role) {
-        if (role != null && role.startsWith("ROLE_")) {
-            return role.substring(5);
-        }
-        return role;
     }
 
     @Bean

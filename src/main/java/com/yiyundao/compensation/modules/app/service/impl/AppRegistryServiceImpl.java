@@ -11,6 +11,7 @@ import com.yiyundao.compensation.modules.app.service.AppRegistryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
@@ -21,7 +22,6 @@ import java.util.Base64;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -34,11 +34,7 @@ public class AppRegistryServiceImpl extends ServiceImpl<AppRegistryMapper, AppRe
     private final PasswordEncoder passwordEncoder;
     private final ObjectMapper objectMapper;
     private final SecureRandom secureRandom = new SecureRandom();
-    private static final Map<String, String> SCOPE_ALIASES = Map.of(
-            "payroll.read", "payroll:read",
-            "payslip.read", "payslip:read"
-    );
-    private static final Set<String> SUPPORTED_SCOPES = Set.of("payroll:read", "payslip:read");
+    private final JdbcTemplate jdbcTemplate;
 
     @Override
     public RegisteredClient register(AppRegistryCreateCommand cmd) {
@@ -154,7 +150,7 @@ public class AppRegistryServiceImpl extends ServiceImpl<AppRegistryMapper, AppRe
         for (String p : parts) {
             if (StringUtils.hasText(p)) {
                 String normalized = normalizeScope(p.trim());
-                if (normalized != null && SUPPORTED_SCOPES.contains(normalized)) {
+                if (normalized != null && isRegisteredExternalScope(normalized)) {
                     unique.add(normalized);
                 }
             }
@@ -201,7 +197,7 @@ public class AppRegistryServiceImpl extends ServiceImpl<AppRegistryMapper, AppRe
             if (!StringUtils.hasText(normalized)) {
                 continue;
             }
-            if (!SUPPORTED_SCOPES.contains(normalized)) {
+            if (!isRegisteredExternalScope(normalized)) {
                 throw new IllegalArgumentException("不支持的 scope: " + scope);
             }
             normalizedScopes.add(normalized);
@@ -216,8 +212,40 @@ public class AppRegistryServiceImpl extends ServiceImpl<AppRegistryMapper, AppRe
         if (!StringUtils.hasText(scope)) {
             return null;
         }
-        String trimmed = scope.trim();
-        return SCOPE_ALIASES.getOrDefault(trimmed, trimmed);
+        String normalized = scope.trim();
+        if (normalized.indexOf(':') < 0) {
+            int separator = normalized.lastIndexOf('.');
+            if (separator > 0 && separator < normalized.length() - 1) {
+                return normalized.substring(0, separator) + ":" + normalized.substring(separator + 1);
+            }
+        }
+        return normalized;
+    }
+
+    /**
+     * 外部应用可申请的 scope 来自权限操作目录，而不是代码中的业务白名单。
+     * 只有绑定到 EXTERNAL API 资源且配置了 authority 的操作才可作为 OAuth scope。
+     */
+    private boolean isRegisteredExternalScope(String scope) {
+        if (jdbcTemplate == null) {
+            return false;
+        }
+        try {
+            Integer count = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM sys_permission_action a "
+                            + "JOIN sys_resource_action ra ON ra.action_id=a.id "
+                            + "JOIN sys_resource r ON r.id=ra.resource_id "
+                            + "WHERE a.code=? AND a.status='enabled' AND a.deleted=0 "
+                            + "AND a.authority IS NOT NULL AND a.authority<>'' "
+                            + "AND ra.status='enabled' AND ra.deleted=0 "
+                            + "AND r.type='API' AND r.access_mode='EXTERNAL' "
+                            + "AND r.status='enabled' AND r.deleted=0",
+                    Integer.class, scope);
+            return count != null && count > 0;
+        } catch (Exception e) {
+            log.error("读取外部 scope 操作目录失败，拒绝 scope: {}", scope, e);
+            return false;
+        }
     }
 
     private String writeIpWhitelist(List<String> ipList) {

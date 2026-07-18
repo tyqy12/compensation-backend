@@ -22,6 +22,7 @@ public class SysResource extends BaseEntity {
     private Integer orderNum;     // 排序
     @TableField("props_json")
     private String propsJson;     // 扩展
+    @TableField("access_mode")
+    private String accessMode;    // PUBLIC/USER/EXTERNAL
     private String status;        // enabled/disabled
 }
-

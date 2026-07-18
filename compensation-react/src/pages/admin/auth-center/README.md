@@ -65,16 +65,16 @@ export const router = createBrowserRouter([
     children: [
       // ... 现有路由
 
-      // 授权中心路由（新架构）
+      // 授权中心路由（组件可以静态注册，访问权由服务端资源授权决定）
       ...authCenterRoutes.map(route => ({
         ...route,
-        element: withGuard(route.element, route.meta.roles)
+        element: withGuard(route.element)
       })),
 
-      // 保留旧的授权中心路由用于兼容
+      // 旧授权中心路由不再作为权限入口保留
       {
         path: 'admin/auth-center',
-        element: withGuard(<Suspense fallback={<Loading />}><AuthCenterPage /></Suspense>, ['ADMIN']),
+        element: <Navigate to="/admin/auth-center/users" replace />,
       },
     ],
   },
@@ -83,32 +83,7 @@ export const router = createBrowserRouter([
 
 ### 2. 更新导航菜单
 
-在菜单配置中添加新的授权中心菜单项：
-
-```typescript
-{
-  key: 'auth-center',
-  label: '授权中心',
-  icon: <SafetyCertificateOutlined />,
-  children: [
-    {
-      key: 'users',
-      label: '用户授权',
-      path: '/admin/auth-center/users',
-    },
-    {
-      key: 'roles',
-      label: '角色管理',
-      path: '/admin/auth-center/roles',
-    },
-    {
-      key: 'resources',
-      label: '资源管理',
-      path: '/admin/auth-center/resources',
-    },
-  ],
-}
-```
+菜单不在前端代码中声明。登录后从 `/auth/me/resources` 读取当前用户的 `MENU`/`VIEW` 资源和操作集合，资源的启用状态、层级、路径、组件和隐藏属性均以数据库返回值为准。权限配置变更后按 `permissionVersion` 重新获取资源，不使用角色名作为菜单过滤条件。
 
 ### 3. 使用路径常量
 

@@ -8,30 +8,26 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SecurityAnnotationsTest {
 
     @Test
-    void orgSyncPermissionShouldNotGrantWriteAccessByManagerRoleAlone() {
+    void legacyAnnotationNamesShouldUseTheDatabaseDecisionEvaluator() {
         PreAuthorize preAuthorize = SecurityAnnotations.HasOrgSyncPermission.class
                 .getAnnotation(PreAuthorize.class);
 
-        assertThat(preAuthorize.value()).contains("hasRole('ADMIN')");
-        assertThat(preAuthorize.value()).contains("hasAuthority('org:sync')");
-        assertThat(preAuthorize.value()).doesNotContain("MANAGER");
+        assertThat(preAuthorize.value()).isEqualTo("@databaseMethodAuthorizationEvaluator.check(authentication)");
     }
 
     @Test
-    void orgReadPermissionMayStillGrantReadAccessToManagers() {
+    void allLegacyAnnotationNamesShouldUseTheSameEvaluator() {
         PreAuthorize preAuthorize = SecurityAnnotations.HasOrgReadPermission.class
                 .getAnnotation(PreAuthorize.class);
 
-        assertThat(preAuthorize.value()).contains("MANAGER");
+        assertThat(preAuthorize.value()).isEqualTo("@databaseMethodAuthorizationEvaluator.check(authentication)");
     }
 
     @Test
-    void orgAdminReadPermissionShouldNotGrantAccessByManagerRoleAlone() {
+    void adminReadAnnotationShouldNotContainAStaticRoleRule() {
         PreAuthorize preAuthorize = SecurityAnnotations.HasOrgAdminReadPermission.class
                 .getAnnotation(PreAuthorize.class);
 
-        assertThat(preAuthorize.value()).contains("hasRole('ADMIN')");
-        assertThat(preAuthorize.value()).contains("hasAuthority('org:read')");
-        assertThat(preAuthorize.value()).doesNotContain("MANAGER");
+        assertThat(preAuthorize.value()).isEqualTo("@databaseMethodAuthorizationEvaluator.check(authentication)");
     }
 }

@@ -18,7 +18,7 @@ import com.yiyundao.compensation.modules.rbac.service.UserResourceService;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.security.SecurityAnnotations;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import jakarta.validation.Valid;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -44,16 +44,26 @@ public class AdminUserAuthorizationController {
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final UserRoleService userRoleService;
     private final UserResourceService userResourceService;
+    private final DatabasePermissionService databasePermissionService;
 
     // 用户已授权资源（个性化权限）
     @GetMapping("/users/{id}/resources")
     @SecurityAnnotations.IsAdmin
     public ApiResponse<List<UserResourceResponseDto>> userResources(@PathVariable Long id) {
-        List<SysUserResource> list = userResourceMapper.selectList(new LambdaQueryWrapper<SysUserResource>()
-                .eq(SysUserResource::getUserId, id));
-        return ApiResponse.success(list.stream()
-                .map(resource -> UserResourceResponseDto.from(resource, objectMapper))
-                .toList());
+        Map<Long, Set<String>> directPermissions = databasePermissionService.getUserDirectActionCodes(id);
+        List<UserResourceResponseDto> result = directPermissions.entrySet().stream()
+                .map(entry -> {
+                    List<String> actions = entry.getValue().stream().sorted().toList();
+                    return UserResourceResponseDto.builder()
+                            .userId(id)
+                            .resourceId(entry.getKey())
+                            .actions(actions)
+                            .actionsJson(writeActions(actions))
+                            .inheritFromRole(false)
+                            .build();
+                })
+                .toList();
+        return ApiResponse.success(result);
     }
 
     /**
@@ -65,44 +75,9 @@ public class AdminUserAuthorizationController {
     @GetMapping("/users/{id}/aggregate-resources")
     @SecurityAnnotations.IsAdmin
     public ApiResponse<List<AggregateResourceItem>> userAggregateResources(@PathVariable Long id) {
-        // 1. 查询用户的所有角色
-        List<SysUserRole> userRoles = userRoleMapper.selectList(
-                new LambdaQueryWrapper<SysUserRole>()
-                        .eq(SysUserRole::getUserId, id));
-
-        Set<Long> roleIds = userRoles.stream()
-                .map(SysUserRole::getRoleId)
-                .collect(Collectors.toSet());
-
-        // 2. 查询所有角色的资源权限
-        Map<Long, Set<String>> resourceActionsMap = new HashMap<>();
-
-        if (!roleIds.isEmpty()) {
-            List<SysRoleResource> roleResources = roleResourceMapper.selectList(
-                    new LambdaQueryWrapper<SysRoleResource>()
-                            .in(SysRoleResource::getRoleId, roleIds));
-
-            for (SysRoleResource rr : roleResources) {
-                Long resourceId = rr.getResourceId();
-                Set<String> actions = parseActions(rr.getActionsJson());
-
-                resourceActionsMap.computeIfAbsent(resourceId, k -> new HashSet<>())
-                        .addAll(actions);
-            }
-        }
-
-        // 3. 查询用户的个性化权限（可以覆盖角色权限）
-        List<SysUserResource> userResources = userResourceMapper.selectList(
-                new LambdaQueryWrapper<SysUserResource>()
-                        .eq(SysUserResource::getUserId, id));
-
-        for (SysUserResource ur : userResources) {
-            Long resourceId = ur.getResourceId();
-            Set<String> actions = parseActions(ur.getActionsJson());
-
-            // 个性化权限覆盖角色权限
-            resourceActionsMap.put(resourceId, actions);
-        }
+        Map<Long, Set<String>> resourceActionsMap = databasePermissionService.getUserBundle(id).actions().entrySet()
+                .stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, entry -> new HashSet<>(entry.getValue())));
 
         // 4. 构建返回结果
         List<AggregateResourceItem> result = resourceActionsMap.entrySet().stream()
@@ -111,7 +86,7 @@ public class AdminUserAuthorizationController {
                     item.setUserId(id);
                     item.setResourceId(entry.getKey());
                     item.setActions(new ArrayList<>(entry.getValue()));
-                    item.setActionsJson(formatActionsJson(entry.getValue()));
+            item.setActionsJson(writeActions(entry.getValue().stream().sorted().toList()));
                     return item;
                 })
                 .collect(Collectors.toList());
@@ -119,42 +94,12 @@ public class AdminUserAuthorizationController {
         return ApiResponse.success(result);
     }
 
-    /**
-     * 解析 actions JSON 字符串
-     */
-    private Set<String> parseActions(String actionsJson) {
-        if (actionsJson == null || actionsJson.isBlank()) {
-            return new HashSet<>();
-        }
+    private String writeActions(Collection<String> actions) {
+        if (actions == null || actions.isEmpty()) return null;
         try {
-            // 尝试解析 JSON 数组
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            return new HashSet<>(Arrays.asList(mapper.readValue(actionsJson, String[].class)));
+            return objectMapper.writeValueAsString(actions);
         } catch (Exception e) {
-            // 兼容旧格式：逗号分隔或 [*]
-            String trimmed = actionsJson.trim();
-            if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
-                trimmed = trimmed.substring(1, trimmed.length() - 1);
-            }
-            return Arrays.stream(trimmed.split("[,\\s]+"))
-                    .map(String::trim)
-                    .filter(s -> !s.isEmpty())
-                    .collect(Collectors.toSet());
-        }
-    }
-
-    /**
-     * 格式化 actions 为 JSON 字符串
-     */
-    private String formatActionsJson(Set<String> actions) {
-        if (actions == null || actions.isEmpty()) {
-            return null;
-        }
-        try {
-            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            return mapper.writeValueAsString(new ArrayList<>(actions));
-        } catch (Exception e) {
-            return actions.toString();
+            throw new IllegalStateException("权限操作序列化失败", e);
         }
     }
 
@@ -184,7 +129,8 @@ public class AdminUserAuthorizationController {
             String uname = currentUsername();
             if (uname != null) {
                 SysUser op = sysUserService.findByUsername(uname);
-                if (op != null && op.getId() != null && userRoleService.hasRole(op.getId(), SecurityConstants.ROLE_ADMIN)) {
+                if (op != null && op.getId() != null
+                        && databasePermissionService.hasCurrentRequestScope(op.getId(), "ALL")) {
                     userResourceService.assignResources(id, requestedResourceIds, req.getActions(), op.getId());
                     Map<String, Object> resp = new HashMap<>();
                     resp.put("workflowId", null);
@@ -193,14 +139,13 @@ public class AdminUserAuthorizationController {
             }
 
             // 检查是增加权限还是减少权限
-            List<SysUserResource> prev = userResourceMapper.selectList(new LambdaQueryWrapper<SysUserResource>()
-                    .eq(SysUserResource::getUserId, id));
+            Map<Long, Set<String>> previous = databasePermissionService.getUserDirectActionCodes(id);
 
             // 获取当前的资源ID集合
             Set<Long> currResourceIds = new HashSet<>(requestedResourceIds);
 
             // 判断是否是纯减少权限：资源不能新增，同一资源的 action 也不能扩权。
-            boolean isOnlyReducing = isOnlyReducingUserResources(prev, currResourceIds, req.getActions());
+            boolean isOnlyReducing = isOnlyReducingUserResources(previous, currResourceIds, req.getActions());
 
             // 如果是纯减少权限，直接生效无需审批
             if (isOnlyReducing) {
@@ -220,7 +165,7 @@ public class AdminUserAuthorizationController {
             data.put("userId", id);
             data.put("resourceIds", requestedResourceIds);
             data.put("actions", req.getActions());
-            data.put("snapshotPrev", prev);
+            data.put("snapshotPrev", previous);
             Long wfId = approvalEngine.startWorkflow(
                     com.yiyundao.compensation.enums.WorkflowType.PERMISSION,
                     buildUserResourceGrantBusinessKey(id),
@@ -254,19 +199,10 @@ public class AdminUserAuthorizationController {
                 ));
     }
 
-    private boolean isOnlyReducingUserResources(List<SysUserResource> previous,
+    private boolean isOnlyReducingUserResources(Map<Long, Set<String>> previous,
                                                 Set<Long> currentResourceIds,
                                                 Map<Long, List<String>> requestedActions) {
-        Map<Long, Set<String>> previousActions = previous.stream()
-                .collect(Collectors.toMap(
-                        SysUserResource::getResourceId,
-                        resource -> parseActions(resource.getActionsJson()),
-                        (left, right) -> {
-                            Set<String> merged = new HashSet<>(left);
-                            merged.addAll(right);
-                            return merged;
-                        }
-                ));
+        Map<Long, Set<String>> previousActions = previous == null ? Map.of() : previous;
 
         if (!previousActions.keySet().containsAll(currentResourceIds)) {
             return false;

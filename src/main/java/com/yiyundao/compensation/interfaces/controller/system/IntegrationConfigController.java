@@ -17,7 +17,7 @@ import org.springframework.util.StringUtils;
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/admin/integration-configs")
-@PreAuthorize("hasRole('ADMIN')")
+@PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
 public class IntegrationConfigController {
 
     private final IntegrationConfigService integrationConfigService;

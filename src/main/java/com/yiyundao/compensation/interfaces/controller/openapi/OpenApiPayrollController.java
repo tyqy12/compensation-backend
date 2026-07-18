@@ -29,13 +29,12 @@ public class OpenApiPayrollController {
     private final ExternalApiContext externalApiContext;
 
     @GetMapping("/batches")
-    @PreAuthorize("hasAuthority('SCOPE_payroll:read')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     public ApiResponse<Page<OpenApiPayrollBatchDto>> pageBatches(@RequestParam(value = "type", required = false) String type,
                                                                  @RequestParam(value = "period", required = false) String period,
                                                                  @RequestParam(value = "status", required = false) String status,
                                                                  @RequestParam(value = "page", defaultValue = "1") long page,
                                                                  @RequestParam(value = "size", defaultValue = "20") long size) {
-        ensureScope("payroll:read");
         if (StringUtils.hasText(type) && !PT_TYPE.equalsIgnoreCase(type.trim())) {
             return ApiResponse.error(ErrorCode.PARAM_INVALID, "仅支持 type=part_time");
         }
@@ -44,9 +43,8 @@ public class OpenApiPayrollController {
     }
 
     @GetMapping("/batches/{batchId}")
-    @PreAuthorize("hasAuthority('SCOPE_payroll:read')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     public ApiResponse<OpenApiPayrollBatchDto> getBatch(@PathVariable("batchId") Long batchId) {
-        ensureScope("payroll:read");
         OpenApiPayrollBatchDto dto = externalPayrollQueryService.findBatch(batchId);
         if (dto == null) {
             return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "发薪批次不存在或不属于 PT 范围");
@@ -55,20 +53,13 @@ public class OpenApiPayrollController {
     }
 
     @GetMapping("/batches/{batchId}/lines")
-    @PreAuthorize("hasAuthority('SCOPE_payroll:read')")
+    @PreAuthorize("@databaseMethodAuthorizationEvaluator.check(authentication)")
     public ApiResponse<Page<OpenApiPayrollLineDto>> pageBatchLines(@PathVariable("batchId") Long batchId,
                                                                    @RequestParam(value = "employeeRef", required = false) String employeeRef,
                                                                    @RequestParam(value = "page", defaultValue = "1") long page,
                                                                    @RequestParam(value = "size", defaultValue = "50") long size) {
-        ensureScope("payroll:read");
         Page<OpenApiPayrollLineDto> result = externalPayrollQueryService.pageBatchLines(batchId, employeeRef, page, size);
         return ApiResponse.success(result);
     }
 
-    private void ensureScope(String scope) {
-        ExternalApiContext.ExternalApiClient client = externalApiContext.current();
-        if (client == null || client.getScopes() == null || !client.getScopes().contains(scope)) {
-            throw new org.springframework.security.access.AccessDeniedException("缺少访问范围" + scope);
-        }
-    }
 }

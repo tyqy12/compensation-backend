@@ -19,9 +19,9 @@ import com.yiyundao.compensation.modules.approval.entity.ApprovalWorkflow;
 import com.yiyundao.compensation.modules.approval.service.ApprovalEngine;
 import com.yiyundao.compensation.modules.approval.service.ApprovalStepService;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
-import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
 import com.yiyundao.compensation.modules.user.entity.SysUser;
 import com.yiyundao.compensation.modules.user.service.SysUserService;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,6 +31,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -60,7 +61,7 @@ class ApprovalControllerTest {
     @Mock
     private AuditLogService auditLogService;
     @Mock
-    private UserRoleService userRoleService;
+    private DatabasePermissionService databasePermissionService;
 
     private ApprovalController controller;
     private SysUser manager;
@@ -73,14 +74,13 @@ class ApprovalControllerTest {
                 approvalWorkflowMapper,
                 sysUserService,
                 auditLogService,
-                userRoleService
+                databasePermissionService
         );
         manager = user(20L, "manager");
         SecurityContextHolder.getContext().setAuthentication(
                 new UsernamePasswordAuthenticationToken("manager", "n/a")
         );
         lenient().when(sysUserService.findByUsername("manager")).thenReturn(manager);
-        lenient().when(userRoleService.hasAnyRole(20L, "ROLE_ADMIN", "ROLE_FINANCE")).thenReturn(false);
     }
 
     @AfterEach
@@ -167,7 +167,7 @@ class ApprovalControllerTest {
                 new UsernamePasswordAuthenticationToken("finance", "n/a")
         );
         when(sysUserService.findByUsername("finance")).thenReturn(finance);
-        when(userRoleService.hasAnyRole(40L, "ROLE_ADMIN", "ROLE_FINANCE")).thenReturn(true);
+        when(databasePermissionService.hasCurrentRequestScope(40L, "ALL")).thenReturn(true);
         ApprovalWorkflow workflow = pendingWorkflow(1004L, 10L, 30L);
         when(approvalEngine.getById(1004L)).thenReturn(workflow);
         when(approvalStepService.listByWorkflow(1004L)).thenReturn(List.of(step(1004L, 1, 30L)));
@@ -176,7 +176,7 @@ class ApprovalControllerTest {
 
         assertThat(response.getCode()).isZero();
         assertThat(response.getData().getId()).isEqualTo(1004L);
-        verify(userRoleService).hasAnyRole(40L, "ROLE_ADMIN", "ROLE_FINANCE");
+        verify(databasePermissionService).hasCurrentRequestScope(40L, "ALL");
     }
 
     @Test
@@ -197,7 +197,7 @@ class ApprovalControllerTest {
                 new UsernamePasswordAuthenticationToken("finance", "n/a")
         );
         when(sysUserService.findByUsername("finance")).thenReturn(finance);
-        when(userRoleService.hasAnyRole(40L, "ROLE_ADMIN", "ROLE_FINANCE")).thenReturn(true);
+        when(databasePermissionService.hasCurrentRequestScope(40L, "ALL")).thenReturn(true);
         ApprovalWorkflow workflow = pendingWorkflow(7001L, 10L, 30L);
         Page<ApprovalWorkflow> result = new Page<>(1, 10);
         result.setRecords(List.of(workflow));

@@ -70,7 +70,5 @@ export type AppDispatch = typeof store.dispatch;
 
 export const selectAuthState = (s: RootState) => s.auth;
 export const selectIsAuthenticated = (s: RootState) => Boolean(s.auth.user);
-export const selectHasRole = (role: string) => (s: RootState) =>
-  (s.auth.user?.roles ?? s.auth.roles).includes(role);
 
 export default slice.reducer;

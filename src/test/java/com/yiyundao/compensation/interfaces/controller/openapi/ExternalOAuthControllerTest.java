@@ -11,12 +11,14 @@ import com.yiyundao.compensation.modules.app.service.AppRegistryService;
 import com.yiyundao.compensation.modules.app.service.impl.AppRateLimitServiceImpl;
 import com.yiyundao.compensation.security.ClientIpResolver;
 import com.yiyundao.compensation.security.ExternalApiTokenService;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.http.ResponseEntity;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -225,6 +227,8 @@ class ExternalOAuthControllerTest {
         when(appRegistryService.isIpAllowed(app, "127.0.0.1")).thenReturn(true);
         when(appRegistryService.resolveScopes(app)).thenReturn(List.of("payroll:read"));
         when(appDataGrantService.listActiveByAppId(app.getId())).thenReturn(List.of());
+        DatabasePermissionService permissionService = mock(DatabasePermissionService.class);
+        when(permissionService.requiresDataGrant(List.of("payroll:read"))).thenReturn(true);
 
         ExternalOAuthController controller = controller(
                 appRegistryService,
@@ -232,6 +236,7 @@ class ExternalOAuthControllerTest {
                 noOpRateLimitService(),
                 appDataGrantService
         );
+        ReflectionTestUtils.setField(controller, "databasePermissionService", permissionService);
 
         ResponseEntity<ApiResponse<ExternalAppTokenResponse>> response = controller.token(
                 new MockHttpServletRequest(),
@@ -271,7 +276,8 @@ class ExternalOAuthControllerTest {
                         grantServiceWithTenantAccess(),
                         externalApiTokenService,
                         new ClientIpResolver(environment),
-                        noOpRateLimitService()
+                        noOpRateLimitService(),
+                        org.mockito.Mockito.mock(com.yiyundao.compensation.security.DatabasePermissionService.class)
                 );
 
         ResponseEntity<ApiResponse<ExternalAppTokenResponse>> response = controller.token(
@@ -318,7 +324,8 @@ class ExternalOAuthControllerTest {
                 appDataGrantService,
                 externalApiTokenService,
                 new ClientIpResolver(new MockEnvironment()),
-                appRateLimitService
+                appRateLimitService,
+                org.mockito.Mockito.mock(com.yiyundao.compensation.security.DatabasePermissionService.class)
         );
     }
 

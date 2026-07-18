@@ -49,7 +49,7 @@ import com.yiyundao.compensation.modules.user.service.UserBindingService;
 import com.yiyundao.compensation.service.EncryptionService;
 import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ErrorCode;
-import com.yiyundao.compensation.security.SecurityConstants;
+import com.yiyundao.compensation.security.DatabasePermissionService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -88,6 +88,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     private final VOConverter voConverter;
     private final ObjectMapper objectMapper;
     private final EmployeeDepartmentService employeeDepartmentService;
+    private final DatabasePermissionService databasePermissionService;
 
     private void validateEmployeeData(Employee employee) {
         validateEmployeeFields(employee);
@@ -477,6 +478,10 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
                                                           Long managerId, String sortBy, String order) {
         log.info("分页查询员工: page={}, size={}, keyword={}", pageNum, pageSize, keyword);
         Page<Employee> page = new Page<>(safePage(pageNum), safeSize(pageSize));
+        // 先校验外部输入，再解析当前用户范围，避免无效参数被认证层错误掩盖。
+        if (StringUtils.hasText(status)) {
+            parseEmployeeStatus(status);
+        }
         Long scopedManagerId = resolveManagerScope(managerId);
         LambdaQueryWrapper<Employee> queryWrapper = buildQueryWrapper(keyword, department, status, isOffline, provider,
                 scopedManagerId, sortBy, order);
@@ -526,13 +531,16 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     }
 
     private Long resolveManagerScope(Long requestedManagerId) {
-        if (!isManagerOnlyAccess()) {
+        Long currentUserId = getCurrentUserId();
+        if (databasePermissionService.hasCurrentRequestScope(currentUserId, "ALL")) {
             return requestedManagerId;
         }
-        Long userId = getCurrentUserId();
+        if (!databasePermissionService.hasCurrentRequestScope(currentUserId, "ASSIGNED")) {
+            throw new BusinessException(ErrorCode.ACCESS_DENIED, "当前账号没有负责人范围权限");
+        }
         Employee currentEmployee;
         try {
-            currentEmployee = resolveEmployeeByUserId(userId);
+            currentEmployee = resolveEmployeeByUserId(currentUserId);
         } catch (Exception ex) {
             throw new BusinessException(ErrorCode.ACCESS_DENIED, "当前经理账号未关联员工，无法查看负责人范围");
         }
@@ -541,22 +549,6 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
             throw new BusinessException(ErrorCode.ACCESS_DENIED, "经理只能查看自己负责的员工");
         }
         return currentEmployeeId;
-    }
-
-    private boolean isManagerOnlyAccess() {
-        var authentication = SecurityContextHolder.getContext().getAuthentication();
-        if (authentication == null || authentication.getAuthorities() == null) {
-            return false;
-        }
-        Set<String> authorities = authentication.getAuthorities().stream()
-                .map(granted -> granted.getAuthority())
-                .collect(Collectors.toSet());
-        return authorities.contains(SecurityConstants.ROLE_MANAGER)
-                && authorities.stream().noneMatch(authority -> Set.of(
-                        SecurityConstants.ROLE_ADMIN,
-                        SecurityConstants.ROLE_FINANCE,
-                        SecurityConstants.ROLE_HR
-                ).contains(authority));
     }
 
     @Override

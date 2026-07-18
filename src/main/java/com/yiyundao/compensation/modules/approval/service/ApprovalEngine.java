@@ -354,18 +354,9 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
         return cfg != null
                 && cfg.getApproverId() == null
                 && !StringUtils.hasText(cfg.getApproverUsername())
-                && isManagerRole(cfg.getRole())
+                && "EMPLOYEE_MANAGER".equalsIgnoreCase(cfg.getApproverType())
                 && workflowData != null
                 && workflowData.containsKey("batchId");
-    }
-
-    private boolean isManagerRole(String role) {
-        if (!StringUtils.hasText(role)) {
-            return false;
-        }
-        String normalized = role.trim();
-        return SecurityConstants.ROLE_MANAGER.equalsIgnoreCase(normalized)
-                || "MANAGER".equalsIgnoreCase(normalized);
     }
 
     /**

@@ -40,8 +40,8 @@ const Forbidden = React.lazy(() => import('@pages/misc/Forbidden'));
 const NotFound = React.lazy(() => import('@pages/misc/NotFound'));
 const ServerError = React.lazy(() => import('@pages/misc/ServerError'));
 
-const withGuard = (el: React.ReactNode, roles?: string[]) => (
-  <ProtectedRoute roles={roles}>{el}</ProtectedRoute>
+const withGuard = (el: React.ReactNode) => (
+  <ProtectedRoute>{el}</ProtectedRoute>
 );
 
 // 路由变化追踪组件
@@ -98,7 +98,6 @@ export const router = createBrowserRouter(
             <Suspense fallback={<Loading />}>
               <IntegrationConfigPage />
             </Suspense>,
-            ['ADMIN'],
           ),
         },
         {
@@ -107,7 +106,6 @@ export const router = createBrowserRouter(
             <Suspense fallback={<Loading />}>
               <OrgSyncPage />
             </Suspense>,
-            ['ADMIN'],
           ),
         },
         {
@@ -116,7 +114,6 @@ export const router = createBrowserRouter(
             <Suspense fallback={<Loading />}>
               <UserBindingPage />
             </Suspense>,
-            ['ADMIN'],
           ),
         },
         // 授权中心 - 新架构（解耦的独立页面）
@@ -126,7 +123,7 @@ export const router = createBrowserRouter(
         // 新授权中心路由
         ...authCenterRoutes.map((route) => ({
           path: route.path,
-          element: withGuard(route.element, route.meta?.roles || ['ADMIN']),
+          element: withGuard(route.element),
         })),
         {
           path: 'admin/resources-v2',
@@ -134,7 +131,6 @@ export const router = createBrowserRouter(
             <Suspense fallback={<Loading />}>
               <ResourcesV2Page />
             </Suspense>,
-            ['ADMIN'],
           ),
         },
         {
@@ -143,7 +139,6 @@ export const router = createBrowserRouter(
             <Suspense fallback={<Loading />}>
               <AppRegistryPage />
             </Suspense>,
-            ['ADMIN'],
           ),
         },
         {
@@ -152,7 +147,6 @@ export const router = createBrowserRouter(
             <Suspense fallback={<Loading />}>
               <AuditLogsPage />
             </Suspense>,
-            ['ADMIN'],
           ),
         },
         {
@@ -161,7 +155,6 @@ export const router = createBrowserRouter(
             <Suspense fallback={<Loading />}>
               <MonitorPage />
             </Suspense>,
-            ['ADMIN'],
           ),
         },
         {
@@ -170,7 +163,6 @@ export const router = createBrowserRouter(
             <Suspense fallback={<Loading />}>
               <TaskSchedulesPage />
             </Suspense>,
-            ['ADMIN'],
           ),
         },
         {

@@ -9,6 +9,8 @@ import {
   putUserResources,
   getUserRoles,
   setUserRoles,
+  listPermissionActions,
+  type PermissionActionCatalogItem,
   type UserAggregateQueryParams,
 } from '@services/adminAuth';
 
@@ -92,5 +94,13 @@ export function useSetUserRolesMutation(userId: number) {
       queryClient.invalidateQueries({ queryKey: ['admin', 'users', 'aggregate'] });
       queryClient.invalidateQueries({ queryKey: ['admin', 'users', userId, 'resources'] });
     },
+  });
+}
+
+export function usePermissionActionsQuery() {
+  return useQuery<PermissionActionCatalogItem[]>({
+    queryKey: ['admin', 'permission-actions'],
+    queryFn: () => listPermissionActions({ status: 'enabled' }),
+    staleTime: 0,
   });
 }

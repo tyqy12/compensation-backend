@@ -236,16 +236,6 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
         return true;
     }
 
-    /**
-     * 检查用户是否为管理员
-     *
-     * @param userId 用户ID
-     * @return 是否为管理员
-     */
-    public boolean isAdmin(Long userId) {
-        return hasRole(userId, "ROLE_ADMIN");
-    }
-
     // ==================== 角色分配 ====================
 
     /**
@@ -649,9 +639,6 @@ public class UserRoleService extends ServiceImpl<SysUserRoleMapper, SysUserRole>
         candidates.add(normalized);
         candidates.add("ROLE_" + normalized);
         candidates.add("role." + lower);
-        if ("ADMIN".equals(normalized)) {
-            candidates.add("role.admin.all");
-        }
         return candidates;
     }
 

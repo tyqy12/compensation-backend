@@ -22,6 +22,19 @@ export interface UserResource {
   actionsJson?: string | null;
 }
 
+export interface PermissionActionCatalogItem {
+  id: number;
+  code: string;
+  name: string;
+  description?: string | null;
+  httpMethods?: string | null;
+  authority?: string | null;
+  status: string;
+  orderNum?: number | null;
+  propsJson?: string | null;
+  resourceIds: number[];
+}
+
 /**
  * 用户聚合权限项（角色权限 + 个性化权限）
  */
@@ -251,5 +264,16 @@ export async function getUserRoles(userId: number): Promise<number[]> {
  */
 export async function setUserRoles(userId: number, roleIds: number[]): Promise<string> {
   const { data } = await api.put<ApiResponse<string>>(`/admin/users/${userId}/roles`, { roleIds });
+  return unwrap(data);
+}
+
+export async function listPermissionActions(params?: {
+  status?: string;
+  keyword?: string;
+}): Promise<PermissionActionCatalogItem[]> {
+  const { data } = await api.get<ApiResponse<PermissionActionCatalogItem[]>>(
+    '/admin/permission-actions',
+    { params },
+  );
   return unwrap(data);
 }
