@@ -30,13 +30,26 @@ public class PayrollTaxLedgerServiceImpl extends ServiceImpl<PayrollTaxLedgerMap
     }
 
     @Override
-    public int postBatch(Long payrollBatchId) {
-        if (payrollBatchId == null) {
+    public int postBatch(Long payrollBatchId, Integer payrollBatchRevision) {
+        if (payrollBatchId == null || payrollBatchRevision == null) {
             return 0;
         }
         return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PayrollTaxLedger>()
                 .eq(PayrollTaxLedger::getPayrollBatchId, payrollBatchId)
+                .eq(PayrollTaxLedger::getPayrollBatchRevision, payrollBatchRevision)
                 .eq(PayrollTaxLedger::getStatus, "draft")
                 .set(PayrollTaxLedger::getStatus, "posted"));
+    }
+
+    @Override
+    public int reverseBatch(Long payrollBatchId, Integer payrollBatchRevision) {
+        if (payrollBatchId == null || payrollBatchRevision == null) {
+            return 0;
+        }
+        return baseMapper.update(null, new com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper<PayrollTaxLedger>()
+                .eq(PayrollTaxLedger::getPayrollBatchId, payrollBatchId)
+                .eq(PayrollTaxLedger::getPayrollBatchRevision, payrollBatchRevision)
+                .eq(PayrollTaxLedger::getStatus, "posted")
+                .set(PayrollTaxLedger::getStatus, "reversed"));
     }
 }

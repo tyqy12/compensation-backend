@@ -139,6 +139,7 @@ public class PayrollCumulativeTaxServiceImpl implements PayrollCumulativeTaxServ
                 .eq(PayrollTaxLedger::getTaxYear, computation.taxYear())
                 .eq(PayrollTaxLedger::getTaxMonth, computation.taxMonth())
                 .eq(PayrollTaxLedger::getPayrollBatchId, batch.getId())
+                .eq(PayrollTaxLedger::getPayrollBatchRevision, normalizeRevision(batch.getBatchRevision()))
                 .last("limit 1"));
         if (ledger == null) {
             ledger = new PayrollTaxLedger();
@@ -149,6 +150,7 @@ public class PayrollCumulativeTaxServiceImpl implements PayrollCumulativeTaxServ
         ledger.setTaxYear(computation.taxYear());
         ledger.setTaxMonth(computation.taxMonth());
         ledger.setPayrollBatchId(batch.getId());
+        ledger.setPayrollBatchRevision(normalizeRevision(batch.getBatchRevision()));
         ledger.setPayrollLineId(payrollLineId);
         ledger.setCumulativeIncome(amounts.income());
         ledger.setCumulativeTaxExemptIncome(amounts.taxExemptIncome());
@@ -161,7 +163,8 @@ public class PayrollCumulativeTaxServiceImpl implements PayrollCumulativeTaxServ
         ledger.setQuickDeduction(computation.result().quickDeduction());
         ledger.setCumulativeTax(computation.result().cumulativeTaxBeforeReduction());
         ledger.setCumulativeTaxReduction(amounts.taxReduction());
-        ledger.setCumulativeWithheldTax(amounts.withheldTax());
+        ledger.setCumulativeWithheldTax(amounts.withheldTax()
+                .add(value(computation.result().currentWithholdingTax())));
         ledger.setCurrentWithholdingTax(computation.result().currentWithholdingTax());
         ledger.setPolicyId(computation.policyId());
         ledger.setCalculationHash(sha256(computation.policyCode() + "|" + computation.result().formula()));
@@ -269,6 +272,10 @@ public class PayrollCumulativeTaxServiceImpl implements PayrollCumulativeTaxServ
 
     private BigDecimal value(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private int normalizeRevision(Integer revision) {
+        return revision == null || revision < 1 ? 1 : revision;
     }
 
     private record Period(int year, int month) {

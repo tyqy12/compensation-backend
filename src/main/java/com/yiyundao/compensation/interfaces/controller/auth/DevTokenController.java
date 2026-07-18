@@ -9,6 +9,7 @@ import com.yiyundao.compensation.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.env.Environment;
 import org.springframework.context.annotation.Profile;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Arrays;
@@ -19,6 +20,7 @@ import java.util.Map;
 @RequestMapping("/auth")
 @RequiredArgsConstructor
 @Profile("(dev | development) & !prod & !production & !staging")
+@ConditionalOnProperty(name = "security.dev-token.enabled", havingValue = "true")
 public class DevTokenController {
 
     private final JwtTokenProvider jwtTokenProvider;

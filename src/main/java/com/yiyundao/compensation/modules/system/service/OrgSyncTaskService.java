@@ -3,10 +3,10 @@ package com.yiyundao.compensation.modules.system.service;
 import com.yiyundao.compensation.dto.OrganizationSyncResult;
 import com.yiyundao.compensation.service.OrganizationSyncService;
 import lombok.Data;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
+import jakarta.annotation.PreDestroy;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -16,14 +16,34 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class OrgSyncTaskService {
 
     private final OrganizationSyncService organizationSyncService;
+    private final ThreadPoolTaskExecutor executor;
 
     private final Map<String, TaskInfo> tasks = new ConcurrentHashMap<>();
+    private static final int MAX_TASKS = 1000;
 
-    public String start(String platform) {
+    public OrgSyncTaskService(OrganizationSyncService organizationSyncService) {
+        this.organizationSyncService = organizationSyncService;
+        this.executor = new ThreadPoolTaskExecutor();
+        this.executor.setCorePoolSize(1);
+        this.executor.setMaxPoolSize(2);
+        this.executor.setQueueCapacity(100);
+        this.executor.setThreadNamePrefix("org-sync-");
+        this.executor.setWaitForTasksToCompleteOnShutdown(true);
+        this.executor.setAwaitTerminationSeconds(30);
+        this.executor.initialize();
+    }
+
+    public synchronized String start(String platform) {
+        cleanupFinishedTasks();
+        if (isRunningFor(platform)) {
+            throw new IllegalStateException("该平台已有组织同步任务运行中");
+        }
+        if (tasks.size() >= MAX_TASKS) {
+            throw new IllegalStateException("组织同步任务过多，请稍后再试");
+        }
         String id = UUID.randomUUID().toString();
         TaskInfo info = new TaskInfo();
         info.setId(id);
@@ -32,12 +52,7 @@ public class OrgSyncTaskService {
         info.setStartTime(LocalDateTime.now());
         tasks.put(id, info);
 
-        ThreadPoolTaskExecutor exec = new ThreadPoolTaskExecutor();
-        exec.setCorePoolSize(1);
-        exec.setMaxPoolSize(2);
-        exec.setThreadNamePrefix("org-sync-");
-        exec.initialize();
-        exec.submit(() -> runTask(id, platform));
+        executor.submit(() -> runTask(id, platform));
         return id;
     }
 
@@ -68,12 +83,25 @@ public class OrgSyncTaskService {
 
     public boolean isRunningFor(String platform) {
         for (TaskInfo t : tasks.values()) {
-            if ("RUNNING".equalsIgnoreCase(t.getStatus()) &&
+            if (("RUNNING".equalsIgnoreCase(t.getStatus()) || "PENDING".equalsIgnoreCase(t.getStatus())) &&
                 (platform.equalsIgnoreCase(t.getPlatform()) || "all".equalsIgnoreCase(t.getPlatform()))) {
                 return true;
             }
         }
         return false;
+    }
+
+    private void cleanupFinishedTasks() {
+        LocalDateTime cutoff = LocalDateTime.now().minusHours(24);
+        tasks.entrySet().removeIf(entry -> {
+            TaskInfo task = entry.getValue();
+            return task != null && task.getEndTime() != null && task.getEndTime().isBefore(cutoff);
+        });
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        executor.shutdown();
     }
 
     @Data

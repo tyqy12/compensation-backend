@@ -55,8 +55,11 @@ jwt:
 encryption:
   sm4:
     key: ${ENCRYPTION_SM4_KEY}
+    keyring: ${ENCRYPTION_SM4_KEYRING:}
   aes:
     key: ${ENCRYPTION_AES_KEY}
+    key-id: ${ENCRYPTION_AES_KEY_ID:env-current}
+    keyring: ${ENCRYPTION_AES_KEYRING:}
 
 logging:
   level:
@@ -109,3 +112,8 @@ external-api:
   rate-limit:
     per-minute: ${EXTERNAL_API_RATE_LIMIT_PER_MINUTE:600}
     alert-cooldown-seconds: ${EXTERNAL_API_RATE_LIMIT_ALERT_COOLDOWN:300}
+
+payroll:
+  compliance:
+    allow-template-fallback: false
+    allow-builtin-tax-fallback: false

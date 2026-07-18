@@ -5,16 +5,22 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.interfaces.dto.app.AppRegistryCreateRequest;
+import com.yiyundao.compensation.interfaces.dto.app.AppDataGrantRequest;
+import com.yiyundao.compensation.interfaces.dto.app.AppDataGrantResponse;
 import com.yiyundao.compensation.interfaces.dto.app.AppRegistryResponse;
 import com.yiyundao.compensation.interfaces.dto.app.AppRegistrySecretResponse;
 import com.yiyundao.compensation.interfaces.dto.app.AppRegistryUpdateRequest;
+import com.yiyundao.compensation.modules.app.entity.AppDataGrant;
 import com.yiyundao.compensation.modules.app.entity.AppRegistry;
+import com.yiyundao.compensation.modules.app.service.AppDataGrantService;
 import com.yiyundao.compensation.modules.app.service.AppRegistryService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import com.yiyundao.compensation.security.SecurityAnnotations;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/admin/app-registry")
@@ -26,6 +32,7 @@ public class AppRegistryController {
     private static final int MAX_PAGE_SIZE = 200;
 
     private final AppRegistryService appRegistryService;
+    private final AppDataGrantService appDataGrantService;
 
     @PostMapping
     public ApiResponse<AppRegistrySecretResponse> create(@Valid @RequestBody AppRegistryCreateRequest request) {
@@ -90,6 +97,37 @@ public class AppRegistryController {
             return ApiResponse.error(ErrorCode.RESOURCE_NOT_FOUND, "应用不存在");
         }
         return ApiResponse.success(toResponse(app));
+    }
+
+    @GetMapping("/{id}/data-grants")
+    public ApiResponse<List<AppDataGrantResponse>> dataGrants(@PathVariable Long id) {
+        ensureAppExists(id);
+        return ApiResponse.success(appDataGrantService.listActiveByAppId(id).stream()
+                .map(AppDataGrantResponse::from)
+                .toList());
+    }
+
+    @PostMapping("/{id}/data-grants")
+    public ApiResponse<AppDataGrantResponse> createDataGrant(@PathVariable Long id,
+                                                              @Valid @RequestBody AppDataGrantRequest request) {
+        AppDataGrant grant = new AppDataGrant();
+        grant.setAppId(id);
+        grant.setScopeType(request.getScopeType());
+        grant.setScopeValue(request.getScopeValue());
+        return ApiResponse.success(AppDataGrantResponse.from(appDataGrantService.saveValidated(grant)));
+    }
+
+    @DeleteMapping("/{id}/data-grants/{grantId}")
+    public ApiResponse<Void> revokeDataGrant(@PathVariable Long id, @PathVariable Long grantId) {
+        appDataGrantService.revoke(id, grantId);
+        return ApiResponse.success(null);
+    }
+
+    private void ensureAppExists(Long id) {
+        if (appRegistryService.getById(id) == null) {
+            throw new com.yiyundao.compensation.common.exception.BusinessException(
+                    ErrorCode.RESOURCE_NOT_FOUND, "应用不存在");
+        }
     }
 
     private int safePage(int page) {

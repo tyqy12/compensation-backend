@@ -188,6 +188,7 @@ describe('AppLayout', () => {
         path: '/payroll/batches',
         parentId: 1,
         orderNum: 1,
+        status: 'disabled',
       },
       {
         id: 3,
@@ -208,6 +209,6 @@ describe('AppLayout', () => {
 
     fireEvent.click(screen.getByText('薪酬管理'));
     await waitFor(() => expect(screen.getByText('薪酬批次')).toBeInTheDocument());
-    expect(screen.getByText('旧版批次视图')).toBeInTheDocument();
+    expect(screen.queryByText('旧版批次视图')).not.toBeInTheDocument();
   });
 });

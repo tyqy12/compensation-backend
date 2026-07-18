@@ -1,6 +1,7 @@
 package com.yiyundao.compensation.modules.employee.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ErrorCode;
@@ -73,11 +74,11 @@ public class EmployeeDepartmentServiceImpl extends ServiceImpl<EmployeeDepartmen
         if (employeeId == null) {
             return List.of();
         }
-        List<EmployeeDepartment> relations = list(new LambdaQueryWrapper<EmployeeDepartment>()
-                .eq(EmployeeDepartment::getEmployeeId, employeeId)
-                .orderByDesc(EmployeeDepartment::getPrimaryFlag)
-                .orderByAsc(EmployeeDepartment::getOrderNum)
-                .orderByAsc(EmployeeDepartment::getId));
+        List<EmployeeDepartment> relations = list(new QueryWrapper<EmployeeDepartment>()
+                .eq("employee_id", employeeId)
+                .orderByDesc("is_primary")
+                .orderByAsc("order_num")
+                .orderByAsc("id"));
         return relations.stream()
                 .map(EmployeeDepartment::getDeptName)
                 .filter(StringUtils::hasText)
@@ -95,11 +96,11 @@ public class EmployeeDepartmentServiceImpl extends ServiceImpl<EmployeeDepartmen
         if (ids.isEmpty()) {
             return Map.of();
         }
-        List<EmployeeDepartment> relations = list(new LambdaQueryWrapper<EmployeeDepartment>()
-                .in(EmployeeDepartment::getEmployeeId, ids)
-                .orderByDesc(EmployeeDepartment::getPrimaryFlag)
-                .orderByAsc(EmployeeDepartment::getOrderNum)
-                .orderByAsc(EmployeeDepartment::getId));
+        List<EmployeeDepartment> relations = list(new QueryWrapper<EmployeeDepartment>()
+                .in("employee_id", ids)
+                .orderByDesc("is_primary")
+                .orderByAsc("order_num")
+                .orderByAsc("id"));
         Map<Long, LinkedHashSet<String>> namesByEmployee = new LinkedHashMap<>();
         for (EmployeeDepartment relation : relations) {
             if (relation.getEmployeeId() == null || !StringUtils.hasText(relation.getDeptName())) {
@@ -121,6 +122,22 @@ public class EmployeeDepartmentServiceImpl extends ServiceImpl<EmployeeDepartmen
         return list(new LambdaQueryWrapper<EmployeeDepartment>()
                 .select(EmployeeDepartment::getEmployeeId)
                 .eq(EmployeeDepartment::getDeptName, departmentName.trim())
+                .isNotNull(EmployeeDepartment::getEmployeeId))
+                .stream()
+                .map(EmployeeDepartment::getEmployeeId)
+                .filter(Objects::nonNull)
+                .distinct()
+                .toList();
+    }
+
+    @Override
+    public List<Long> findEmployeeIdsByLocalDepartmentId(Long localDepartmentId) {
+        if (localDepartmentId == null) {
+            return List.of();
+        }
+        return list(new LambdaQueryWrapper<EmployeeDepartment>()
+                .select(EmployeeDepartment::getEmployeeId)
+                .eq(EmployeeDepartment::getLocalDeptId, localDepartmentId)
                 .isNotNull(EmployeeDepartment::getEmployeeId))
                 .stream()
                 .map(EmployeeDepartment::getEmployeeId)

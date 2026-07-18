@@ -2,6 +2,7 @@ import React, { Suspense, useMemo } from 'react';
 import { useLocation, matchPath } from 'react-router-dom';
 import { useMeResourcesQuery } from '@services/queries/rbac';
 import Loading from '@components/Common/Loading';
+import type { SysResource } from '@types/api';
 
 const views = import.meta.glob([
   '/src/pages/**/*.tsx',
@@ -20,12 +21,18 @@ function resolveComponentPath(component?: string | null): string | undefined {
   return candidates.find((k) => k in views);
 }
 
+function isEnabledResource(resource: SysResource): boolean {
+  return resource.status == null || resource.status === 'enabled' || resource.status === 1;
+}
+
 export const DynamicPageRenderer: React.FC = () => {
   const { pathname } = useLocation();
   const { data } = useMeResourcesQuery();
 
   const match = useMemo(() => {
-    const list = (data?.resources || []).filter((r) => r.type === 'VIEW' || r.type === 'MENU');
+    const list = (data?.resources || []).filter(
+      (r) => (r.type === 'VIEW' || r.type === 'MENU') && isEnabledResource(r),
+    );
     // sort by path length desc for best match
     const sorted = list
       .filter((r) => r.path)

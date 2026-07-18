@@ -22,6 +22,8 @@ public class PayrollTaxLedger extends BaseEntity {
     private Integer taxMonth;
     @TableField("payroll_batch_id")
     private Long payrollBatchId;
+    @TableField("payroll_batch_revision")
+    private Integer payrollBatchRevision;
     @TableField("payroll_line_id")
     private Long payrollLineId;
     @TableField("cumulative_income")

@@ -57,14 +57,7 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
     private final PayrollDistributionService distributionService;
     private final PayrollApprovalProjectionService approvalProjectionService;
     private final PayrollProcessManager payrollProcessManager;
-    private com.yiyundao.compensation.modules.payroll.service.PayrollTaxLedgerService payrollTaxLedgerService;
     private PayrollSettlementIntegrityService payrollSettlementIntegrityService;
-
-    @Autowired(required = false)
-    public void setPayrollTaxLedgerService(
-            com.yiyundao.compensation.modules.payroll.service.PayrollTaxLedgerService payrollTaxLedgerService) {
-        this.payrollTaxLedgerService = payrollTaxLedgerService;
-    }
 
     @Autowired(required = false)
     public void setPayrollSettlementIntegrityService(
@@ -122,10 +115,6 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
                     ErrorCode.VALIDATION_FAILED,
                     "存在阻塞问题，暂不可提交审批：" + String.join("；", blockingMessages)
             );
-        }
-
-        if (payrollTaxLedgerService != null) {
-            payrollTaxLedgerService.postBatch(batchId);
         }
 
         PayrollDistribution distribution = distributionService.createOrReuseForBatch(b);
@@ -329,12 +318,14 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
             return false;
         }
         long total = payrollLineService.count(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PayrollLine>()
-                .eq(PayrollLine::getBatchId, batchId));
+                .eq(PayrollLine::getBatchId, batchId)
+                .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision())));
         if (total <= 0) {
             return true;
         }
         long unresolved = payrollLineService.count(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, batchId)
+                .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision()))
                 .and(w -> w
                         .isNull(PayrollLine::getConfirmationStatus)
                         .or().eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.PENDING.getCode())
@@ -354,12 +345,21 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
     }
 
     private java.util.List<String> collectBlockingIssueMessages(Long batchId) {
+        PayrollBatch batch = getById(batchId);
+        if (batch == null) {
+            return java.util.List.of("批次不存在");
+        }
         java.util.List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
-                .eq(PayrollLine::getBatchId, batchId));
+                .eq(PayrollLine::getBatchId, batchId)
+                .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision())));
         return PayrollPaymentEligibilitySupport.collectBlockingIssueMessages(
                 lines,
                 validationIssueSupport::deserialize
         );
+    }
+
+    private int normalizeRevision(Integer revision) {
+        return revision == null || revision < 1 ? 1 : revision;
     }
 
     /**

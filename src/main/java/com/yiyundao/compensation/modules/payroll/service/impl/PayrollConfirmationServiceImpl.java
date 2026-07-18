@@ -68,6 +68,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
             "SELECT 1 FROM payroll_batch pb"
                     + " WHERE pb.id = payroll_line.batch_id"
                     + " AND pb.deleted = 0"
+                    + " AND payroll_line.batch_revision = COALESCE(pb.batch_revision, 1)"
                     + " AND COALESCE(pb.confirmation_required, 1) = 1"
                     + " AND pb.status IN (" + sqlStatusCodes(CONFIRMATION_WINDOW_STATUSES) + ")";
 
@@ -87,6 +88,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         SysUser operator = requireAuthenticated(currentUser);
         PayrollLine line = requireLine(lineId);
         PayrollBatch batch = requireBatch(line.getBatchId());
+        ensureCurrentRevision(line, batch);
         ensureBatchConfirmable(batch);
         ensureLineOperableByCurrentUser(line, operator);
         boolean confirmed = confirmSingleLine(line, operator,
@@ -104,6 +106,7 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         SysUser operator = requireAuthenticated(currentUser);
         PayrollLine line = requireLine(lineId);
         PayrollBatch batch = requireBatch(line.getBatchId());
+        ensureCurrentRevision(line, batch);
         ensureBatchConfirmable(batch);
         ensureLineOperableByCurrentUser(line, operator);
         if (request == null || !StringUtils.hasText(request.getReason())) {
@@ -255,7 +258,8 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
     public PayrollConfirmationSummaryDto getBatchSummary(Long batchId) {
         PayrollBatch batch = requireBatch(batchId);
         List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
-                .eq(PayrollLine::getBatchId, batchId));
+                .eq(PayrollLine::getBatchId, batchId)
+                .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision())));
         PayrollConfirmationStats stats = calcStats(lines);
 
         PayrollConfirmationSummaryDto dto = new PayrollConfirmationSummaryDto();
@@ -288,7 +292,9 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
                 .orderByAsc(PayrollLine::getBatchId)
                 .orderByAsc(PayrollLine::getId);
         if (batchId != null) {
+            PayrollBatch scopedBatch = requireBatch(batchId);
             wrapper.eq(PayrollLine::getBatchId, batchId);
+            wrapper.eq(PayrollLine::getBatchRevision, normalizeRevision(scopedBatch.getBatchRevision()));
         }
         if (!canViewAllPendingConfirmations(operator)) {
             if (operator.getEmployeeId() == null) {
@@ -370,6 +376,12 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
                     workflow.getId(), lineId, line.getDisputeWorkflowId());
             return;
         }
+        PayrollBatch lineBatch = line.getBatchId() == null ? null : payrollBatchService.getById(line.getBatchId());
+        if (lineBatch == null || normalizeRevision(line.getBatchRevision())
+                != normalizeRevision(lineBatch.getBatchRevision())) {
+            log.info("忽略旧 revision 的异议回调: workflowId={}, lineId={}", workflow.getId(), lineId);
+            return;
+        }
         PayrollBatch batch = payrollBatchService.getById(line.getBatchId());
         if (batch == null || !matchesCurrentBatchRevision(workflow, batch)) {
             log.info("忽略过期异议回调: workflowId={}, lineId={}, batchId={}, currentRevision={}, workflowRevision={}",
@@ -429,7 +441,8 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
         }
 
         List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
-                .eq(PayrollLine::getBatchId, batchId));
+                .eq(PayrollLine::getBatchId, batchId)
+                .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision())));
         PayrollConfirmationStats stats = calcStats(lines);
         PayrollBatchStatus targetStatus;
         LocalDateTime completedTime = null;
@@ -528,8 +541,10 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
     }
 
     private List<PayrollLine> loadBatchConfirmCandidates(Long batchId, PayrollBatchConfirmRequest request) {
+        PayrollBatch batch = requireBatch(batchId);
         LambdaQueryWrapper<PayrollLine> wrapper = new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, batchId)
+                .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision()))
                 .and(w -> w
                         .eq(PayrollLine::getConfirmationStatus, PayrollConfirmationStatus.PENDING.getCode())
                         .or()
@@ -544,8 +559,10 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
     }
 
     private List<PayrollLine> resolveAssignableLines(Long batchId, PayrollConfirmationAssignRequest request) {
+        PayrollBatch batch = requireBatch(batchId);
         LambdaQueryWrapper<PayrollLine> wrapper = new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, batchId)
+                .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision()))
                 .orderByAsc(PayrollLine::getId);
         if (!CollectionUtils.isEmpty(request.getLineIds())) {
             wrapper.in(PayrollLine::getId, request.getLineIds());
@@ -735,6 +752,13 @@ public class PayrollConfirmationServiceImpl implements PayrollConfirmationServic
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "工资条不存在");
         }
         return line;
+    }
+
+    private void ensureCurrentRevision(PayrollLine line, PayrollBatch batch) {
+        if (line == null || batch == null
+                || normalizeRevision(line.getBatchRevision()) != normalizeRevision(batch.getBatchRevision())) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "该工资条已被重算，请刷新后操作当前版本");
+        }
     }
 
     private PayrollBatch requireBatch(Long batchId) {

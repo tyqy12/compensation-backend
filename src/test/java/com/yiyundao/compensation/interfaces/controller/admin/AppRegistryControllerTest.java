@@ -7,6 +7,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.interfaces.dto.app.AppRegistryResponse;
 import com.yiyundao.compensation.modules.app.entity.AppRegistry;
+import com.yiyundao.compensation.modules.app.service.AppDataGrantService;
 import com.yiyundao.compensation.modules.app.service.AppRegistryService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
@@ -36,7 +37,7 @@ class AppRegistryControllerTest {
     @BeforeEach
     void setUp() {
         appRegistryService = mock(AppRegistryService.class);
-        controller = new AppRegistryController(appRegistryService);
+        controller = new AppRegistryController(appRegistryService, mock(AppDataGrantService.class));
     }
 
     @Test

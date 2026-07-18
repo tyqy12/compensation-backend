@@ -11,12 +11,16 @@ import jakarta.annotation.PostConstruct;
 
 import javax.crypto.Cipher;
 import javax.crypto.spec.IvParameterSpec;
+import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.Security;
+import java.security.SecureRandom;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Locale;
 
 /**
@@ -31,12 +35,25 @@ public class ConfigDecryptionService {
     private final Environment environment;
 
     private static final String AES_ALGORITHM = "AES/CBC/PKCS5Padding";
+    private static final String AES_GCM_ALGORITHM = "AES/GCM/NoPadding";
+    private static final String ENVELOPE_VERSION = "v2";
     private static final int IV_LENGTH = 16; // 16字节IV
+    private static final int GCM_NONCE_LENGTH = 12;
+    private static final int GCM_TAG_LENGTH = 128;
     private static final String DEFAULT_AES_KEY = "default_aes_key_32_chars_long_here";
     private static final int MIN_AES_KEY_LENGTH = 16;
 
     // Cached key material
     private byte[] aesKeyBytes; // 32 bytes (AES-256)
+    private String aesKeyId;
+    private Map<String, byte[]> aesKeyring = Map.of();
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    @Value("${encryption.aes.key-id:env-current}")
+    private String configuredAesKeyId;
+
+    @Value("${encryption.aes.keyring:}")
+    private String configuredAesKeyring;
 
     static {
         // 添加BouncyCastle提供者以支持SM4
@@ -57,6 +74,12 @@ public class ConfigDecryptionService {
     public void init() {
         validateKeyForEnvironment();
         this.aesKeyBytes = deriveKey(fallbackAesKey, 32);
+        this.aesKeyId = configuredAesKeyId == null || configuredAesKeyId.isBlank()
+                ? "env-current" : configuredAesKeyId.trim();
+        Map<String, byte[]> keyring = new LinkedHashMap<>();
+        parseKeyring(configuredAesKeyring).forEach((keyId, secret) -> keyring.put(keyId, deriveKey(secret, 32)));
+        keyring.put(aesKeyId, aesKeyBytes);
+        this.aesKeyring = Map.copyOf(keyring);
         log.info("配置解密服务初始化完成");
     }
 
@@ -64,7 +87,7 @@ public class ConfigDecryptionService {
         if (isBlank(fallbackAesKey) || fallbackAesKey.length() < MIN_AES_KEY_LENGTH) {
             throw new IllegalStateException("encryption.aes.key must be at least 16 characters");
         }
-        if (isProdLikeProfile() && isDefaultAesKey(fallbackAesKey)) {
+        if (isProdLikeProfile() && isPlaceholderKey(fallbackAesKey)) {
             throw new IllegalStateException("Production deployment cannot use default encryption.aes.key");
         }
         if (isDefaultAesKey(fallbackAesKey)) {
@@ -84,6 +107,15 @@ public class ConfigDecryptionService {
         return DEFAULT_AES_KEY.equals(key) || key.toLowerCase(Locale.ROOT).contains("default");
     }
 
+    private boolean isPlaceholderKey(String key) {
+        if (isBlank(key)) {
+            return true;
+        }
+        String normalized = key.toLowerCase(Locale.ROOT);
+        return isDefaultAesKey(key) || normalized.contains("change-me")
+                || normalized.contains("your_") || normalized.contains("replace-with");
+    }
+
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
     }
@@ -93,7 +125,10 @@ public class ConfigDecryptionService {
      */
     public String decrypt(String encryptedData) {
         try {
-            return aesDecrypt(encryptedData);
+            if (isVersion2Envelope(encryptedData)) {
+                return gcmDecrypt(encryptedData);
+            }
+            return legacyDecrypt(encryptedData);
         } catch (Exception e) {
             log.error("配置解密失败", e);
             throw new RuntimeException("配置解密失败", e);
@@ -105,7 +140,7 @@ public class ConfigDecryptionService {
      */
     public String encrypt(String data) {
         try {
-            return aesEncrypt(data);
+            return gcmEncrypt(data);
         } catch (Exception e) {
             log.error("配置加密失败", e);
             throw new RuntimeException("配置加密失败", e);
@@ -139,38 +174,52 @@ public class ConfigDecryptionService {
     /**
      * 生成随机IV
      */
-    private byte[] generateRandomIV() {
-        byte[] iv = new byte[IV_LENGTH];
-        new java.security.SecureRandom().nextBytes(iv);
-        return iv;
+    private byte[] generateRandomNonce() {
+        byte[] nonce = new byte[GCM_NONCE_LENGTH];
+        secureRandom.nextBytes(nonce);
+        return nonce;
     }
 
     /**
      * AES加密实现
      */
-    private String aesEncrypt(String data) throws Exception {
-        byte[] iv = generateRandomIV();
-        SecretKeySpec keySpec = new SecretKeySpec(aesKeyBytes, "AES");
-        IvParameterSpec ivSpec = new IvParameterSpec(iv);
-
-        Cipher cipher = Cipher.getInstance(AES_ALGORITHM);
-        cipher.init(Cipher.ENCRYPT_MODE, keySpec, ivSpec);
-
+    private String gcmEncrypt(String data) throws Exception {
+        byte[] nonce = generateRandomNonce();
+        Cipher cipher = Cipher.getInstance(AES_GCM_ALGORITHM);
+        cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(aesKeyBytes, "AES"),
+                new GCMParameterSpec(GCM_TAG_LENGTH, nonce));
+        cipher.updateAAD(envelopeAad(aesKeyId));
         byte[] encrypted = cipher.doFinal(data.getBytes(StandardCharsets.UTF_8));
-
-        // Prepend IV to encrypted data
-        byte[] encryptedWithIv = new byte[iv.length + encrypted.length];
-        System.arraycopy(iv, 0, encryptedWithIv, 0, iv.length);
-        System.arraycopy(encrypted, 0, encryptedWithIv, iv.length, encrypted.length);
-
-        return Base64.getEncoder().encodeToString(encryptedWithIv);
+        byte[] payload = new byte[nonce.length + encrypted.length];
+        System.arraycopy(nonce, 0, payload, 0, nonce.length);
+        System.arraycopy(encrypted, 0, payload, nonce.length, encrypted.length);
+        return ENVELOPE_VERSION + ":" + aesKeyId + ":"
+                + Base64.getUrlEncoder().withoutPadding().encodeToString(payload);
     }
 
     /**
      * AES解密实现
      */
-    private String aesDecrypt(String encryptedData) throws Exception {
+    private String legacyDecrypt(String encryptedData) throws Exception {
+        Exception lastFailure = null;
+        for (byte[] key : aesKeyring.values()) {
+            try {
+                return legacyDecryptWithKey(encryptedData, key);
+            } catch (Exception e) {
+                lastFailure = e;
+            }
+        }
+        if (lastFailure != null) {
+            throw lastFailure;
+        }
+        return legacyDecryptWithKey(encryptedData, aesKeyBytes);
+    }
+
+    private String legacyDecryptWithKey(String encryptedData, byte[] keyBytes) throws Exception {
         byte[] encryptedWithIv = Base64.getDecoder().decode(encryptedData);
+        if (encryptedWithIv.length <= IV_LENGTH) {
+            throw new IllegalArgumentException("Invalid legacy encryption payload");
+        }
 
         // Extract IV from the beginning
         byte[] iv = new byte[IV_LENGTH];
@@ -178,7 +227,7 @@ public class ConfigDecryptionService {
         System.arraycopy(encryptedWithIv, 0, iv, 0, IV_LENGTH);
         System.arraycopy(encryptedWithIv, IV_LENGTH, encrypted, 0, encrypted.length);
 
-        SecretKeySpec keySpec = new SecretKeySpec(aesKeyBytes, "AES");
+        SecretKeySpec keySpec = new SecretKeySpec(keyBytes, "AES");
         IvParameterSpec ivSpec = new IvParameterSpec(iv);
 
         Cipher cipher = Cipher.getInstance(AES_ALGORITHM);
@@ -186,5 +235,54 @@ public class ConfigDecryptionService {
 
         byte[] decrypted = cipher.doFinal(encrypted);
         return new String(decrypted, StandardCharsets.UTF_8);
+    }
+
+    private String gcmDecrypt(String encryptedData) throws Exception {
+        String[] parts = encryptedData.split(":", 3);
+        if (parts.length != 3 || !ENVELOPE_VERSION.equals(parts[0]) || parts[1].isBlank()) {
+            throw new IllegalArgumentException("Unsupported encryption envelope");
+        }
+        byte[] key = aesKeyring.get(parts[1]);
+        if (key == null) {
+            throw new IllegalStateException("Encryption key version is not available: " + parts[1]);
+        }
+        byte[] payload = Base64.getUrlDecoder().decode(parts[2]);
+        if (payload.length <= GCM_NONCE_LENGTH + (GCM_TAG_LENGTH / 8)) {
+            throw new IllegalArgumentException("Invalid encryption envelope payload");
+        }
+        byte[] nonce = Arrays.copyOf(payload, GCM_NONCE_LENGTH);
+        byte[] encrypted = Arrays.copyOfRange(payload, GCM_NONCE_LENGTH, payload.length);
+        Cipher cipher = Cipher.getInstance(AES_GCM_ALGORITHM);
+        cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key, "AES"),
+                new GCMParameterSpec(GCM_TAG_LENGTH, nonce));
+        cipher.updateAAD(envelopeAad(parts[1]));
+        return new String(cipher.doFinal(encrypted), StandardCharsets.UTF_8);
+    }
+
+    private byte[] envelopeAad(String keyId) {
+        return (ENVELOPE_VERSION + ":" + keyId).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private boolean isVersion2Envelope(String value) {
+        return value != null && value.startsWith(ENVELOPE_VERSION + ":");
+    }
+
+    private Map<String, String> parseKeyring(String raw) {
+        Map<String, String> result = new LinkedHashMap<>();
+        if (raw == null || raw.isBlank()) {
+            return result;
+        }
+        for (String entry : raw.split(",")) {
+            int separator = entry.indexOf('=');
+            if (separator <= 0 || separator == entry.length() - 1) {
+                continue;
+            }
+            String keyId = entry.substring(0, separator).trim();
+            String key = entry.substring(separator + 1).trim();
+            if (!keyId.isEmpty() && !key.isEmpty()) {
+                result.put(keyId, key);
+            }
+        }
+        return result;
     }
 }

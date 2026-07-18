@@ -1,8 +1,6 @@
 spring:
   application:
     name: compensation-assistant-system
-  profiles:
-    active: dev
 
   # AOP配置
   aop:
@@ -65,7 +63,7 @@ management:
         enabled: true
     tags:
       application: ${spring.application.name}
-      environment: ${spring.profiles.active}
+      environment: ${spring.profiles.active:local}
 
 # ==================== 链路追踪配置 ====================
 tracing:
@@ -97,6 +95,8 @@ payment:
     stale-approved-payroll-minutes: 10
 
 payroll:
+  report:
+    max-in-memory-lines: ${PAYROLL_REPORT_MAX_IN_MEMORY_LINES:50000}
   confirmation:
     dispute-reconciliation:
       enabled: true

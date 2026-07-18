@@ -4,11 +4,15 @@ import {
   App as AntdApp,
   Button,
   Card,
+  Drawer,
   Form,
   Input,
   Modal,
+  Popconfirm,
+  Select,
   Space,
   Switch,
+  Table,
   Tag,
   Typography,
   Checkbox,
@@ -18,17 +22,25 @@ import {
   PlusOutlined,
   EditOutlined,
   KeyOutlined,
+  DeleteOutlined,
   SafetyOutlined,
 } from '@ant-design/icons';
 import {
+  useAppDataGrantsQuery,
   useAppRegistriesQuery,
+  useCreateAppDataGrantMutation,
   useCreateAppRegistryMutation,
+  useRevokeAppDataGrantMutation,
   useUpdateAppRegistryMutation,
   useRotateAppRegistrySecretMutation,
   type AppRegistryQueryParams,
   type AppRegistryDto,
 } from '@services/queries/appRegistry';
-import type { AppRegistryRequest } from '@types/openapi';
+import type {
+  AppDataGrantDto,
+  AppDataGrantScopeType,
+  AppRegistryRequest,
+} from '@types/openapi';
 import { getPagedRecords } from '@types/api';
 import dayjs from 'dayjs';
 
@@ -39,6 +51,17 @@ const AVAILABLE_SCOPES = [
   { value: 'payslip:read', label: 'payslip:read (工资条)' },
 ];
 
+const DATA_GRANT_SCOPE_OPTIONS: Array<{ value: AppDataGrantScopeType; label: string }> = [
+  { value: 'tenant', label: '租户（全部薪酬数据）' },
+  { value: 'department', label: '部门（本地部门 ID）' },
+  { value: 'employee', label: '员工（员工 ID）' },
+  { value: 'payroll_batch', label: '工资批次（批次 ID）' },
+];
+
+const DATA_GRANT_SCOPE_LABELS = Object.fromEntries(
+  DATA_GRANT_SCOPE_OPTIONS.map((item) => [item.value, item.label]),
+) as Record<AppDataGrantScopeType, string>;
+
 type FormValues = {
   appName: string;
   scopes: string[];
@@ -46,6 +69,11 @@ type FormValues = {
   ipWhitelist?: string;
   webhookUrl?: string;
   description?: string;
+};
+
+type GrantFormValues = {
+  scopeType: AppDataGrantScopeType;
+  scopeValue: string;
 };
 
 const toRequestPayload = (values: FormValues): AppRegistryRequest => {
@@ -132,7 +160,9 @@ const AppRegistryPage: React.FC = () => {
   const [queryParams, setQueryParams] = useState<AppRegistryQueryParams>({ current: 1, size: 10 });
   const [modalVisible, setModalVisible] = useState(false);
   const [editing, setEditing] = useState<AppRegistryDto | null>(null);
+  const [grantApp, setGrantApp] = useState<AppRegistryDto | null>(null);
   const [form] = Form.useForm<FormValues>();
+  const [grantForm] = Form.useForm<GrantFormValues>();
 
   const { message, modal } = AntdApp.useApp();
 
@@ -140,6 +170,9 @@ const AppRegistryPage: React.FC = () => {
   const createMutation = useCreateAppRegistryMutation();
   const updateMutation = useUpdateAppRegistryMutation();
   const rotateMutation = useRotateAppRegistrySecretMutation();
+  const grantQuery = useAppDataGrantsQuery(grantApp?.id ?? 0, { enabled: !!grantApp });
+  const createGrantMutation = useCreateAppDataGrantMutation();
+  const revokeGrantMutation = useRevokeAppDataGrantMutation();
 
   const dataSource = getPagedRecords(listQuery.data);
 
@@ -173,6 +206,44 @@ const AppRegistryPage: React.FC = () => {
     setModalVisible(false);
     setEditing(null);
     form.resetFields();
+  };
+
+  const openGrantDrawer = (record: AppRegistryDto) => {
+    setGrantApp(record);
+    grantForm.resetFields();
+    grantForm.setFieldsValue({ scopeType: 'employee' });
+  };
+
+  const closeGrantDrawer = () => {
+    setGrantApp(null);
+    grantForm.resetFields();
+  };
+
+  const handleGrantSubmit = async (values: GrantFormValues) => {
+    if (!grantApp) return;
+    try {
+      await createGrantMutation.mutateAsync({
+        id: grantApp.id,
+        payload: { scopeType: values.scopeType, scopeValue: values.scopeValue.trim() },
+      });
+      message.success('数据范围已授权');
+      grantForm.resetFields(['scopeValue']);
+      grantForm.setFieldsValue({ scopeType: values.scopeType });
+      await grantQuery.refetch();
+    } catch (error: any) {
+      message.error(error?.response?.data?.message || error?.message || '授权失败');
+    }
+  };
+
+  const handleRevokeGrant = async (grant: AppDataGrantDto) => {
+    if (!grantApp) return;
+    try {
+      await revokeGrantMutation.mutateAsync({ id: grantApp.id, grantId: grant.id });
+      message.success('数据范围已撤销');
+      await grantQuery.refetch();
+    } catch (error: any) {
+      message.error(error?.response?.data?.message || error?.message || '撤销失败');
+    }
   };
 
   const handleSubmit = async () => {
@@ -310,6 +381,15 @@ const AppRegistryPage: React.FC = () => {
               >
                 轮换密钥
               </Button>,
+              <Button
+                key="grants"
+                type="link"
+                size="small"
+                icon={<SafetyOutlined />}
+                onClick={() => openGrantDrawer(record)}
+              >
+                数据范围
+              </Button>,
             ],
           },
         ]}
@@ -393,6 +473,84 @@ const AppRegistryPage: React.FC = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      <Drawer
+        title={grantApp ? `数据范围：${grantApp.appName}` : '数据范围'}
+        open={!!grantApp}
+        onClose={closeGrantDrawer}
+        width={620}
+      >
+        <Form<GrantFormValues>
+          form={grantForm}
+          layout="vertical"
+          onFinish={handleGrantSubmit}
+          initialValues={{ scopeType: 'employee' }}
+        >
+          <Form.Item
+            name="scopeType"
+            label="范围类型"
+            rules={[{ required: true, message: '请选择范围类型' }]}
+          >
+            <Select options={DATA_GRANT_SCOPE_OPTIONS} />
+          </Form.Item>
+          <Form.Item
+            name="scopeValue"
+            label="范围值"
+            extra="租户使用配置的租户标识；部门、员工和批次使用数字 ID。禁止使用通配符。"
+            rules={[{ required: true, whitespace: true, message: '请输入范围值' }]}
+          >
+            <Input placeholder="例如：1001" />
+          </Form.Item>
+          <Button
+            type="primary"
+            htmlType="submit"
+            icon={<PlusOutlined />}
+            loading={createGrantMutation.isPending}
+          >
+            添加授权
+          </Button>
+        </Form>
+
+        <Table<AppDataGrantDto>
+          style={{ marginTop: 24 }}
+          rowKey={(record) => String(record.id)}
+          size="small"
+          loading={grantQuery.isLoading || grantQuery.isFetching}
+          dataSource={grantQuery.data || []}
+          pagination={false}
+          locale={{ emptyText: '尚未配置数据范围，含薪酬 scope 的应用将无法获取数据' }}
+          columns={[
+            {
+              title: '类型',
+              dataIndex: 'scopeType',
+              render: (value: AppDataGrantScopeType) => DATA_GRANT_SCOPE_LABELS[value] || value,
+            },
+            { title: '范围值', dataIndex: 'scopeValue', ellipsis: true },
+            {
+              title: '操作',
+              width: 90,
+              render: (_, record) => (
+                <Popconfirm
+                  title="撤销这条数据授权？"
+                  okText="撤销"
+                  cancelText="取消"
+                  onConfirm={() => handleRevokeGrant(record)}
+                >
+                  <Button
+                    type="link"
+                    danger
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    loading={revokeGrantMutation.isPending}
+                  >
+                    撤销
+                  </Button>
+                </Popconfirm>
+              ),
+            },
+          ]}
+        />
+      </Drawer>
     </PageContainer>
   );
 };

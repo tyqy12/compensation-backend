@@ -56,6 +56,21 @@ class EmployeeDepartmentServiceImplTest {
         assertThat(service.saved).isEmpty();
     }
 
+    @Test
+    void departmentReadsShouldUsePhysicalColumnNamesForPrimaryOrdering() {
+        initTableInfo(EmployeeDepartment.class);
+        TestableEmployeeDepartmentService service = new TestableEmployeeDepartmentService();
+        EmployeeDepartment relation = new EmployeeDepartment();
+        relation.setEmployeeId(7L);
+        relation.setDeptName("技术部");
+        service.relations = List.of(relation);
+
+        assertThat(service.findDepartmentNames(7L)).containsExactly("技术部");
+        assertThat(service.findDepartmentNamesByEmployeeIds(List.of(7L)))
+                .containsEntry(7L, List.of("技术部"));
+        assertThat(service.lastListWrapper.getSqlSegment()).contains("is_primary", "order_num", "id");
+    }
+
     private static void initTableInfo(Class<?> entityType) {
         MybatisConfiguration configuration = new MybatisConfiguration();
         MapperBuilderAssistant assistant = new MapperBuilderAssistant(configuration, entityType.getName());
@@ -66,6 +81,8 @@ class EmployeeDepartmentServiceImplTest {
     private static class TestableEmployeeDepartmentService extends EmployeeDepartmentServiceImpl {
         private final List<Wrapper<EmployeeDepartment>> removed = new ArrayList<>();
         private final List<EmployeeDepartment> saved = new ArrayList<>();
+        private List<EmployeeDepartment> relations = List.of();
+        private Wrapper<EmployeeDepartment> lastListWrapper;
 
         @Override
         public boolean remove(Wrapper<EmployeeDepartment> queryWrapper) {
@@ -77,6 +94,12 @@ class EmployeeDepartmentServiceImplTest {
         public boolean saveBatch(Collection<EmployeeDepartment> entityList) {
             saved.addAll(entityList);
             return true;
+        }
+
+        @Override
+        public List<EmployeeDepartment> list(Wrapper<EmployeeDepartment> queryWrapper) {
+            lastListWrapper = queryWrapper;
+            return relations;
         }
     }
 }

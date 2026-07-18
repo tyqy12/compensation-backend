@@ -18,6 +18,12 @@ public class PayrollLine extends BaseEntity {
     private Integer batchRevision;
     @TableField("employee_id")
     private Long employeeId;
+    @TableField("employee_no_snapshot")
+    private String employeeNoSnapshot;
+    @TableField("employee_name_snapshot")
+    private String employeeNameSnapshot;
+    @TableField("department_snapshot")
+    private String departmentSnapshot;
     @TableField("employment_type")
     private String employmentType;
     @TableField("template_id")

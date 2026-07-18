@@ -12,6 +12,8 @@ import com.yiyundao.compensation.interfaces.dto.openapi.OpenApiPayslipDto;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.modules.employee.service.EmployeeDepartmentService;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
+import com.yiyundao.compensation.modules.app.entity.AppDataGrant;
+import com.yiyundao.compensation.modules.app.service.AppDataGrantService;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
@@ -22,6 +24,8 @@ import com.yiyundao.compensation.modules.payroll.service.SalaryItemService;
 import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.service.EncryptionService;
+import com.yiyundao.compensation.security.ExternalApiContext;
+import com.yiyundao.compensation.security.ExternalApiDataScopeService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -36,6 +40,7 @@ import java.util.List;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -65,11 +70,27 @@ class ExternalPayrollQueryServiceImplTest {
     @Mock
     private EmployeeDepartmentService employeeDepartmentService;
 
+    @Mock
+    private AppDataGrantService appDataGrantService;
+
+    private ExternalApiContext externalApiContext;
     private ExternalPayrollQueryServiceImpl service;
 
     @BeforeEach
     void setUp() {
         initTableInfo(ExternalIdentity.class);
+        externalApiContext = new ExternalApiContext();
+        externalApiContext.set(ExternalApiContext.ExternalApiClient.builder()
+                .appId(1L)
+                .clientId("test-app")
+                .scopes(List.of("payroll:read", "payslip:read"))
+                .build());
+        AppDataGrant tenantGrant = new AppDataGrant();
+        tenantGrant.setAppId(1L);
+        tenantGrant.setScopeType(AppDataGrantService.TENANT);
+        tenantGrant.setScopeValue("default");
+        tenantGrant.setStatus("active");
+        lenient().when(appDataGrantService.listActiveByAppId(1L)).thenReturn(List.of(tenantGrant));
         service = new ExternalPayrollQueryServiceImpl(
                 payrollBatchService,
                 payrollLineService,
@@ -79,7 +100,9 @@ class ExternalPayrollQueryServiceImplTest {
                 new ObjectMapper(),
                 encryptionService,
                 externalIdentityService,
-                employeeDepartmentService
+                employeeDepartmentService,
+                externalApiContext,
+                new ExternalApiDataScopeService(appDataGrantService, employeeDepartmentService)
         );
     }
 
@@ -294,6 +317,40 @@ class ExternalPayrollQueryServiceImplTest {
 
         assertThat(result).isNotNull();
         assertThat(result.getPaidAt()).isEqualTo(processEndTime);
+    }
+
+    @Test
+    void externalApplicationsShouldNotSeeEachOthersEmployeePayslips() {
+        PayrollLine line = line(206L, 112L);
+        PayrollBatch batch = batch(112L, PayrollBatchStatus.PAID);
+        Employee employee = employee(301L, "E01");
+        when(payrollLineService.getById(206L)).thenReturn(line);
+        when(payrollBatchService.getById(112L)).thenReturn(batch);
+        when(employeeService.getByEmployeeId("E01")).thenReturn(employee);
+        when(employeeService.getById(301L)).thenReturn(employee);
+        when(payrollLineService.count(any())).thenReturn(1L);
+
+        AppDataGrant employeeGrant = new AppDataGrant();
+        employeeGrant.setAppId(2L);
+        employeeGrant.setScopeType(AppDataGrantService.EMPLOYEE);
+        employeeGrant.setScopeValue("301");
+        employeeGrant.setStatus("active");
+        when(appDataGrantService.listActiveByAppId(2L)).thenReturn(List.of(employeeGrant));
+        externalApiContext.set(ExternalApiContext.ExternalApiClient.builder()
+                .appId(2L).clientId("app-a").scopes(List.of("payslip:read")).build());
+
+        assertThat(service.findPayslip(206L, "emp:E01")).isNotNull();
+
+        AppDataGrant otherEmployeeGrant = new AppDataGrant();
+        otherEmployeeGrant.setAppId(3L);
+        otherEmployeeGrant.setScopeType(AppDataGrantService.EMPLOYEE);
+        otherEmployeeGrant.setScopeValue("302");
+        otherEmployeeGrant.setStatus("active");
+        when(appDataGrantService.listActiveByAppId(3L)).thenReturn(List.of(otherEmployeeGrant));
+        externalApiContext.set(ExternalApiContext.ExternalApiClient.builder()
+                .appId(3L).clientId("app-b").scopes(List.of("payslip:read")).build());
+
+        assertThat(service.findPayslip(206L, "emp:E01")).isNull();
     }
 
     private PayrollBatch batch(Long id, PayrollBatchStatus status) {

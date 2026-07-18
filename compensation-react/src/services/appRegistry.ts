@@ -1,6 +1,12 @@
 import api, { unwrap } from '@services/api';
 import type { ApiResponse, PagedResponse } from '@types/api';
-import type { AppRegistryDto, AppRegistryRequest, AppRegistrySecretDto } from '@types/openapi';
+import type {
+  AppDataGrantDto,
+  AppDataGrantRequest,
+  AppRegistryDto,
+  AppRegistryRequest,
+  AppRegistrySecretDto,
+} from '@types/openapi';
 
 export interface AppRegistryQueryParams {
   current?: number;
@@ -59,4 +65,24 @@ export async function rotateAppRegistrySecret(
     `/admin/app-registry/${id}/rotate-secret`,
   );
   return unwrap(data);
+}
+
+export async function listAppDataGrants(id: number | string): Promise<AppDataGrantDto[]> {
+  const { data } = await api.get<ApiResponse<AppDataGrantDto[]>>(`/admin/app-registry/${id}/data-grants`);
+  return unwrap(data);
+}
+
+export async function createAppDataGrant(
+  id: number | string,
+  payload: AppDataGrantRequest,
+): Promise<AppDataGrantDto> {
+  const { data } = await api.post<ApiResponse<AppDataGrantDto>>(
+    `/admin/app-registry/${id}/data-grants`,
+    payload,
+  );
+  return unwrap(data);
+}
+
+export async function revokeAppDataGrant(id: number | string, grantId: number | string): Promise<void> {
+  await api.delete(`/admin/app-registry/${id}/data-grants/${grantId}`);
 }

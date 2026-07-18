@@ -67,8 +67,10 @@ CREATE TABLE IF NOT EXISTS `payroll_tax_deduction_declaration` (
   `effective_to` date DEFAULT NULL,
   `credential_ref` varchar(255) DEFAULT NULL COMMENT '凭证元数据引用，不存明文证件',
   `evidence_json` json DEFAULT NULL COMMENT '声明和凭证审计元数据',
+  `facts_json` json DEFAULT NULL COMMENT '扣除事实JSON',
   `status` varchar(20) NOT NULL DEFAULT 'pending' COMMENT 'pending/approved/rejected/expired',
   `source_type` varchar(32) DEFAULT NULL COMMENT 'employee_declaration/import/tax_platform',
+  `policy_id` bigint DEFAULT NULL COMMENT '扣除政策版本',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `create_by` varchar(50) DEFAULT NULL,
@@ -87,6 +89,7 @@ CREATE TABLE IF NOT EXISTS `payroll_tax_ledger` (
   `tax_year` int NOT NULL,
   `tax_month` int NOT NULL,
   `payroll_batch_id` bigint DEFAULT NULL,
+  `payroll_batch_revision` int NOT NULL DEFAULT '1' COMMENT '工资批次版本',
   `payroll_line_id` bigint DEFAULT NULL,
   `cumulative_income` decimal(18,2) NOT NULL DEFAULT '0.00',
   `cumulative_tax_exempt_income` decimal(18,2) NOT NULL DEFAULT '0.00',
@@ -111,7 +114,7 @@ CREATE TABLE IF NOT EXISTS `payroll_tax_ledger` (
   `deleted` tinyint(1) NOT NULL DEFAULT '0',
   `version` int NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_tax_ledger_employee_period_batch` (`employee_id`,`tax_year`,`tax_month`,`payroll_batch_id`,`deleted`),
+  UNIQUE KEY `uk_tax_ledger_employee_period_batch_revision` (`employee_id`,`tax_year`,`tax_month`,`payroll_batch_id`,`payroll_batch_revision`,`deleted`),
   KEY `idx_tax_ledger_previous` (`employee_id`,`withholding_entity_id`,`tax_year`,`tax_month`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工年度累计个税台账';
 

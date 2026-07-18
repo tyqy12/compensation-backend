@@ -23,6 +23,28 @@ class ConfigDecryptionServiceTest {
     }
 
     @Test
+    void shouldUseAuthenticatedVersionedEnvelopeAndRejectTampering() {
+        ConfigDecryptionService service = new ConfigDecryptionService(
+                "configured-aes-key-for-test",
+                new MockEnvironment().withProperty("spring.profiles.active", "test")
+        );
+        service.init();
+
+        String encrypted = service.encrypt("sensitive-config-value");
+        int payloadStart = encrypted.indexOf(':', encrypted.indexOf(':') + 1) + 1;
+        int tamperIndex = payloadStart + 4;
+        char original = encrypted.charAt(tamperIndex);
+        char replacement = original == 'A' ? 'B' : 'A';
+        String tampered = encrypted.substring(0, tamperIndex) + replacement
+                + encrypted.substring(tamperIndex + 1);
+
+        assertThat(encrypted).startsWith("v2:env-current:");
+        assertThatThrownBy(() -> service.decrypt(tampered))
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("配置解密失败");
+    }
+
+    @Test
     void shouldRejectDefaultKeyInProdLikeProfile() {
         ConfigDecryptionService service = new ConfigDecryptionService(
                 "default_aes_key_32_chars_long_here",

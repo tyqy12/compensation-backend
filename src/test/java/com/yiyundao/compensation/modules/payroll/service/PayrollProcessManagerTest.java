@@ -78,6 +78,8 @@ class PayrollProcessManagerTest {
     private EncryptionService encryptionService;
     @Mock
     private TransactionOperations transactionOperations;
+    @Mock
+    private PayrollTaxLedgerService payrollTaxLedgerService;
 
     @Test
     void computeAndInitializeShouldMarkSkippedConfirmationBatchConfirmedBeforeCreatingDistribution() {
@@ -798,7 +800,8 @@ class PayrollProcessManagerTest {
                 settlementService,
                 afterCommitExecutor,
                 encryptionService,
-                transactionOperations
+                transactionOperations,
+                payrollTaxLedgerService
         );
     }
 

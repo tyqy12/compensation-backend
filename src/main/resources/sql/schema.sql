@@ -26,6 +26,24 @@ DROP TABLE IF EXISTS `payroll_tax_bracket`;
 DROP TABLE IF EXISTS `payroll_policy_package`;
 DROP TABLE IF EXISTS `sys_role`;
 DROP TABLE IF EXISTS `sys_resource`;
+DROP TABLE IF EXISTS `app_data_grant`;
+
+CREATE TABLE `app_data_grant` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `app_id` bigint NOT NULL COMMENT '第三方应用 ID',
+  `scope_type` varchar(32) NOT NULL COMMENT 'tenant/department/employee/payroll_batch',
+  `scope_value` varchar(128) NOT NULL COMMENT '对象 ID，不允许通配符',
+  `status` varchar(20) NOT NULL DEFAULT 'active',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_app_data_grant` (`app_id`,`scope_type`,`scope_value`,`deleted`),
+  KEY `idx_app_data_grant_active` (`app_id`,`status`,`scope_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='第三方应用数据范围授权';
 
 -- ============================================
 -- 1. 员工信息表 (employee)
@@ -264,6 +282,9 @@ CREATE TABLE `payroll_line` (
   `batch_id` bigint NOT NULL COMMENT '批次ID',
   `batch_revision` int NOT NULL DEFAULT '1' COMMENT '工资行所属批次版本号',
   `employee_id` bigint NOT NULL COMMENT '员工ID',
+  `employee_no_snapshot` varchar(50) DEFAULT NULL COMMENT '核算时员工工号快照',
+  `employee_name_snapshot` varchar(100) DEFAULT NULL COMMENT '核算时员工姓名快照',
+  `department_snapshot` varchar(500) DEFAULT NULL COMMENT '核算时部门快照',
   `employment_type` varchar(20) NOT NULL COMMENT 'full_time/part_time',
   `template_id` bigint DEFAULT NULL COMMENT '模板ID',
   `template_version` bigint DEFAULT NULL COMMENT '工资行使用的规则包版本',
@@ -588,8 +609,10 @@ CREATE TABLE `payroll_tax_deduction_declaration` (
   `effective_to` date DEFAULT NULL,
   `credential_ref` varchar(255) DEFAULT NULL,
   `evidence_json` json DEFAULT NULL,
+  `facts_json` json DEFAULT NULL COMMENT '扣除事实JSON，不存最终政策金额以外的推导状态',
   `status` varchar(20) NOT NULL DEFAULT 'pending',
   `source_type` varchar(32) DEFAULT NULL,
+  `policy_id` bigint DEFAULT NULL COMMENT '扣除政策版本',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `create_by` varchar(50) DEFAULT NULL,
@@ -607,6 +630,7 @@ CREATE TABLE `payroll_tax_ledger` (
   `tax_year` int NOT NULL,
   `tax_month` int NOT NULL,
   `payroll_batch_id` bigint DEFAULT NULL,
+  `payroll_batch_revision` int NOT NULL DEFAULT '1' COMMENT '工资批次版本',
   `payroll_line_id` bigint DEFAULT NULL,
   `cumulative_income` decimal(18,2) NOT NULL DEFAULT '0.00',
   `cumulative_tax_exempt_income` decimal(18,2) NOT NULL DEFAULT '0.00',
@@ -631,7 +655,7 @@ CREATE TABLE `payroll_tax_ledger` (
   `deleted` tinyint(1) NOT NULL DEFAULT '0',
   `version` int NOT NULL DEFAULT '0',
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_tax_ledger_employee_period_batch` (`employee_id`,`tax_year`,`tax_month`,`payroll_batch_id`,`deleted`),
+  UNIQUE KEY `uk_tax_ledger_employee_period_batch_revision` (`employee_id`,`tax_year`,`tax_month`,`payroll_batch_id`,`payroll_batch_revision`,`deleted`),
   KEY `idx_tax_ledger_previous` (`employee_id`,`withholding_entity_id`,`tax_year`,`tax_month`,`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工年度累计个税台账';
 
@@ -757,7 +781,7 @@ INSERT INTO `payroll_policy_package`
 SELECT 'CN.RESIDENT_WAGE_WITHHOLDING', '居民个人工资薪金累计预扣预缴', 'tax', 'CN', '2019-01-01',
        '国家税务总局公告2018年第61号',
        'https://fgk.chinatax.gov.cn/zcfgk/c100015/c5200946/content.html',
-       '{"basicDeductionPerMonth":5000,"annualBonusPolicyUntil":"2027-12-31"}', 'published', 1
+       '{"basicDeductionPerMonth":5000,"deductions":{"infant_care":{"monthlyPerSubject":2000,"effectiveFrom":"2023-01-01"},"child_education":{"monthlyPerSubject":2000,"effectiveFrom":"2023-01-01"},"continuing_education":{"monthlyAmount":400,"vocationalAnnualAmount":3600},"major_medical":{"annualThreshold":15000,"annualLimit":80000,"settlementOnly":true},"housing_loan_interest":{"monthlyAmount":1000,"maxMonths":240},"rent":{"monthlyAmounts":[800,1100,1500]},"elderly_care":{"singleChildMonthlyAmount":3000,"nonSingleTotalMonthlyAmount":3000,"perPersonLimit":1500},"individual_pension":{"annualLimit":12000,"effectiveFrom":"2024-01-01"}},"annualBonusPolicyUntil":"2027-12-31"}', 'published', 1
 WHERE NOT EXISTS (
   SELECT 1 FROM `payroll_policy_package`
   WHERE `code`='CN.RESIDENT_WAGE_WITHHOLDING' AND `version_no`=1 AND `deleted`=0

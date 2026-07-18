@@ -395,6 +395,9 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
                 new Page<>(current, size),
                 new LambdaQueryWrapper<PayrollLine>()
                         .eq(PayrollLine::getEmployeeId, employeeId)
+                        .exists("SELECT 1 FROM payroll_batch pb WHERE pb.id = payroll_line.batch_id"
+                                + " AND pb.deleted = 0"
+                                + " AND payroll_line.batch_revision = COALESCE(pb.batch_revision, 1)")
                         .orderByDesc(PayrollLine::getId)
         );
 

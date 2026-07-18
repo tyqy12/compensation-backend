@@ -3,6 +3,8 @@ package com.yiyundao.compensation.modules.payroll.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.yiyundao.compensation.common.exception.BusinessException;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollBasicReportDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollPreviewDto;
@@ -16,6 +18,7 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollReportService;
 import com.yiyundao.compensation.modules.payroll.support.CsvExportUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.util.CollectionUtils;
 import org.springframework.util.StringUtils;
@@ -55,15 +58,25 @@ public class PayrollReportServiceImpl implements PayrollReportService {
     private final EmployeeService employeeService;
     private final ObjectMapper objectMapper;
 
+    /** 当前实现需要解析工资项快照；超过上限时明确拒绝，避免导出请求导致 JVM OOM。 */
+    @Value("${payroll.report.max-in-memory-lines:50000}")
+    private int maxInMemoryLines;
+
     @Override
     public PayrollBasicReportDto basicReport(Long batchId, String periodLabel, String department) {
         List<Long> batchIds = resolveBatchIds(batchId, periodLabel);
         if (batchIds.isEmpty()) {
             return emptyReport();
         }
-        List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
-                .in(PayrollLine::getBatchId, batchIds)
-        );
+        Map<Long, PayrollBatch> batchMap = loadBatchMap(batchIds);
+        LambdaQueryWrapper<PayrollLine> activeWrapper = activeRevisionWrapper(batchMap);
+        long activeLineCount = payrollLineService.count(activeWrapper);
+        int lineLimit = maxInMemoryLines > 0 ? maxInMemoryLines : 50000;
+        if (activeLineCount > lineLimit) {
+            throw new BusinessException(ErrorCode.SERVICE_UNAVAILABLE,
+                    "报表数据量超过当前同步导出上限，请缩小批次/期间范围后重试");
+        }
+        List<PayrollLine> lines = payrollLineService.list(activeWrapper);
         if (CollectionUtils.isEmpty(lines)) {
             PayrollBasicReportDto dto = emptyReport();
             dto.setBatchId(batchId);
@@ -71,7 +84,6 @@ public class PayrollReportServiceImpl implements PayrollReportService {
             return dto;
         }
 
-        Map<Long, PayrollBatch> batchMap = loadBatchMap(batchIds);
         Map<Long, Employee> employeeMap = loadEmployeeMap(lines);
         Map<String, PayrollBasicReportDto.DepartmentSummary> departmentMap = new LinkedHashMap<>();
 
@@ -85,7 +97,9 @@ public class PayrollReportServiceImpl implements PayrollReportService {
 
         for (PayrollLine line : lines) {
             Employee employee = employeeMap.get(line.getEmployeeId());
-            String dept = employee != null && StringUtils.hasText(employee.getDepartment())
+            String dept = StringUtils.hasText(line.getDepartmentSnapshot())
+                    ? line.getDepartmentSnapshot()
+                    : employee != null && StringUtils.hasText(employee.getDepartment())
                     ? employee.getDepartment()
                     : "未分配";
             if (StringUtils.hasText(department) && !department.equalsIgnoreCase(dept)) {
@@ -251,6 +265,30 @@ public class PayrollReportServiceImpl implements PayrollReportService {
         return map;
     }
 
+    private LambdaQueryWrapper<PayrollLine> activeRevisionWrapper(Map<Long, PayrollBatch> batchMap) {
+        LambdaQueryWrapper<PayrollLine> wrapper = new LambdaQueryWrapper<>();
+        if (batchMap == null || batchMap.isEmpty()) {
+            wrapper.eq(PayrollLine::getId, -1L);
+            return wrapper;
+        }
+        wrapper.and(group -> {
+            boolean first = true;
+            for (Map.Entry<Long, PayrollBatch> entry : batchMap.entrySet()) {
+                if (!first) {
+                    group.or();
+                }
+                group.eq(PayrollLine::getBatchId, entry.getKey())
+                        .eq(PayrollLine::getBatchRevision, normalizeRevision(entry.getValue().getBatchRevision()));
+                first = false;
+            }
+        });
+        return wrapper;
+    }
+
+    private int normalizeRevision(Integer revision) {
+        return revision == null || revision < 1 ? 1 : revision;
+    }
+
     private Map<Long, Employee> loadEmployeeMap(List<PayrollLine> lines) {
         Set<Long> employeeIds = new HashSet<>();
         for (PayrollLine line : lines) {
@@ -287,7 +325,7 @@ public class PayrollReportServiceImpl implements PayrollReportService {
                 log.warn("Failed to parse payroll line items: {}", nested.getMessage());
             }
             log.warn("Failed to parse payroll line items: {}", e.getMessage());
-            return Collections.emptyList();
+            throw new BusinessException(ErrorCode.DATA_INTEGRITY_ERROR, "工资项快照损坏，无法生成正式报表");
         }
     }
 

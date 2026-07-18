@@ -36,6 +36,7 @@ import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueS
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -69,6 +70,15 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
     private PayrollContributionCalculationService payrollContributionCalculationService;
     private PayrollContributionRecordService payrollContributionRecordService;
     private com.yiyundao.compensation.modules.payroll.service.PayrollCalculationTraceService payrollCalculationTraceService;
+
+    /**
+     * 模板社保比例只允许用于本地影子核算。生产核算必须命中完整的参保关系和属地政策。
+     */
+    @Value("${payroll.compliance.allow-template-fallback:false}")
+    private boolean allowTemplateContributionFallback;
+
+    @Value("${payroll.compliance.allow-builtin-tax-fallback:false}")
+    private boolean allowBuiltinTaxFallback;
 
     @Autowired(required = false)
     public void setPayrollCumulativeTaxService(PayrollCumulativeTaxService payrollCumulativeTaxService) {
@@ -130,8 +140,10 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
 
         try {
             java.util.Map<Long, PayrollLine> existingByEmployee = new java.util.HashMap<>();
+            int activeRevision = normalizeRevision(ctx.batch.getBatchRevision()) - (revisionAdvance ? 1 : 0);
             for (PayrollLine existing : existingLines) {
-                if (existing != null && existing.getEmployeeId() != null) {
+                if (existing != null && existing.getEmployeeId() != null
+                        && normalizeRevision(existing.getBatchRevision()) == activeRevision) {
                     existingByEmployee.put(existing.getEmployeeId(), existing);
                 }
             }
@@ -141,18 +153,8 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
                 entities.add(toPayrollLine(ctx, entry.getKey(), entry.getValue(), existingByEmployee.get(entry.getKey())));
             }
 
-            if (ctx.createNewRevision) {
-                payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>().eq(PayrollLine::getBatchId, batchId));
-            } else {
-                java.util.Set<Long> keepEmployeeIds = summary.linesByEmployee.keySet();
-                if (keepEmployeeIds.isEmpty()) {
-                    payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>().eq(PayrollLine::getBatchId, batchId));
-                } else {
-                    payrollLineService.remove(new LambdaQueryWrapper<PayrollLine>()
-                            .eq(PayrollLine::getBatchId, batchId)
-                            .notIn(PayrollLine::getEmployeeId, keepEmployeeIds));
-                }
-            }
+            // Revision is append-only. The batch's batch_revision points at the active result;
+            // prior payroll lines remain queryable for audit, dispute and reconciliation.
 
             if (!entities.isEmpty()) {
                 payrollLineService.saveOrUpdateBatch(entities);
@@ -630,7 +632,8 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
                     fallbackSocial,
                     ctx.rule.roundingMode
             );
-    BigDecimal social = contributionResult != null && contributionResult.policyDriven()
+    boolean contributionPolicyDriven = contributionResult != null && contributionResult.policyDriven();
+    BigDecimal social = contributionPolicyDriven
             ? contributionResult.employeeAmount().setScale(ctx.rule.scale, ctx.rule.roundingMode)
             : fallbackSocial;
     if (contributionResult != null) {
@@ -670,6 +673,33 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
             .setScale(ctx.rule.scale, ctx.rule.roundingMode));
 
     java.util.List<PayrollValidationIssueDto> issues = new java.util.ArrayList<>();
+    if (payrollCumulativeTaxService == null && !allowBuiltinTaxFallback) {
+        issues.add(validationIssueSupport.blocking(
+                "TAX_ENGINE_MISSING",
+                "累计预扣个税合规计算组件不可用，已阻止正式核算",
+                String.valueOf(empId),
+                ctx.batch.getPeriodLabel(),
+                null
+        ));
+    }
+    if (!contributionPolicyDriven && !allowTemplateContributionFallback) {
+        issues.add(validationIssueSupport.blocking(
+                "CONTRIBUTION_POLICY_MISSING",
+                "员工缺少有效参保关系或已发布的属地五险一金政策，已阻止正式核算",
+                String.valueOf(empId),
+                ctx.batch.getPeriodLabel(),
+                null
+        ));
+    }
+    if (payrollCalculationTraceService == null && !allowBuiltinTaxFallback) {
+        issues.add(validationIssueSupport.blocking(
+                "CALCULATION_TRACE_WRITER_MISSING",
+                "薪酬计算证据链组件不可用，已阻止正式核算",
+                String.valueOf(empId),
+                ctx.batch.getPeriodLabel(),
+                null
+        ));
+    }
     java.util.List<String> missingItems = new java.util.ArrayList<>();
     java.util.Set<String> presentCodes = new java.util.HashSet<>();
     for (var item : pItems) {
@@ -822,8 +852,6 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         if (payrollContributionRecordService == null || ctx == null || entities == null) {
             return;
         }
-        payrollContributionRecordService.remove(new LambdaQueryWrapper<com.yiyundao.compensation.modules.payroll.entity.PayrollContributionRecord>()
-                .eq(com.yiyundao.compensation.modules.payroll.entity.PayrollContributionRecord::getPayrollBatchId, ctx.batch.getId()));
         for (PayrollLine line : entities) {
             PayrollContributionCalculationService.Result result = ctx.contributionComputations.get(line.getEmployeeId());
             if (result == null || !result.policyDriven()) {
@@ -1143,6 +1171,9 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         entity.setBatchId(ctx.batch.getId());
         entity.setBatchRevision(ctx.calculationRevision);
         entity.setEmployeeId(empId);
+        entity.setEmployeeNoSnapshot(lineDto.getEmployeeNo());
+        entity.setEmployeeNameSnapshot(lineDto.getEmployeeName());
+        entity.setDepartmentSnapshot(lineDto.getDepartment());
         entity.setTemplateId(ctx.template != null ? ctx.template.getId() : null);
         entity.setTemplateVersion(ctx.template != null ? ctx.template.getDataVersion() : null);
         entity.setInputSnapshotHash(ctx.inputSnapshotHash);
@@ -1158,8 +1189,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
     try {
         entity.setTaxBreakdownJson(objectMapper.writeValueAsString(lineDto.getTaxBreakdown()));
     } catch (Exception e) {
-        log.warn("serialize tax breakdown snapshot failed: {}", e.getMessage());
-        entity.setTaxBreakdownJson(null);
+        throw new BusinessException(ErrorCode.DATA_INTEGRITY_ERROR, "个税解释快照序列化失败，已阻止落库");
     }
     if (existing != null && existing.getStatus() != null) {
         entity.setStatus(existing.getStatus());
@@ -1183,8 +1213,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
     try {
         entity.setItemsSnapshotJson(objectMapper.writeValueAsString(lineDto.getItems()));
     } catch (Exception e) {
-        log.warn("serialize items snapshot failed: {}", e.getMessage());
-        entity.setItemsSnapshotJson("[]");
+        throw new BusinessException(ErrorCode.DATA_INTEGRITY_ERROR, "工资项快照序列化失败，已阻止落库");
     }
     entity.setWarning(validationIssueSupport.serialize(lineDto.getIssues()));
     return entity;
@@ -1346,7 +1375,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
 
     private java.util.List<PayrollPreviewDto.PayrollPreviewItemDto> parseItemsSnapshot(String json) {
         if (json == null || json.isBlank()) {
-            return java.util.Collections.emptyList();
+            throw new BusinessException(ErrorCode.DATA_INTEGRITY_ERROR, "工资项历史快照损坏，无法继续核算");
         }
         try {
             var node = readJsonTree(json);
@@ -1569,6 +1598,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
             // fetch previous payroll line for this employee
             var prevLine = payrollLineService.getOne(new LambdaQueryWrapper<PayrollLine>()
                     .eq(PayrollLine::getBatchId, prev.getId())
+                    .eq(PayrollLine::getBatchRevision, normalizeRevision(prev.getBatchRevision()))
                     .eq(PayrollLine::getEmployeeId, employeeId)
                     .last("limit 1"));
             if (prevLine == null) return null;

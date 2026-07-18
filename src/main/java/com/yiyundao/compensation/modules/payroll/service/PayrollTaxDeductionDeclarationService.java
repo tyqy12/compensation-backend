@@ -5,4 +5,6 @@ import com.yiyundao.compensation.modules.payroll.entity.PayrollTaxDeductionDecla
 
 public interface PayrollTaxDeductionDeclarationService extends IService<PayrollTaxDeductionDeclaration> {
     PayrollTaxDeductionDeclaration saveValidated(PayrollTaxDeductionDeclaration declaration);
+
+    PayrollTaxDeductionDeclaration approveValidated(Long declarationId);
 }

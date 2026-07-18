@@ -35,7 +35,11 @@ public class PayrollTaxDeductionDeclaration extends BaseEntity {
     private String credentialRef;
     @TableField("evidence_json")
     private String evidenceJson;
+    @TableField("facts_json")
+    private String factsJson;
     private String status;
     @TableField("source_type")
     private String sourceType;
+    @TableField("policy_id")
+    private Long policyId;
 }

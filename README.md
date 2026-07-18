@@ -58,8 +58,8 @@ com.yiyundao.compensation/
 
 ### 启动命令
 ```bash
-# 开发环境启动
-./mvnw spring-boot:run
+# 开发环境启动（必须显式启用，并通过环境变量提供数据库和密钥）
+DEV_TOKEN_ENABLED=true ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
 
 # 指定环境启动
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=dev
@@ -246,13 +246,13 @@ git push
 ## 🔧 配置说明
 
 ### 必需配置项
-在启动前，请在 `application-dev.yml` 中配置：
+在启动前，请通过环境变量或未提交的 `application-local.yml` 配置，禁止把凭据写入 Git：
 
 1. **数据库连接**
 ```yaml
-spring.datasource.url: jdbc:mysql://localhost:3306/compensation_dev
-spring.datasource.username: your_username
-spring.datasource.password: your_password
+export SPRING_DATASOURCE_URL='jdbc:mysql://localhost:3306/compensation_dev'
+export SPRING_DATASOURCE_USERNAME='your_username'
+export SPRING_DATASOURCE_PASSWORD='your_password'
 ```
 
 2. **Redis配置**
@@ -267,8 +267,8 @@ export SPRING_DATA_REDIS_PASSWORD='your-redis-password'
 ```
 
 3. **JWT密钥**
-```yaml
-jwt.secret: your-secret-key-at-least-32-chars
+```bash
+export JWT_SECRET='your-random-secret-at-least-32-chars'
 ```
 
 ### 第三方集成配置
@@ -281,7 +281,7 @@ jwt.secret: your-secret-key-at-least-32-chars
 ## 🛡️ 安全特性
 - ✅ JWT Token 认证
 - ✅ 基于角色的访问控制 (RBAC)
-- ✅ SM4 + AES-256 双重加密支持
+- ✅ AES-GCM 版本化密文（兼容历史 SM4/AES-CBC 数据）
 - ✅ 安全的密码存储 (BCrypt)
 - ✅ CORS 和 CSRF 防护
  - ✅ 集成配置密文落库 + 管理员可见 + 脱敏返回

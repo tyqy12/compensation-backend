@@ -28,6 +28,8 @@ import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
 import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.service.EncryptionService;
+import com.yiyundao.compensation.security.ExternalApiContext;
+import com.yiyundao.compensation.security.ExternalApiDataScopeService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -72,9 +74,12 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
     private final EncryptionService encryptionService;
     private final ExternalIdentityService externalIdentityService;
     private final EmployeeDepartmentService employeeDepartmentService;
+    private final ExternalApiContext externalApiContext;
+    private final ExternalApiDataScopeService externalApiDataScopeService;
 
     @Override
     public Page<OpenApiPayrollBatchDto> pagePtBatches(String period, String status, long page, long size) {
+        ExternalApiDataScopeService.DataScope dataScope = currentDataScope();
         long current = Math.max(page, 1);
         long pageSize = Math.min(Math.max(size, 1), 100);
 
@@ -84,6 +89,13 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
 
         if (StringUtils.hasText(period)) {
             wrapper.eq(PayrollBatch::getPeriodLabel, period.trim());
+        }
+        if (!dataScope.allTenant()) {
+            Set<Long> allowedBatchIds = resolveAllowedBatchIds(dataScope);
+            if (allowedBatchIds.isEmpty()) {
+                return emptyBatchPage(current, pageSize);
+            }
+            wrapper.in(PayrollBatch::getId, allowedBatchIds);
         }
         wrapper.orderByDesc(PayrollBatch::getUpdateTime);
 
@@ -96,7 +108,7 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
 
         List<PayrollBatch> batches = entityPage.getRecords();
         List<Long> batchIds = batches.stream().map(PayrollBatch::getId).toList();
-        Map<Long, Long> lineCountMap = loadLineCounts(batchIds);
+        Map<Long, Long> lineCountMap = loadLineCounts(batches, dataScope);
         Map<String, PaymentBatch> paymentBatchMap = loadPaymentBatches(batches);
 
         List<OpenApiPayrollBatchDto> dtos = batches.stream()
@@ -111,11 +123,12 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
         if (batchId == null) {
             return null;
         }
+        ExternalApiDataScopeService.DataScope dataScope = currentDataScope();
         PayrollBatch batch = payrollBatchService.getById(batchId);
-        if (!isExternallyVisibleBatch(batch)) {
+        if (!isExternallyVisibleBatch(batch) || !isBatchAllowed(batch, dataScope)) {
             return null;
         }
-        Map<Long, Long> lineCountMap = loadLineCounts(List.of(batch.getId()));
+        Map<Long, Long> lineCountMap = loadLineCounts(List.of(batch), dataScope);
         Map<String, PaymentBatch> paymentBatchMap = loadPaymentBatches(List.of(batch));
         return toBatchDto(batch, lineCountMap, paymentBatchMap);
     }
@@ -125,8 +138,9 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
         if (batchId == null) {
             return emptyPage(page, size);
         }
+        ExternalApiDataScopeService.DataScope dataScope = currentDataScope();
         PayrollBatch batch = payrollBatchService.getById(batchId);
-        if (!isExternallyVisibleBatch(batch)) {
+        if (!isExternallyVisibleBatch(batch) || !isBatchAllowed(batch, dataScope)) {
             return emptyPage(page, size);
         }
 
@@ -140,10 +154,14 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
 
         LambdaQueryWrapper<PayrollLine> wrapper = new LambdaQueryWrapper<PayrollLine>()
                 .eq(PayrollLine::getBatchId, batchId)
+                .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision()))
                 .eq(PayrollLine::getEmploymentType, PT_TYPE)
                 .orderByDesc(PayrollLine::getId);
         if (employeeInternalId != null) {
             wrapper.eq(PayrollLine::getEmployeeId, employeeInternalId);
+        }
+        if (dataScope.filtersByEmployee() && !dataScope.allowsBatchId(batchId)) {
+            wrapper.in(PayrollLine::getEmployeeId, dataScope.employeeIds());
         }
 
         Page<PayrollLine> entityPage = payrollLineService.page(new Page<>(current, pageSize), wrapper);
@@ -164,6 +182,7 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
 
     @Override
     public List<OpenApiPayslipDto> findPayslips(String employeeRef, String period) {
+        ExternalApiDataScopeService.DataScope dataScope = currentDataScope();
         Long employeeId = resolveEmployeeId(employeeRef);
         if (employeeId == null || !StringUtils.hasText(period)) {
             return Collections.emptyList();
@@ -176,18 +195,29 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
         if (CollectionUtils.isEmpty(batches)) {
             return Collections.emptyList();
         }
-        List<Long> batchIds = batches.stream().map(PayrollBatch::getId).toList();
-
-        List<PayrollLine> lines = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
-                .in(PayrollLine::getBatchId, batchIds)
+        Set<Long> allowedBatchIds = resolveAllowedBatchIds(dataScope);
+        List<PayrollBatch> visibleBatches = batches.stream()
+                .filter(batch -> dataScope.allTenant() || allowedBatchIds.contains(batch.getId()))
+                .toList();
+        if (visibleBatches.isEmpty()) {
+            return Collections.emptyList();
+        }
+        boolean hasDirectBatchGrant = !dataScope.allTenant()
+                && visibleBatches.stream().anyMatch(batch -> dataScope.batchIds().contains(batch.getId()));
+        if (!dataScope.allTenant() && !hasDirectBatchGrant && !dataScope.allowsEmployeeId(employeeId)) {
+            return Collections.emptyList();
+        }
+        LambdaQueryWrapper<PayrollLine> payslipWrapper = activeRevisionWrapper(visibleBatches);
+        payslipWrapper
                 .eq(PayrollLine::getEmployeeId, employeeId)
-                .eq(PayrollLine::getEmploymentType, PT_TYPE));
+                .eq(PayrollLine::getEmploymentType, PT_TYPE);
+        List<PayrollLine> lines = payrollLineService.list(payslipWrapper);
         if (CollectionUtils.isEmpty(lines)) {
             return Collections.emptyList();
         }
 
         Employee employee = employeeService.getById(employeeId);
-        Map<Long, PayrollBatch> batchMap = batches.stream().collect(Collectors.toMap(PayrollBatch::getId, b -> b));
+        Map<Long, PayrollBatch> batchMap = visibleBatches.stream().collect(Collectors.toMap(PayrollBatch::getId, b -> b));
         Map<String, SalaryItem> salaryItemMap = loadSalaryItems(lines);
 
         return lines.stream()
@@ -200,6 +230,7 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
         if (payslipId == null || !StringUtils.hasText(employeeRef)) {
             return null;
         }
+        ExternalApiDataScopeService.DataScope dataScope = currentDataScope();
         Long employeeId = resolveEmployeeId(employeeRef);
         if (employeeId == null) {
             return null;
@@ -211,7 +242,13 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
             return null;
         }
         PayrollBatch batch = payrollBatchService.getById(line.getBatchId());
-        if (!isExternallyVisibleBatch(batch)) {
+        if (!isExternallyVisibleBatch(batch)
+                || normalizeRevision(line.getBatchRevision()) != normalizeRevision(batch.getBatchRevision())
+                || !isBatchAllowed(batch, dataScope)) {
+            return null;
+        }
+        if (dataScope.filtersByEmployee() && !dataScope.allowsBatchId(batch.getId())
+                && !dataScope.allowsEmployeeId(line.getEmployeeId())) {
             return null;
         }
         Employee employee = employeeService.getById(line.getEmployeeId());
@@ -223,6 +260,53 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
         return batch != null
                 && PT_TYPE.equalsIgnoreCase(batch.getType())
                 && ALLOWED_BATCH_STATUSES.contains(batch.getStatus());
+    }
+
+    private ExternalApiDataScopeService.DataScope currentDataScope() {
+        ExternalApiContext.ExternalApiClient client = externalApiContext.current();
+        if (client == null) {
+            throw new org.springframework.security.access.AccessDeniedException("缺少外部应用数据授权上下文");
+        }
+        return externalApiDataScopeService.resolve(client);
+    }
+
+    private boolean isBatchAllowed(PayrollBatch batch,
+                                   ExternalApiDataScopeService.DataScope dataScope) {
+        if (batch == null || dataScope.allTenant() || dataScope.allowsBatchId(batch.getId())) {
+            return batch != null;
+        }
+        if (!dataScope.filtersByEmployee()) {
+            return false;
+        }
+        Long count = payrollLineService.count(new LambdaQueryWrapper<PayrollLine>()
+                .eq(PayrollLine::getBatchId, batch.getId())
+                .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision()))
+                .eq(PayrollLine::getEmploymentType, PT_TYPE)
+                .in(PayrollLine::getEmployeeId, dataScope.employeeIds()));
+        return count != null && count > 0;
+    }
+
+    private Set<Long> resolveAllowedBatchIds(ExternalApiDataScopeService.DataScope dataScope) {
+        if (dataScope.allTenant()) {
+            return Set.of();
+        }
+        Set<Long> result = new HashSet<>(dataScope.batchIds());
+        if (!dataScope.employeeIds().isEmpty()) {
+            List<Object> rows = payrollLineService.listObjs(new QueryWrapper<PayrollLine>()
+                    .select("DISTINCT batch_id")
+                    .in("employee_id", dataScope.employeeIds())
+                    .eq("employment_type", PT_TYPE)
+                    .exists("SELECT 1 FROM payroll_batch pb WHERE pb.id = payroll_line.batch_id"
+                            + " AND pb.deleted = 0"
+                            + " AND payroll_line.batch_revision = COALESCE(pb.batch_revision, 1)")
+                    .isNotNull("batch_id"));
+            for (Object row : rows) {
+                if (row instanceof Number number) {
+                    result.add(number.longValue());
+                }
+            }
+        }
+        return result;
     }
 
     private Page<OpenApiPayrollLineDto> emptyPage(long page, long size) {
@@ -249,15 +333,21 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
         return List.of(matchedStatus);
     }
 
-    private Map<Long, Long> loadLineCounts(List<Long> batchIds) {
-        if (CollectionUtils.isEmpty(batchIds)) {
+    private Map<Long, Long> loadLineCounts(List<PayrollBatch> batches,
+                                           ExternalApiDataScopeService.DataScope dataScope) {
+        if (CollectionUtils.isEmpty(batches)) {
             return Collections.emptyMap();
         }
+        List<Long> batchIds = batches.stream().map(PayrollBatch::getId).toList();
         QueryWrapper<PayrollLine> wrapper = new QueryWrapper<>();
         wrapper.select("batch_id", "COUNT(*) AS cnt")
                 .in("batch_id", batchIds)
-                .eq("employment_type", PT_TYPE)
-                .groupBy("batch_id");
+                .eq("employment_type", PT_TYPE);
+        appendActiveRevisionPredicate(wrapper, batches);
+        if (!dataScope.allTenant() && dataScope.filtersByEmployee()) {
+            wrapper.in("employee_id", dataScope.employeeIds());
+        }
+        wrapper.groupBy("batch_id");
         List<Map<String, Object>> maps = payrollLineService.listMaps(wrapper);
         Map<Long, Long> result = new HashMap<>();
         if (maps != null) {
@@ -269,6 +359,58 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
                 }
             }
         }
+        return result;
+    }
+
+    private LambdaQueryWrapper<PayrollLine> activeRevisionWrapper(List<PayrollBatch> batches) {
+        LambdaQueryWrapper<PayrollLine> wrapper = new LambdaQueryWrapper<>();
+        appendActiveRevisionPredicate(wrapper, batches);
+        return wrapper;
+    }
+
+    private void appendActiveRevisionPredicate(QueryWrapper<PayrollLine> wrapper, List<PayrollBatch> batches) {
+        wrapper.and(group -> {
+            boolean first = true;
+            for (PayrollBatch batch : batches) {
+                if (batch == null || batch.getId() == null) {
+                    continue;
+                }
+                if (!first) {
+                    group.or();
+                }
+                group.eq("batch_id", batch.getId())
+                        .eq("batch_revision", normalizeRevision(batch.getBatchRevision()));
+                first = false;
+            }
+        });
+    }
+
+    private void appendActiveRevisionPredicate(LambdaQueryWrapper<PayrollLine> wrapper, List<PayrollBatch> batches) {
+        wrapper.and(group -> {
+            boolean first = true;
+            for (PayrollBatch batch : batches) {
+                if (batch == null || batch.getId() == null) {
+                    continue;
+                }
+                if (!first) {
+                    group.or();
+                }
+                group.eq(PayrollLine::getBatchId, batch.getId())
+                        .eq(PayrollLine::getBatchRevision, normalizeRevision(batch.getBatchRevision()));
+                first = false;
+            }
+        });
+    }
+
+    private int normalizeRevision(Integer revision) {
+        return revision == null || revision < 1 ? 1 : revision;
+    }
+
+    private Page<OpenApiPayrollBatchDto> emptyBatchPage(long page, long size) {
+        long current = Math.max(page, 1);
+        long pageSize = Math.min(Math.max(size, 1), 100);
+        Page<OpenApiPayrollBatchDto> result = new Page<>(current, pageSize, 0);
+        result.setRecords(Collections.emptyList());
         return result;
     }
 
@@ -381,8 +523,9 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
                 .socialAmount(safe(line.getSocialAmount()))
                 .netAmount(safe(line.getNetAmount()))
                 .currency(line.getCurrency())
-                .departments(resolveDepartments(employee))
-                .employeeNameMasked(maskName(employee != null ? employee.getName() : null))
+                .departments(resolveDepartments(line.getDepartmentSnapshot(), employee))
+                .employeeNameMasked(maskName(StringUtils.hasText(line.getEmployeeNameSnapshot())
+                        ? line.getEmployeeNameSnapshot() : employee != null ? employee.getName() : null))
                 .phoneMasked(encryptionService.maskPhone(employee != null ? employee.getPhone() : null))
                 .generatedAt(line.getUpdateTime())
                 .build();
@@ -406,8 +549,9 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
                 .socialAmount(safe(line.getSocialAmount()))
                 .netAmount(safe(line.getNetAmount()))
                 .currency(line.getCurrency())
-                .departments(resolveDepartments(employee))
-                .employeeNameMasked(maskName(employee != null ? employee.getName() : null))
+                .departments(resolveDepartments(line.getDepartmentSnapshot(), employee))
+                .employeeNameMasked(maskName(StringUtils.hasText(line.getEmployeeNameSnapshot())
+                        ? line.getEmployeeNameSnapshot() : employee != null ? employee.getName() : null))
                 .phoneMasked(encryptionService.maskPhone(employee != null ? employee.getPhone() : null))
                 .generatedAt(line.getUpdateTime())
                 .items(items)
@@ -607,6 +751,17 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
                 .filter(StringUtils::hasText)
                 .distinct()
                 .toList();
+    }
+
+    private List<String> resolveDepartments(String departmentSnapshot, Employee employee) {
+        if (StringUtils.hasText(departmentSnapshot)) {
+            return java.util.Arrays.stream(departmentSnapshot.split("[,，、/]") )
+                    .map(String::trim)
+                    .filter(StringUtils::hasText)
+                    .distinct()
+                    .toList();
+        }
+        return resolveDepartments(employee);
     }
 
     private String maskName(String name) {

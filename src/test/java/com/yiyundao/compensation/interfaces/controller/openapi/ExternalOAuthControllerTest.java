@@ -4,7 +4,9 @@ import com.yiyundao.compensation.common.response.ApiResponse;
 import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.interfaces.dto.app.ExternalAppTokenResponse;
 import com.yiyundao.compensation.modules.app.entity.AppRegistry;
+import com.yiyundao.compensation.modules.app.entity.AppDataGrant;
 import com.yiyundao.compensation.modules.app.service.AppRateLimitService;
+import com.yiyundao.compensation.modules.app.service.AppDataGrantService;
 import com.yiyundao.compensation.modules.app.service.AppRegistryService;
 import com.yiyundao.compensation.modules.app.service.impl.AppRateLimitServiceImpl;
 import com.yiyundao.compensation.security.ClientIpResolver;
@@ -214,6 +216,34 @@ class ExternalOAuthControllerTest {
     }
 
     @Test
+    void tokenShouldRejectPayrollScopeWithoutObjectGrant() {
+        AppRegistry app = app("client-a");
+        AppRegistryService appRegistryService = mock(AppRegistryService.class);
+        AppDataGrantService appDataGrantService = mock(AppDataGrantService.class);
+        when(appRegistryService.findEnabledByClientId("client-a")).thenReturn(app);
+        when(appRegistryService.matchesSecret(app, "secret-a")).thenReturn(true);
+        when(appRegistryService.isIpAllowed(app, "127.0.0.1")).thenReturn(true);
+        when(appRegistryService.resolveScopes(app)).thenReturn(List.of("payroll:read"));
+        when(appDataGrantService.listActiveByAppId(app.getId())).thenReturn(List.of());
+
+        ExternalOAuthController controller = controller(
+                appRegistryService,
+                mock(ExternalApiTokenService.class),
+                noOpRateLimitService(),
+                appDataGrantService
+        );
+
+        ResponseEntity<ApiResponse<ExternalAppTokenResponse>> response = controller.token(
+                new MockHttpServletRequest(),
+                basicAuth("client-a", "secret-a"),
+                "client_credentials",
+                null
+        );
+
+        assertErrorResponse(response, HttpStatus.FORBIDDEN, ErrorCode.FORBIDDEN, "数据范围");
+    }
+
+    @Test
     void tokenShouldUseForwardedForOnlyFromTrustedProxy() {
         AppRegistry app = app("client-a");
         AppRegistryService appRegistryService = mock(AppRegistryService.class);
@@ -238,6 +268,7 @@ class ExternalOAuthControllerTest {
         ExternalOAuthController controller =
                 new ExternalOAuthController(
                         appRegistryService,
+                        grantServiceWithTenantAccess(),
                         externalApiTokenService,
                         new ClientIpResolver(environment),
                         noOpRateLimitService()
@@ -275,12 +306,29 @@ class ExternalOAuthControllerTest {
     private ExternalOAuthController controller(AppRegistryService appRegistryService,
                                                ExternalApiTokenService externalApiTokenService,
                                                AppRateLimitService appRateLimitService) {
+        return controller(appRegistryService, externalApiTokenService, appRateLimitService, grantServiceWithTenantAccess());
+    }
+
+    private ExternalOAuthController controller(AppRegistryService appRegistryService,
+                                               ExternalApiTokenService externalApiTokenService,
+                                               AppRateLimitService appRateLimitService,
+                                               AppDataGrantService appDataGrantService) {
         return new ExternalOAuthController(
                 appRegistryService,
+                appDataGrantService,
                 externalApiTokenService,
                 new ClientIpResolver(new MockEnvironment()),
                 appRateLimitService
         );
+    }
+
+    private AppDataGrantService grantServiceWithTenantAccess() {
+        AppDataGrantService service = mock(AppDataGrantService.class);
+        AppDataGrant grant = new AppDataGrant();
+        grant.setScopeType(AppDataGrantService.TENANT);
+        grant.setScopeValue("default");
+        when(service.listActiveByAppId(1L)).thenReturn(List.of(grant));
+        return service;
     }
 
     private AppRateLimitService noOpRateLimitService() {

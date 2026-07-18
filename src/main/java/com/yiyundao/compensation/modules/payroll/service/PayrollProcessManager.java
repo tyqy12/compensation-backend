@@ -63,6 +63,7 @@ public class PayrollProcessManager {
     private final TransactionAfterCommitExecutor afterCommitExecutor;
     private final EncryptionService encryptionService;
     private final TransactionOperations transactionOperations;
+    private final PayrollTaxLedgerService payrollTaxLedgerService;
 
     @Transactional
     public boolean computeAndInitialize(Long batchId) {
@@ -126,6 +127,7 @@ public class PayrollProcessManager {
             return;
         }
         markBatchApproved(batch.getId(), distribution.getBatchRevision(), workflowId);
+        payrollTaxLedgerService.postBatch(batch.getId(), normalizeRevision(distribution.getBatchRevision()));
         if (distribution.getScheduledDate() != null && distribution.getScheduledDate().isAfter(LocalDate.now())) {
             distribution.setDistributionStatus(PayrollDistributionStatus.PLANNED);
             distributionService.updateById(distribution);
@@ -148,6 +150,7 @@ public class PayrollProcessManager {
             PayrollBatch batch = payrollBatchMapper.selectById(distribution.getBatchId());
             if (isActiveDistributionRevision(distribution, batch)) {
                 rejectPendingBatch(batch.getId(), distribution.getBatchRevision());
+                payrollTaxLedgerService.reverseBatch(batch.getId(), normalizeRevision(distribution.getBatchRevision()));
             }
         }
     }
@@ -166,6 +169,7 @@ public class PayrollProcessManager {
             PayrollBatch batch = payrollBatchMapper.selectById(distribution.getBatchId());
             if (isActiveDistributionRevision(distribution, batch)) {
                 restoreSubmittedBatchToConfirmed(batch.getId(), distribution.getBatchRevision());
+                payrollTaxLedgerService.reverseBatch(batch.getId(), normalizeRevision(distribution.getBatchRevision()));
             }
         }
     }

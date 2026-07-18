@@ -5,9 +5,18 @@ import {
   createAppRegistry,
   updateAppRegistry,
   rotateAppRegistrySecret,
+  listAppDataGrants,
+  createAppDataGrant,
+  revokeAppDataGrant,
   type AppRegistryQueryParams,
 } from '@services/appRegistry';
-import type { AppRegistryDto, AppRegistryRequest, AppRegistrySecretDto } from '@types/openapi';
+import type {
+  AppDataGrantDto,
+  AppDataGrantRequest,
+  AppRegistryDto,
+  AppRegistryRequest,
+  AppRegistrySecretDto,
+} from '@types/openapi';
 import { qk } from '@types/api';
 
 export function useAppRegistriesQuery(
@@ -59,6 +68,36 @@ export function useRotateAppRegistrySecretMutation() {
   });
 }
 
+export function useAppDataGrantsQuery(id: number | string, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ['admin', 'app-registry', id, 'data-grants'],
+    queryFn: () => listAppDataGrants(id),
+    enabled: !!id && (options?.enabled ?? true),
+  });
+}
+
+export function useCreateAppDataGrantMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: number | string; payload: AppDataGrantRequest }) =>
+      createAppDataGrant(id, payload),
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'app-registry', variables.id, 'data-grants'] });
+    },
+  });
+}
+
+export function useRevokeAppDataGrantMutation() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, grantId }: { id: number | string; grantId: number | string }) =>
+      revokeAppDataGrant(id, grantId),
+    onSuccess: (_, variables) => {
+      qc.invalidateQueries({ queryKey: ['admin', 'app-registry', variables.id, 'data-grants'] });
+    },
+  });
+}
+
 export type AppRegistryWithSecret = AppRegistryDto & { clientSecret?: string };
 
 export type {
@@ -66,4 +105,6 @@ export type {
   AppRegistryDto,
   AppRegistryRequest,
   AppRegistrySecretDto,
+  AppDataGrantDto,
+  AppDataGrantRequest,
 } from '@types/openapi';

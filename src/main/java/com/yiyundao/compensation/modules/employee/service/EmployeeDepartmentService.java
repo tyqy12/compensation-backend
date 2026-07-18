@@ -15,4 +15,6 @@ public interface EmployeeDepartmentService {
     Map<Long, List<String>> findDepartmentNamesByEmployeeIds(Collection<Long> employeeIds);
 
     List<Long> findEmployeeIdsByDepartmentName(String departmentName);
+
+    List<Long> findEmployeeIdsByLocalDepartmentId(Long localDepartmentId);
 }

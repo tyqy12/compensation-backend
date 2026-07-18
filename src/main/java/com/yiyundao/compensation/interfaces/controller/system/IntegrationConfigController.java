@@ -476,6 +476,10 @@ public class IntegrationConfigController {
         EncryptionConfigDto c = new EncryptionConfigDto();
         c.setAesKey(keepExistingWhenMaskedOrBlank(incoming.getAesKey(), existing != null ? existing.getAesKey() : null));
         c.setSm4Key(keepExistingWhenMaskedOrBlank(incoming.getSm4Key(), existing != null ? existing.getSm4Key() : null));
+        c.setAesKeyId(incoming.getAesKeyId() != null ? incoming.getAesKeyId() : existing != null ? existing.getAesKeyId() : null);
+        c.setAesKeyring(incoming.getAesKeyring() != null ? incoming.getAesKeyring() : existing != null ? existing.getAesKeyring() : null);
+        c.setSm4KeyId(incoming.getSm4KeyId() != null ? incoming.getSm4KeyId() : existing != null ? existing.getSm4KeyId() : null);
+        c.setSm4Keyring(incoming.getSm4Keyring() != null ? incoming.getSm4Keyring() : existing != null ? existing.getSm4Keyring() : null);
         c.setAlgorithm(incoming.getAlgorithm());
         c.setKeyDerivation(incoming.getKeyDerivation());
         c.setKeyRotationDays(incoming.getKeyRotationDays());
@@ -696,6 +700,10 @@ public class IntegrationConfigController {
         EncryptionConfigDto c = new EncryptionConfigDto();
         c.setAesKey(maskAll(dto.getAesKey()));
         c.setSm4Key(maskAll(dto.getSm4Key()));
+        c.setAesKeyId(dto.getAesKeyId());
+        c.setAesKeyring(dto.getAesKeyring() == null ? null : java.util.Map.of("managed", "***"));
+        c.setSm4KeyId(dto.getSm4KeyId());
+        c.setSm4Keyring(dto.getSm4Keyring() == null ? null : java.util.Map.of("managed", "***"));
         c.setAlgorithm(dto.getAlgorithm());
         c.setKeyDerivation(dto.getKeyDerivation());
         c.setKeyRotationDays(dto.getKeyRotationDays());

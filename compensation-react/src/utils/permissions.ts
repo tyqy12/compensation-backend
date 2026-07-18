@@ -24,6 +24,10 @@ function hasRouteParams(path?: string | null): boolean {
   return /:[a-zA-Z_][a-zA-Z0-9_]*/.test(path);
 }
 
+function isEnabledResource(resource: SysResource): boolean {
+  return resource.status == null || resource.status === 'enabled' || resource.status === 1;
+}
+
 /**
  * 构建资源树（支持后端返回的嵌套结构）
  * @param resources 扁平资源列表或已嵌套的资源列表
@@ -36,6 +40,7 @@ export function buildResourceTree(resources: SysResource[], opts?: BuildOpts): M
 
   if (hasNestedStructure) {
     return (resources as MenuNode[]).filter((r) => {
+      if (!isEnabledResource(r)) return false;
       const meta = r.meta ?? {};
       if (meta?.hidden) return false;
       // 过滤掉带有路由参数的路径（如 /employees/:id），这些是详情页，不应出现在菜单中
@@ -55,6 +60,7 @@ export function buildResourceTree(resources: SysResource[], opts?: BuildOpts): M
   const list = (resources || [])
     .filter((r) => r.type === 'MENU' || r.type === 'VIEW')
     .filter((r) => {
+      if (!isEnabledResource(r)) return false;
       const meta = r.meta ?? {};
       if (meta?.hidden) return false;
       // 过滤掉带有路由参数的路径（如 /employees/:id），这些是详情页，不应出现在菜单中

@@ -172,6 +172,11 @@ public enum ErrorCode {
      */
     SERVICE_UNAVAILABLE(50006, "服务不可用", HttpStatus.SERVICE_UNAVAILABLE),
 
+    /**
+     * 持久化快照或证据链损坏，禁止继续生成正式业务输出。
+     */
+    DATA_INTEGRITY_ERROR(50007, "数据完整性错误", HttpStatus.INTERNAL_SERVER_ERROR),
+
     // ==================== 外部集成错误码（6xxx） ====================
 
     /**

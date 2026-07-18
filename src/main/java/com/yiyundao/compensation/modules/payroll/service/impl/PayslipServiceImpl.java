@@ -1,6 +1,8 @@
 package com.yiyundao.compensation.modules.payroll.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.yiyundao.compensation.common.exception.BusinessException;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -71,6 +73,7 @@ public class PayslipServiceImpl implements PayslipService {
             "SELECT 1 FROM payroll_batch pb"
                     + " WHERE pb.id = payroll_line.batch_id"
                     + " AND pb.deleted = 0"
+                    + " AND payroll_line.batch_revision = COALESCE(pb.batch_revision, 1)"
                     + " AND ("
                     + " (COALESCE(pb.confirmation_required, 1) = 1"
                     + " AND pb.status IN (" + sqlStatusCodes(CONFIRMATION_VISIBLE_STATUSES) + "))"
@@ -168,6 +171,9 @@ public class PayslipServiceImpl implements PayslipService {
             return null;
         }
         PayrollBatch batch = line.getBatchId() != null ? payrollBatchService.getById(line.getBatchId()) : null;
+        if (batch == null || normalizeRevision(line.getBatchRevision()) != normalizeRevision(batch.getBatchRevision())) {
+            return null;
+        }
         ensureAccess(currentUser, line);
         ensureBatchVisibleToCurrentUser(currentUser, batch);
 
@@ -204,9 +210,12 @@ public class PayslipServiceImpl implements PayslipService {
             detail.setPeriodEnd(cycle.getEndDate());
         }
         if (employee != null) {
-            detail.setEmployeeNo(employee.getEmployeeId());
-            detail.setEmployeeName(employee.getName());
-            detail.setDepartment(employee.getDepartment());
+            detail.setEmployeeNo(StringUtils.hasText(line.getEmployeeNoSnapshot())
+                    ? line.getEmployeeNoSnapshot() : employee.getEmployeeId());
+            detail.setEmployeeName(StringUtils.hasText(line.getEmployeeNameSnapshot())
+                    ? line.getEmployeeNameSnapshot() : employee.getName());
+            detail.setDepartment(StringUtils.hasText(line.getDepartmentSnapshot())
+                    ? line.getDepartmentSnapshot() : employee.getDepartment());
             detail.setEmploymentType(employee.getEmploymentType());
             detail.setBankName(employee.getBankName());
             detail.setBankAccountMasked(maskEncryptedBankAccount(employee.getBankAccount()));
@@ -329,6 +338,10 @@ public class PayslipServiceImpl implements PayslipService {
         return CONFIRMATION_VISIBLE_STATUSES.contains(batch.getStatus());
     }
 
+    private int normalizeRevision(Integer revision) {
+        return revision == null || revision < 1 ? 1 : revision;
+    }
+
     private Map<Long, PayrollBatch> loadBatches(List<PayrollLine> lines) {
         Set<Long> batchIds = new HashSet<>();
         for (PayrollLine l : lines) {
@@ -388,7 +401,7 @@ public class PayslipServiceImpl implements PayslipService {
                 log.warn("Failed to parse payslip items snapshot: {}", nested.getMessage());
             }
             log.warn("Failed to parse payslip items snapshot: {}", e.getMessage());
-            return Collections.emptyList();
+            throw new BusinessException(ErrorCode.DATA_INTEGRITY_ERROR, "工资条项目快照损坏，无法展示或导出");
         }
     }
 

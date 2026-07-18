@@ -197,7 +197,6 @@ class PayrollCalculationServiceImplTest {
 
     private PayrollBatch stubSuccessfulCalculationInputs(Long batchId) {
         PayrollBatch batch = stubReadyInputsUntilCalculating(batchId);
-        when(payrollLineService.remove(any())).thenReturn(true);
         when(validationIssueSupport.toMessages(any())).thenReturn(List.of());
         when(validationIssueSupport.serialize(any())).thenReturn("[]");
         return batch;

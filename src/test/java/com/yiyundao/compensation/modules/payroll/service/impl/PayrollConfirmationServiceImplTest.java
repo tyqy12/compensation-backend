@@ -199,6 +199,7 @@ class PayrollConfirmationServiceImplTest {
         PayrollLine line = new PayrollLine();
         line.setId(300L);
         line.setBatchId(200L);
+        line.setBatchRevision(3);
         line.setEmployeeId(21L);
         line.setConfirmationAssigneeEmployeeId(21L);
         line.setConfirmationStatus(PayrollConfirmationStatus.PENDING.getCode());

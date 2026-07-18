@@ -5,6 +5,7 @@ import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.interfaces.dto.app.ExternalAppTokenResponse;
 import com.yiyundao.compensation.modules.app.entity.AppRegistry;
 import com.yiyundao.compensation.modules.app.service.AppRateLimitService;
+import com.yiyundao.compensation.modules.app.service.AppDataGrantService;
 import com.yiyundao.compensation.modules.app.service.AppRegistryService;
 import com.yiyundao.compensation.modules.app.service.impl.AppRateLimitServiceImpl;
 import com.yiyundao.compensation.security.ClientIpResolver;
@@ -35,6 +36,7 @@ import java.util.Set;
 public class ExternalOAuthController {
 
     private final AppRegistryService appRegistryService;
+    private final AppDataGrantService appDataGrantService;
     private final ExternalApiTokenService externalApiTokenService;
     private final ClientIpResolver clientIpResolver;
     private final AppRateLimitService appRateLimitService;
@@ -81,6 +83,10 @@ public class ExternalOAuthController {
         List<String> requestedScopes = resolveRequestedScopes(scope, registeredScopes);
         if (requestedScopes.isEmpty()) {
             return error(ErrorCode.PARAM_INVALID, "请求范围无效");
+        }
+        if (requiresPayrollDataGrant(requestedScopes)
+                && appDataGrantService.listActiveByAppId(app.getId()).isEmpty()) {
+            return error(ErrorCode.FORBIDDEN, "应用未配置薪酬数据范围，禁止签发薪酬访问令牌");
         }
 
         ExternalApiTokenService.TokenResult tokenResult = externalApiTokenService.generateToken(app, requestedScopes);
@@ -160,6 +166,10 @@ public class ExternalOAuthController {
         return registeredScopes.stream()
                 .filter(requestedSet::contains)
                 .toList();
+    }
+
+    private boolean requiresPayrollDataGrant(List<String> scopes) {
+        return scopes.stream().anyMatch(item -> "payroll:read".equals(item) || "payslip:read".equals(item));
     }
 
     private record ClientCredentials(String clientId, String clientSecret) {}

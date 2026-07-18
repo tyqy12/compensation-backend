@@ -85,7 +85,7 @@ public class PayrollSettlementIntegrityService {
                 .set("status", targetStatus.getCode());
         if (immutableTarget) {
             wrapper.set("immutable_flag", true)
-                    .set("result_hash", calculateResultHash(batch.getId()))
+                    .set("result_hash", calculateResultHash(batch.getId(), normalizeRevision(batch.getBatchRevision())))
                     .set("input_frozen_at", batch.getInputFrozenAt() == null ? now : batch.getInputFrozenAt())
                     .set("locked_at", batch.getLockedAt() == null ? now : batch.getLockedAt());
         }
@@ -102,9 +102,10 @@ public class PayrollSettlementIntegrityService {
         return payrollBatchMapper.update(null, wrapper) > 0;
     }
 
-    private String calculateResultHash(Long batchId) {
+    private String calculateResultHash(Long batchId, int batchRevision) {
         List<PayrollLine> lines = payrollLineMapper.selectList(new QueryWrapper<PayrollLine>()
                 .eq("batch_id", batchId)
+                .eq("batch_revision", batchRevision)
                 .orderByAsc("id"));
         StringBuilder canonical = new StringBuilder();
         for (PayrollLine line : lines) {
@@ -120,6 +121,10 @@ public class PayrollSettlementIntegrityService {
             canonical.append('\n');
         }
         return sha256(canonical.toString());
+    }
+
+    private int normalizeRevision(Integer revision) {
+        return revision == null || revision < 1 ? 1 : revision;
     }
 
     private void append(StringBuilder target, Object value) {

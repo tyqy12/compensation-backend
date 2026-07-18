@@ -74,6 +74,12 @@ security:
   sensitive:
     enabled: true
 
+payroll:
+  compliance:
+    # 测试数据不包含真实属地参保关系；正式环境必须保持默认 false。
+    allow-template-fallback: true
+    allow-builtin-tax-fallback: true
+
 jwt:
   secret: "test-secret-key-please-change-to-32-bytes-minimum"
   expiration: 3600000

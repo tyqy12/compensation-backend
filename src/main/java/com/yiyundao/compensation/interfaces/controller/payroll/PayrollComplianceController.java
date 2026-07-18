@@ -303,9 +303,15 @@ public class PayrollComplianceController {
         declaration.setEffectiveTo(request.getEffectiveTo());
         declaration.setCredentialRef(request.getCredentialRef());
         declaration.setEvidenceJson(request.getEvidenceJson());
+        declaration.setFactsJson(request.getFactsJson());
         declaration.setSourceType(request.getSourceType());
         declaration.setStatus("pending");
         return ApiResponse.success(declarationService.saveValidated(declaration));
+    }
+
+    @PostMapping("/deductions/{id}/approve")
+    public ApiResponse<PayrollTaxDeductionDeclaration> approveDeduction(@PathVariable Long id) {
+        return ApiResponse.success(declarationService.approveValidated(id));
     }
 
     @GetMapping("/tax-ledger")

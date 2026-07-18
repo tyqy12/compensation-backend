@@ -29,5 +29,6 @@ public class PayrollTaxDeductionDeclarationRequest {
     private LocalDate effectiveTo;
     private String credentialRef;
     private String evidenceJson;
+    private String factsJson;
     private String sourceType = "employee_declaration";
 }

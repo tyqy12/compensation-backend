@@ -47,10 +47,10 @@ Other examples:
 - Employee sensitive decrypt APIs guarded by role: src/main/java/com/yiyundao/compensation/interfaces/controller/employee/EmployeeController.java:114
 
 ## Configuration
-JWT keys and TTL are configured in profile YAMLs. Dev example: src/main/resources/application-dev.yml:39
+JWT keys and TTL are configured in profile YAMLs. The dev profile is never selected implicitly; provide `JWT_SECRET` through the environment.
 ```
 jwt:
-  secret: compensation-assistant-dev-secret-key-2024
+  secret: ${JWT_SECRET}
   expiration: 86400000           # 1 day
   refresh-expiration: 604800000  # 7 days
 ```

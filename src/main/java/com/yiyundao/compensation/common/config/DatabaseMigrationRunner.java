@@ -424,6 +424,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         migratePayrollV21AggregateColumns();
         migratePayrollRuleVersionColumns();
         migratePayrollComplianceFoundation();
+        migratePayrollIntegrityHardening();
         migratePayrollComplianceResources();
         retireLegacyPayrollContent();
         // Approval workflow incremental columns
@@ -1219,7 +1220,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         createTableIfMissing("payroll_tax_ledger",
                 "CREATE TABLE `payroll_tax_ledger` (" +
                         "`id` bigint NOT NULL AUTO_INCREMENT, `employee_id` bigint NOT NULL, `withholding_entity_id` bigint DEFAULT NULL, " +
-                        "`tax_year` int NOT NULL, `tax_month` int NOT NULL, `payroll_batch_id` bigint DEFAULT NULL, `payroll_line_id` bigint DEFAULT NULL, " +
+                        "`tax_year` int NOT NULL, `tax_month` int NOT NULL, `payroll_batch_id` bigint DEFAULT NULL, `payroll_batch_revision` int NOT NULL DEFAULT 1, `payroll_line_id` bigint DEFAULT NULL, " +
                         "`cumulative_income` decimal(18,2) NOT NULL DEFAULT 0, `cumulative_tax_exempt_income` decimal(18,2) NOT NULL DEFAULT 0, " +
                         "`cumulative_basic_deduction` decimal(18,2) NOT NULL DEFAULT 0, `cumulative_special_deduction` decimal(18,2) NOT NULL DEFAULT 0, " +
                         "`cumulative_special_additional` decimal(18,2) NOT NULL DEFAULT 0, `cumulative_other_deduction` decimal(18,2) NOT NULL DEFAULT 0, " +
@@ -1227,7 +1228,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                         "`cumulative_tax` decimal(18,2) NOT NULL DEFAULT 0, `cumulative_tax_reduction` decimal(18,2) NOT NULL DEFAULT 0, `cumulative_withheld_tax` decimal(18,2) NOT NULL DEFAULT 0, " +
                         "`current_withholding_tax` decimal(18,2) NOT NULL DEFAULT 0, `policy_id` bigint DEFAULT NULL, `calculation_hash` varchar(64) DEFAULT NULL, `status` varchar(20) NOT NULL DEFAULT 'draft', " +
                         "`create_time` datetime DEFAULT CURRENT_TIMESTAMP, `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, `create_by` varchar(50) DEFAULT NULL, `update_by` varchar(50) DEFAULT NULL, `deleted` tinyint(1) NOT NULL DEFAULT 0, `version` int NOT NULL DEFAULT 0, " +
-                        "PRIMARY KEY (`id`), UNIQUE KEY `uk_tax_ledger_employee_period_batch` (`employee_id`,`tax_year`,`tax_month`,`payroll_batch_id`,`deleted`), " +
+                        "PRIMARY KEY (`id`), UNIQUE KEY `uk_tax_ledger_employee_period_batch_revision` (`employee_id`,`tax_year`,`tax_month`,`payroll_batch_id`,`payroll_batch_revision`,`deleted`), " +
                         "KEY `idx_tax_ledger_previous` (`employee_id`,`withholding_entity_id`,`tax_year`,`tax_month`,`status`)) " +
                         "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工年度累计个税台账'");
         createTableIfMissing("payroll_contribution_policy",
@@ -1261,6 +1262,9 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         addColumnIfMissing("payroll_batch", "immutable_flag", "ALTER TABLE payroll_batch ADD COLUMN `immutable_flag` tinyint(1) NOT NULL DEFAULT 0 COMMENT '结果是否不可变' AFTER `closed_at`");
         addColumnIfMissing("payroll_batch", "adjustment_of_batch_id", "ALTER TABLE payroll_batch ADD COLUMN `adjustment_of_batch_id` bigint DEFAULT NULL COMMENT '调整所基于的原批次' AFTER `immutable_flag`");
         addColumnIfMissing("payroll_line", "tax_breakdown_json", "ALTER TABLE payroll_line ADD COLUMN `tax_breakdown_json` json DEFAULT NULL COMMENT '个税累计计算解释快照' AFTER `net_amount`");
+        addColumnIfMissing("payroll_line", "employee_no_snapshot", "ALTER TABLE payroll_line ADD COLUMN `employee_no_snapshot` varchar(50) DEFAULT NULL COMMENT '核算时员工工号快照' AFTER `employee_id`");
+        addColumnIfMissing("payroll_line", "employee_name_snapshot", "ALTER TABLE payroll_line ADD COLUMN `employee_name_snapshot` varchar(100) DEFAULT NULL COMMENT '核算时员工姓名快照' AFTER `employee_no_snapshot`");
+        addColumnIfMissing("payroll_line", "department_snapshot", "ALTER TABLE payroll_line ADD COLUMN `department_snapshot` varchar(500) DEFAULT NULL COMMENT '核算时部门快照' AFTER `employee_name_snapshot`");
         addColumnIfMissing("salary_item", "tax_category", "ALTER TABLE salary_item ADD COLUMN `tax_category` varchar(40) DEFAULT NULL COMMENT '税务分类' AFTER `taxable`");
         addColumnIfMissing("salary_item", "tax_exempt", "ALTER TABLE salary_item ADD COLUMN `tax_exempt` tinyint(1) DEFAULT 0 COMMENT '是否免税' AFTER `tax_category`");
         addColumnIfMissing("salary_item", "pension_base", "ALTER TABLE salary_item ADD COLUMN `pension_base` tinyint(1) DEFAULT 0 COMMENT '是否计入养老基数' AFTER `tax_exempt`");
@@ -1286,7 +1290,16 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
 
         executeSqlSafely("INSERT INTO payroll_policy_package (code,name,policy_type,region_code,effective_from,source_document,source_url,payload_json,status,version_no,checksum) " +
                 "SELECT 'CN.RESIDENT_WAGE_WITHHOLDING','居民个人工资薪金累计预扣预缴','tax','CN','2019-01-01','国家税务总局公告2018年第61号','https://fgk.chinatax.gov.cn/zcfgk/c100015/c5200946/content.html'," +
-                "JSON_OBJECT('basicDeductionPerMonth',5000,'annualBonusPolicyUntil','2027-12-31'),'published',1,SHA2('CN.RESIDENT_WAGE_WITHHOLDING@1',256) " +
+                "JSON_OBJECT('basicDeductionPerMonth',5000,'deductions',JSON_OBJECT(" +
+                        "'infant_care',JSON_OBJECT('monthlyPerSubject',2000,'effectiveFrom','2023-01-01')," +
+                        "'child_education',JSON_OBJECT('monthlyPerSubject',2000,'effectiveFrom','2023-01-01')," +
+                        "'continuing_education',JSON_OBJECT('monthlyAmount',400,'vocationalAnnualAmount',3600)," +
+                        "'major_medical',JSON_OBJECT('annualThreshold',15000,'annualLimit',80000,'settlementOnly',true)," +
+                        "'housing_loan_interest',JSON_OBJECT('monthlyAmount',1000,'maxMonths',240)," +
+                        "'rent',JSON_OBJECT('monthlyAmounts',JSON_ARRAY(800,1100,1500))," +
+                        "'elderly_care',JSON_OBJECT('singleChildMonthlyAmount',3000,'nonSingleTotalMonthlyAmount',3000,'perPersonLimit',1500)," +
+                        "'individual_pension',JSON_OBJECT('annualLimit',12000,'effectiveFrom','2024-01-01')" +
+                        "),'annualBonusPolicyUntil','2027-12-31'),'published',1,SHA2('CN.RESIDENT_WAGE_WITHHOLDING@1',256) " +
                 "WHERE NOT EXISTS (SELECT 1 FROM payroll_policy_package WHERE code='CN.RESIDENT_WAGE_WITHHOLDING' AND version_no=1 AND deleted=0)");
         executeSqlSafely("INSERT IGNORE INTO payroll_tax_bracket (policy_id,tax_year,bracket_level,upper_limit,rate,quick_deduction) " +
                 "SELECT p.id,2026,1,36000,0.03,0 FROM payroll_policy_package p WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0 " +
@@ -1297,6 +1310,45 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "UNION ALL SELECT p.id,2026,6,960000,0.35,85920 FROM payroll_policy_package p WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0 " +
                 "UNION ALL SELECT p.id,2026,7,NULL,0.45,181920 FROM payroll_policy_package p WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0");
         executeSqlSafely("UPDATE salary_template SET status='disabled' WHERE deleted=0 AND status='enabled' AND (tax_rule_json IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(tax_rule_json,'$.tax.mode')) <> 'cumulative_withholding')");
+    }
+
+    private void migratePayrollIntegrityHardening() {
+        createTableIfMissing("app_data_grant",
+                "CREATE TABLE `app_data_grant` (" +
+                        "`id` bigint NOT NULL AUTO_INCREMENT, `app_id` bigint NOT NULL, " +
+                        "`scope_type` varchar(32) NOT NULL, `scope_value` varchar(128) NOT NULL, " +
+                        "`status` varchar(20) NOT NULL DEFAULT 'active', " +
+                        "`create_time` datetime DEFAULT CURRENT_TIMESTAMP, `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, " +
+                        "`create_by` varchar(50) DEFAULT NULL, `update_by` varchar(50) DEFAULT NULL, " +
+                        "`deleted` tinyint(1) NOT NULL DEFAULT 0, `version` int NOT NULL DEFAULT 0, " +
+                        "PRIMARY KEY (`id`), UNIQUE KEY `uk_app_data_grant` (`app_id`,`scope_type`,`scope_value`,`deleted`), " +
+                        "KEY `idx_app_data_grant_active` (`app_id`,`status`,`scope_type`)) " +
+                        "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='第三方应用数据范围授权'");
+        addColumnIfMissing("payroll_tax_ledger", "payroll_batch_revision",
+                "ALTER TABLE payroll_tax_ledger ADD COLUMN `payroll_batch_revision` int NOT NULL DEFAULT 1 COMMENT '工资批次版本' AFTER `payroll_batch_id`");
+        addColumnIfMissing("payroll_tax_deduction_declaration", "policy_id",
+                "ALTER TABLE payroll_tax_deduction_declaration ADD COLUMN `policy_id` bigint DEFAULT NULL COMMENT '扣除政策版本' AFTER `source_type`");
+        addColumnIfMissing("payroll_tax_deduction_declaration", "facts_json",
+                "ALTER TABLE payroll_tax_deduction_declaration ADD COLUMN `facts_json` json DEFAULT NULL COMMENT '扣除事实JSON' AFTER `evidence_json`");
+        dropIndexIfExists("payroll_tax_ledger", "uk_tax_ledger_employee_period_batch");
+        addIndexIfMissing("payroll_tax_ledger", "uk_tax_ledger_employee_period_batch_revision",
+                "CREATE UNIQUE INDEX `uk_tax_ledger_employee_period_batch_revision` ON `payroll_tax_ledger` (`employee_id`,`tax_year`,`tax_month`,`payroll_batch_id`,`payroll_batch_revision`,`deleted`)");
+        executeSqlSafely("UPDATE payroll_policy_package SET payload_json = JSON_SET(COALESCE(payload_json, JSON_OBJECT()), '$.deductions', JSON_OBJECT(" +
+                "'infant_care', JSON_OBJECT('monthlyPerSubject', 2000, 'effectiveFrom', '2023-01-01')," +
+                "'child_education', JSON_OBJECT('monthlyPerSubject', 2000, 'effectiveFrom', '2023-01-01')," +
+                "'continuing_education', JSON_OBJECT('monthlyAmount', 400, 'vocationalAnnualAmount', 3600)," +
+                "'major_medical', JSON_OBJECT('annualThreshold', 15000, 'annualLimit', 80000, 'settlementOnly', TRUE)," +
+                "'housing_loan_interest', JSON_OBJECT('monthlyAmount', 1000, 'maxMonths', 240)," +
+                "'rent', JSON_OBJECT('monthlyAmounts', JSON_ARRAY(800, 1100, 1500))," +
+                "'elderly_care', JSON_OBJECT('singleChildMonthlyAmount', 3000, 'nonSingleTotalMonthlyAmount', 3000, 'perPersonLimit', 1500)," +
+                "'individual_pension', JSON_OBJECT('annualLimit', 12000, 'effectiveFrom', '2024-01-01'))) " +
+                "WHERE code = 'CN.RESIDENT_WAGE_WITHHOLDING' AND version_no = 1 AND deleted = 0 " +
+                "AND JSON_EXTRACT(payload_json, '$.deductions') IS NULL");
+        executeSqlSafely("UPDATE payroll_line pl JOIN employee e ON e.id = pl.employee_id SET " +
+                "pl.employee_no_snapshot = COALESCE(pl.employee_no_snapshot, e.employee_id), " +
+                "pl.employee_name_snapshot = COALESCE(pl.employee_name_snapshot, e.name), " +
+                "pl.department_snapshot = COALESCE(pl.department_snapshot, e.department) " +
+                "WHERE pl.deleted = 0 AND (pl.employee_no_snapshot IS NULL OR pl.employee_name_snapshot IS NULL OR pl.department_snapshot IS NULL)");
     }
 
     private void migratePayrollComplianceResources() {
@@ -1378,6 +1430,17 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
             }
         } catch (Exception e) {
             log.warn("Failed adding index {}.{}: {}", table, index, e.getMessage());
+        }
+    }
+
+    private void dropIndexIfExists(String table, String index) {
+        try {
+            if (indexExists(table, index)) {
+                jdbcTemplate.execute("ALTER TABLE `" + table + "` DROP INDEX `" + index + "`");
+                log.info("Dropped obsolete index {}.{}", table, index);
+            }
+        } catch (Exception e) {
+            log.warn("Failed dropping index {}.{}: {}", table, index, e.getMessage());
         }
     }
 

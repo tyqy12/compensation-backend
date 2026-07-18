@@ -129,7 +129,9 @@ class PayrollEndToEndIntegrationTest {
         assertThat(payrollCalculationService.computeAndSave(batch.getId())).isTrue();
         PayrollBatch firstBatch = payrollBatchService.getById(batch.getId());
         PayrollLine firstLine = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
-                        .eq(PayrollLine::getBatchId, batch.getId()))
+                        .eq(PayrollLine::getBatchId, batch.getId())
+                        .eq(PayrollLine::getBatchRevision, 1)
+                        .orderByAsc(PayrollLine::getId))
                 .stream()
                 .findFirst()
                 .orElseThrow();
@@ -145,14 +147,18 @@ class PayrollEndToEndIntegrationTest {
 
         PayrollBatch secondBatch = payrollBatchService.getById(batch.getId());
         PayrollLine secondLine = payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
-                        .eq(PayrollLine::getBatchId, batch.getId()))
+                        .eq(PayrollLine::getBatchId, batch.getId())
+                        .eq(PayrollLine::getBatchRevision, 2)
+                        .orderByAsc(PayrollLine::getId))
                 .stream()
                 .findFirst()
                 .orElseThrow();
         assertThat(secondBatch.getBatchRevision()).isEqualTo(2);
         assertThat(secondLine.getBatchRevision()).isEqualTo(2);
         assertThat(secondLine.getId()).isNotEqualTo(firstLine.getId());
-        assertThat(payrollLineService.getById(firstLine.getId())).isNull();
+        assertThat(payrollLineService.getById(firstLine.getId())).isNotNull();
+        assertThat(payrollLineService.list(new LambdaQueryWrapper<PayrollLine>()
+                .eq(PayrollLine::getBatchId, batch.getId()))).hasSize(2);
     }
 
     @Test

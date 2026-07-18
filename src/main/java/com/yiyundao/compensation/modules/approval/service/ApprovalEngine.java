@@ -380,7 +380,11 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
 
         List<PayrollLine> lines = payrollLineMapper.selectList(new QueryWrapper<PayrollLine>()
                 .select("employee_id")
-                .eq("batch_id", batchId));
+                .eq("batch_id", batchId)
+                .exists("SELECT 1 FROM payroll_batch pb"
+                        + " WHERE pb.id = payroll_line.batch_id"
+                        + " AND pb.deleted = 0"
+                        + " AND payroll_line.batch_revision = COALESCE(pb.batch_revision, 1)"));
         if (lines == null || lines.isEmpty()) {
             throw new IllegalStateException("薪资批次没有可解析审批人的工资行: " + batchId);
         }

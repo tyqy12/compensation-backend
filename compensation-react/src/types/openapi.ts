@@ -550,3 +550,20 @@ export interface AppRegistryRequest {
   ipWhitelist?: string[];
   webhookUrl?: string | null;
 }
+
+export type AppDataGrantScopeType = 'tenant' | 'department' | 'employee' | 'payroll_batch';
+
+export interface AppDataGrantDto {
+  id: number;
+  appId: number;
+  scopeType: AppDataGrantScopeType;
+  scopeValue: string;
+  status: 'active' | 'revoked';
+  createTime?: string;
+  updateTime?: string;
+}
+
+export interface AppDataGrantRequest {
+  scopeType: AppDataGrantScopeType;
+  scopeValue: string;
+}
