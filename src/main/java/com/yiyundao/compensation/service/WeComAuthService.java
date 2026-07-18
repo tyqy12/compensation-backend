@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.service;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.yiyundao.compensation.common.utils.SecretLogSanitizer;
 import com.yiyundao.compensation.interfaces.dto.config.WechatConfigDto;
 import com.yiyundao.compensation.modules.system.service.IntegrationConfigService;
@@ -252,7 +253,14 @@ public class WeComAuthService {
     @Data
     private static class WeComToken { private int errcode; private String errmsg; private String access_token; private Integer expires_in; }
     @Data
-    private static class WeComUserInfo { private int errcode; private String errmsg; private String userid; private String openid; private String external_userid; }
+    private static class WeComUserInfo {
+        private int errcode;
+        private String errmsg;
+        @JsonAlias({"UserId", "userid"})
+        private String userid;
+        private String openid;
+        private String external_userid;
+    }
     @Data
     private static class JsTicket { private int errcode; private String errmsg; private String ticket; private Integer expires_in; }
 

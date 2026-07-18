@@ -1,4 +1,6 @@
 .dashboard-page {
+  width: 100%;
+  min-width: 0;
   min-height: 100%;
   padding: 28px 32px 40px;
   background: var(--page-bg);
@@ -20,6 +22,7 @@
 
 .dashboard-hero-copy {
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .dashboard-eyebrow {
@@ -36,6 +39,7 @@
 }
 
 .dashboard-subtitle {
+  overflow-wrap: anywhere;
   font-size: 14px;
 }
 
@@ -134,6 +138,8 @@
 }
 
 .dashboard-workspace {
+  width: 100%;
+  min-width: 0;
   display: grid;
   grid-template-columns: minmax(0, 1.7fr) minmax(300px, 1fr);
   gap: 16px;
@@ -256,6 +262,10 @@
   gap: 16px;
   padding: 14px 0;
   border-bottom: 1px solid var(--border-subtle);
+}
+
+.dashboard-list-item > .ant-btn {
+  flex: 0 0 auto;
 }
 
 .dashboard-list-item:first-child {

@@ -5,7 +5,7 @@ import { Provider as ReduxProvider } from 'react-redux';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from 'react-router-dom';
 import { store } from '@services/stores/authSlice';
-import { appTheme } from './theme';
+import { getAppTheme } from './theme';
 import { router } from '@routes/index';
 import { useUIStore } from '@services/stores/uiStore';
 import { suppressDevelopmentWarnings } from '@utils/suppressWarnings';
@@ -23,6 +23,7 @@ const queryClient = new QueryClient({
 const ThemedConfig: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const mode = useUIStore((s) => s.theme);
   const algorithm = mode === 'dark' ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm;
+  const currentTheme = getAppTheme(mode);
 
   useEffect(() => {
     document.documentElement.dataset.theme = mode;
@@ -31,7 +32,7 @@ const ThemedConfig: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   return (
     <ConfigProvider
       locale={zhCN}
-      theme={{ token: appTheme.tokens, components: appTheme.components, algorithm }}
+      theme={{ token: currentTheme.tokens, components: currentTheme.components, algorithm }}
     >
       {children}
     </ConfigProvider>

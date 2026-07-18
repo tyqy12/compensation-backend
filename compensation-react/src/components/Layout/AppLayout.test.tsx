@@ -113,6 +113,37 @@ describe('AppLayout', () => {
     expect(sider).not.toHaveClass('ant-layout-sider-collapsed');
   });
 
+  it('uses a dismissible drawer navigation on mobile widths', () => {
+    const originalInnerWidth = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 375 });
+
+    const { container, unmount } = render(
+      <TestWrapper>
+        <AppLayout />
+      </TestWrapper>,
+    );
+
+    try {
+      const sider = screen.getByRole('complementary');
+      expect(sider).toHaveClass('ant-layout-sider-collapsed');
+
+      fireEvent.click(screen.getByRole('button', { name: '打开侧边导航' }));
+      expect(screen.getAllByRole('button', { name: '关闭侧边导航' })).toHaveLength(2);
+      expect(container.querySelector('.app-mobile-nav-backdrop')).toBeInTheDocument();
+      expect(sider).not.toHaveClass('ant-layout-sider-collapsed');
+
+      fireEvent.click(container.querySelector('.app-mobile-nav-backdrop') as HTMLElement);
+      expect(screen.getByRole('button', { name: '打开侧边导航' })).toBeInTheDocument();
+      expect(sider).toHaveClass('ant-layout-sider-collapsed');
+    } finally {
+      unmount();
+      Object.defineProperty(window, 'innerWidth', {
+        configurable: true,
+        value: originalInnerWidth,
+      });
+    }
+  });
+
   it('renders resource icons so collapsed navigation remains usable', () => {
     mockRbac.resources = [
       {

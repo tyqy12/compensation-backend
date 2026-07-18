@@ -17,7 +17,7 @@ export const ProtectedRoute: React.FC<Props> = ({ roles, children }) => {
   const isAuthenticated = useSelector((s: RootState) => Boolean(s.auth.user));
   const userRoles = useSelector((s: RootState) => s.auth.user?.roles ?? s.auth.roles ?? []);
   const hasRequiredRole = !roles || roles.length === 0 || hasAnyRole(userRoles, roles);
-  const { data: meRes, isLoading, isError } = useMeResourcesQuery({
+  const { data: meRes, isLoading, isFetching, isError } = useMeResourcesQuery({
     enabled: isAuthenticated && hasRequiredRole,
   });
 
@@ -27,7 +27,7 @@ export const ProtectedRoute: React.FC<Props> = ({ roles, children }) => {
   if (!hasRequiredRole) {
     return <Navigate to="/403" replace />;
   }
-  if (isLoading) {
+  if (isLoading || isFetching) {
     return <Loading />;
   }
   if (isError) {

@@ -1,4 +1,7 @@
 .calendar-page {
+  width: 100%;
+  min-width: 0;
+
   .calendar-page-alert {
     margin-bottom: 16px;
   }
@@ -139,17 +142,17 @@
   }
 
   .calendar-date-event.is-period {
-    background: color-mix(in srgb, var(--primary) 11%, transparent);
+    background: var(--primary-soft);
     color: var(--primary);
   }
 
   .calendar-date-event.is-cutoff {
-    background: color-mix(in srgb, var(--warning) 15%, transparent);
+    background: var(--warning-soft);
     color: var(--warning);
   }
 
   .calendar-date-event.is-pay {
-    background: color-mix(in srgb, var(--success) 14%, transparent);
+    background: var(--success-soft);
     color: var(--success);
   }
 
@@ -179,7 +182,7 @@
     align-items: center;
     justify-content: center;
     border-radius: 7px;
-    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    background: var(--primary-soft);
     color: var(--primary);
     font-size: 18px;
   }

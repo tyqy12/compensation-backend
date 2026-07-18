@@ -1,4 +1,7 @@
 .rules-page {
+  width: 100%;
+  min-width: 0;
+
   .rules-page-alert {
     margin-bottom: 16px;
   }
@@ -167,7 +170,7 @@
     align-items: center;
     justify-content: center;
     border-radius: 8px;
-    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    background: var(--primary-soft);
     color: var(--primary);
     font-size: 20px;
   }
@@ -334,5 +337,25 @@
     .rules-metric-grid {
       grid-template-columns: minmax(0, 1fr);
     }
+  }
+}
+
+@media (max-width: 900px) {
+  .rules-page .rules-workbench {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .rules-page .rules-index-panel,
+  .rules-page .rules-detail-panel {
+    width: 100%;
+  }
+
+  .rules-page .rules-index-panel {
+    position: static;
+  }
+
+  .rules-page .rules-index-list {
+    max-height: 300px;
   }
 }

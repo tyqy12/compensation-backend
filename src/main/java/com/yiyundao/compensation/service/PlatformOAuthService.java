@@ -1,5 +1,6 @@
 package com.yiyundao.compensation.service;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.yiyundao.compensation.interfaces.dto.config.DingTalkConfigDto;
 import com.yiyundao.compensation.interfaces.dto.config.FeishuConfigDto;
 import com.yiyundao.compensation.interfaces.dto.config.WechatConfigDto;
@@ -118,9 +119,18 @@ public class PlatformOAuthService {
         try {
             // 1) 获取 access_token
             WechatConfigDto cfg = integrationConfigService.getWechatConfig();
+            if (cfg == null || !StringUtils.hasText(cfg.getCorpId()) || !StringUtils.hasText(cfg.getCorpSecret())) {
+                log.warn("wechat exchange code failed: wechat config missing or incomplete");
+                return null;
+            }
             String tokenUrl = "https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=" + cfg.getCorpId() + "&corpsecret=" + cfg.getCorpSecret();
             WechatTokenResp token = webClient.get().uri(tokenUrl).retrieve().bodyToMono(WechatTokenResp.class).block();
-            if (token == null || token.getErrcode() != 0) return null;
+            if (token == null || token.getErrcode() != 0) {
+                log.warn("wechat gettoken failed: errcode={}, errmsg={}",
+                        token == null ? null : token.getErrcode(),
+                        token == null ? "null response" : SecretLogSanitizer.sanitize(token.getErrmsg()));
+                return null;
+            }
             // 2) 通过 code 换 userid
             String infoUrl = "https://qyapi.weixin.qq.com/cgi-bin/user/getuserinfo?access_token=" + token.getAccess_token() + "&code=" + code;
             WechatUserInfoResp info = webClient.get().uri(infoUrl).retrieve().bodyToMono(WechatUserInfoResp.class).block();
@@ -132,6 +142,9 @@ public class PlatformOAuthService {
                 u.setSubjectId(info.getUserid());
                 return u;
             }
+            log.warn("wechat getuserinfo failed: errcode={}, errmsg={}",
+                    info == null ? null : info.getErrcode(),
+                    info == null ? "null response" : SecretLogSanitizer.sanitize(info.getErrmsg()));
         } catch (Exception e) {
             log.error("wechat exchange code failed: {}", SecretLogSanitizer.sanitize(e));
         }
@@ -226,7 +239,12 @@ public class PlatformOAuthService {
     @Data
     private static class WechatTokenResp { private int errcode; private String errmsg; private String access_token; }
     @Data
-    private static class WechatUserInfoResp { private int errcode; private String errmsg; private String userid; }
+    private static class WechatUserInfoResp {
+        private int errcode;
+        private String errmsg;
+        @JsonAlias({"UserId", "userid"})
+        private String userid;
+    }
 
     @Data
     private static class FeishuTokenReq { private String grant_type; private String code; public FeishuTokenReq(String g, String c){this.grant_type=g;this.code=c;} }

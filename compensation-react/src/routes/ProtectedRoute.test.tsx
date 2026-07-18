@@ -13,6 +13,8 @@ vi.mock('@services/rbac', () => ({
   getMeResources: vi.fn(),
 }));
 
+const testLocation = vi.hoisted(() => ({ pathname: '/test' }));
+
 // Mock react-router-dom
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
@@ -26,7 +28,7 @@ vi.mock('react-router-dom', async () => {
   return {
     ...actual,
     Navigate: MockNavigate,
-    useLocation: () => ({ pathname: '/test', search: '', hash: '', state: null }),
+    useLocation: () => ({ pathname: testLocation.pathname, search: '', hash: '', state: null }),
   };
 });
 
@@ -51,6 +53,17 @@ const TestWrapper = ({ children }: { children: React.ReactNode }) => {
 describe('ProtectedRoute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    testLocation.pathname = '/test';
+    const storage = new Map<string, string>();
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        getItem: (key: string) => storage.get(key) ?? null,
+        setItem: (key: string, value: string) => storage.set(key, value),
+        removeItem: (key: string) => storage.delete(key),
+        clear: () => storage.clear(),
+      },
+    });
     store.dispatch({ type: 'auth/logout' });
     mockGetMeResources.mockResolvedValue({
       permissionVersion: 1,
@@ -194,6 +207,37 @@ describe('ProtectedRoute', () => {
 
     await waitFor(() => expect(screen.getByTestId('navigate')).toHaveAttribute('data-to', '/403'));
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+  });
+
+  it('首页权限缓存过期时等待服务端刷新后再判断访问权限', async () => {
+    testLocation.pathname = '/';
+    localStorage.setItem('rbac_cache_1', JSON.stringify({
+      permissionVersion: 1,
+      resources: [
+        { id: 2, type: 'MENU', code: 'employees', name: '员工管理', path: '/employees' },
+      ],
+      actions: {},
+    }));
+    mockGetMeResources.mockResolvedValue({
+      permissionVersion: 2,
+      resources: [
+        { id: 1, type: 'MENU', code: 'dashboard', name: '工作台', path: '/' },
+      ],
+      actions: {},
+    });
+    store.dispatch(login({ id: '1', username: 'testuser', roles: ['HR'] }));
+
+    render(
+      <TestWrapper>
+        <ProtectedRoute>
+          <div>Protected Content</div>
+        </ProtectedRoute>
+      </TestWrapper>,
+    );
+
+    expect(await screen.findByText('Protected Content')).toBeInTheDocument();
+    expect(mockGetMeResources).toHaveBeenCalled();
+    expect(screen.queryByTestId('navigate')).not.toBeInTheDocument();
   });
 
   it('权限资源加载失败时跳转到系统错误页，不按空权限处理', async () => {

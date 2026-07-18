@@ -51,7 +51,7 @@ const Login: React.FC = () => {
         </div>
         <Text className="login-eyebrow">OPERATIONS CONSOLE</Text>
         <Title level={1}>{appName}</Title>
-        <Paragraph>
+        <Paragraph className="login-brand-description">
           统一管理员工、组织、薪酬、支付与审批流程，让每一次人事与财务操作都清晰可追溯。
         </Paragraph>
         <div className="login-brand-meta">

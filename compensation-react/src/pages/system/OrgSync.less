@@ -1,16 +1,18 @@
 .org-sync-page {
-  --org-ink: #172b4d;
-  --org-muted: #6b7785;
-  --org-border: #e5eaf0;
-  --org-border-strong: #d4dde8;
-  --org-surface: #ffffff;
-  --org-subtle: #f7f9fc;
-  --org-blue: #1677ff;
-  --org-green: #2f9e72;
-  --org-amber: #d48806;
-  --org-red: #d64545;
+  --org-ink: var(--ink);
+  --org-muted: var(--muted);
+  --org-border: var(--border);
+  --org-border-strong: var(--border);
+  --org-surface: var(--surface);
+  --org-subtle: var(--surface-subtle);
+  --org-blue: var(--primary);
+  --org-green: var(--success);
+  --org-amber: var(--warning);
+  --org-red: var(--danger);
+  width: 100%;
+  min-width: 0;
   padding: 18px 0 30px;
-  background: #f6f8fb;
+  background: var(--page-bg);
   color: var(--org-ink);
 }
 
@@ -47,17 +49,17 @@
 
 .org-sync-stat-icon-platform {
   color: var(--org-blue);
-  background: #eaf2ff;
+  background: var(--primary-soft);
 }
 
 .org-sync-stat-icon-success {
   color: var(--org-green);
-  background: #e7f7f1;
+  background: var(--success-soft);
 }
 
 .org-sync-stat-icon-time {
   color: var(--org-amber);
-  background: #fff5db;
+  background: var(--warning-soft);
 }
 
 .org-sync-stat-content {
@@ -108,6 +110,7 @@
 
 .org-sync-workspace > .ant-col {
   display: flex;
+  min-width: 0;
 }
 
 .org-sync-operation-card,
@@ -275,7 +278,7 @@
   border: 1px solid #cbd5e1;
   border-radius: 50%;
   color: #7d8997;
-  background: #fff;
+  background: var(--org-surface);
   font-size: 11px;
   font-weight: 700;
 }
@@ -336,12 +339,14 @@
 }
 
 .org-sync-tree-shell {
+  width: 100%;
+  max-width: 100%;
   max-height: 286px;
   overflow: auto;
   padding: 0 12px 10px;
   border: 1px solid var(--org-border-strong);
   border-radius: 8px;
-  background: #fbfcfe;
+  background: var(--org-subtle);
 }
 
 .org-sync-tree-toolbar {
@@ -354,7 +359,7 @@
   gap: 12px;
   padding: 10px 0 8px;
   border-bottom: 1px solid #edf1f5;
-  background: #fbfcfe;
+  background: var(--org-subtle);
   font-size: 12px;
 }
 
@@ -379,7 +384,7 @@
   padding: 20px 8px;
   border: 1px dashed var(--org-border-strong);
   border-radius: 8px;
-  background: #fbfcfe;
+  background: var(--org-subtle);
 }
 
 .org-sync-empty-state .ant-empty {
@@ -401,7 +406,7 @@
   padding: 12px 14px;
   border: 1px solid #d8ecec;
   border-radius: 8px;
-  background: #f2fafa;
+  background: var(--teal-soft);
 }
 
 .org-sync-all-note .anticon {
@@ -490,23 +495,23 @@
   align-items: center;
   justify-content: center;
   border-radius: 50%;
-  background: #eef2f6;
+  background: var(--surface-hover);
   font-size: 21px;
 }
 
 .org-sync-health-icon.is-success {
   color: var(--org-green);
-  background: #e7f7f1;
+  background: var(--success-soft);
 }
 
 .org-sync-health-icon.is-warning {
   color: var(--org-amber);
-  background: #fff5db;
+  background: var(--warning-soft);
 }
 
 .org-sync-health-icon.is-error {
   color: var(--org-red);
-  background: #fff0f0;
+  background: var(--danger-soft);
 }
 
 .org-sync-health-platform {
@@ -545,7 +550,7 @@
   margin-top: 14px;
   padding: 10px 12px;
   border-radius: 7px;
-  background: #f7f9fc;
+  background: var(--org-subtle);
   font-size: 12px;
 }
 
@@ -589,7 +594,7 @@
   justify-content: center;
   border-radius: 50%;
   color: #526173;
-  background: #eef2f6;
+  background: var(--surface-hover);
   font-size: 12px;
   font-weight: 700;
 }
@@ -677,7 +682,7 @@
 
 .org-sync-preview-modal .ant-modal-body {
   padding: 18px 26px 24px;
-  background: #f7f9fc;
+  background: var(--org-subtle);
 }
 
 .org-sync-edit-modal .ant-modal-body {
@@ -737,7 +742,7 @@
   justify-content: center;
   border-radius: 8px;
   color: var(--org-blue);
-  background: #eaf2ff;
+  background: var(--primary-soft);
   font-size: 17px;
 }
 
@@ -809,14 +814,21 @@
 }
 
 .org-sync-preview-table .ant-table-container {
-  overflow: hidden;
+  max-width: 100%;
+  overflow-x: auto;
   border: 1px solid var(--org-border);
   border-radius: 8px;
 }
 
+.org-sync-preview-table .ant-table-wrapper,
+.org-sync-preview-table .ant-table {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .org-sync-preview-table .ant-table-thead > tr > th {
   color: #526173;
-  background: #f7f9fc;
+  background: var(--org-subtle);
   font-size: 12px;
   font-weight: 600;
 }
@@ -827,11 +839,11 @@
 
 .org-sync-preview-table .ant-table-tbody > tr.is-already-imported > td {
   color: #8995a3;
-  background: #fcfcfd;
+  background: var(--org-subtle);
 }
 
 .org-sync-preview-table .ant-table-tbody > tr.is-already-imported:hover > td {
-  background: #f6f8fb !important;
+  background: var(--surface-hover) !important;
 }
 
 .org-sync-edit-context {
@@ -854,7 +866,7 @@
   justify-content: center;
   border-radius: 50%;
   color: #526173;
-  background: #e8edf3;
+  background: var(--surface-hover);
   font-size: 16px;
 }
 

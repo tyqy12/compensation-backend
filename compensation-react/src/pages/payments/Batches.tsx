@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback, useMemo } from 'react';
+import React, { useState, useRef, useCallback, useMemo, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Button,
@@ -23,7 +23,6 @@ import {
   PageContainer,
   ProTable,
   type ProColumns,
-  type ActionType,
   type ProFormInstance,
 } from '@ant-design/pro-components';
 import {
@@ -42,7 +41,6 @@ import {
 } from '@ant-design/icons';
 import {
   checkBatchTransfer,
-  fetchPaymentBatches,
   type TransferValidationIssue,
   usePaymentBatchesQuery,
   usePaymentBatchQuery,
@@ -50,12 +48,9 @@ import {
   useStartBatchTransferMutation,
   useRetryFailedRecordsMutation,
   type PaymentBatch,
-  type PaymentBatchListResponse,
   type PaymentBatchQueryParams,
   type PaymentRecord,
-  getBatchStatusInfo,
   getPaymentRecordStatusInfo,
-  getPaymentTypeInfo,
   formatAmount,
   calculateBatchProgress,
   calculateBatchSuccessRate,
@@ -64,6 +59,7 @@ import {
 import dayjs from 'dayjs';
 import { useHasAction } from '@services/queries/rbac';
 import { withActionPrefix } from '@utils/error';
+import './Batches.less';
 
 const { Text } = Typography;
 
@@ -102,18 +98,20 @@ const PaymentBatches: React.FC = () => {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   };
 
-  const [queryParams, setQueryParams] = useState<PaymentBatchQueryParams>(() => ({
-    current: parsePositiveInt(searchParams.get('current') ?? searchParams.get('page'), 1),
-    pageSize: parsePositiveInt(searchParams.get('pageSize') ?? searchParams.get('size'), 10),
-    keyword: searchParams.get('keyword') || undefined,
-    status: (searchParams.get('status') as any) || undefined,
-    paymentType: (searchParams.get('paymentType') as any) || undefined,
-    startDate: searchParams.get('startDate') || undefined,
-    endDate: searchParams.get('endDate') || undefined,
-    sortBy: searchParams.get('sortBy') || 'submitTime',
-    order: (searchParams.get('order') as 'asc' | 'desc') || 'desc',
-  }));
-  const [tableResult, setTableResult] = useState<PaymentBatchListResponse | null>(null);
+  const queryParams = useMemo<PaymentBatchQueryParams>(
+    () => ({
+      current: parsePositiveInt(searchParams.get('current') ?? searchParams.get('page'), 1),
+      pageSize: parsePositiveInt(searchParams.get('pageSize') ?? searchParams.get('size'), 10),
+      keyword: searchParams.get('keyword') || undefined,
+      status: (searchParams.get('status') as PaymentBatch['status']) || undefined,
+      paymentType: (searchParams.get('paymentType') as PaymentBatch['paymentType']) || undefined,
+      startDate: searchParams.get('startDate') || undefined,
+      endDate: searchParams.get('endDate') || undefined,
+      sortBy: searchParams.get('sortBy') || 'submitTime',
+      order: (searchParams.get('order') as 'asc' | 'desc') || 'desc',
+    }),
+    [searchParams],
+  );
 
   // 选中状态
   const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
@@ -124,7 +122,6 @@ const PaymentBatches: React.FC = () => {
   const [recordFilters, setRecordFilters] = useState({ status: '' as string });
 
   // 核心引用
-  const actionRef = useRef<ActionType>();
   const formRef = useRef<ProFormInstance>();
 
   // 权限
@@ -144,6 +141,22 @@ const PaymentBatches: React.FC = () => {
   // Mutations
   const startTransferMutation = useStartBatchTransferMutation();
   const retryMutation = useRetryFailedRecordsMutation();
+  const refetchBatches = batchesQuery.refetch;
+
+  useEffect(() => {
+    formRef.current?.setFieldsValue({
+      keyword: queryParams.keyword,
+      status: queryParams.status,
+      paymentType: queryParams.paymentType,
+      submitRange:
+        queryParams.startDate || queryParams.endDate
+          ? [
+              queryParams.startDate ? dayjs(queryParams.startDate) : undefined,
+              queryParams.endDate ? dayjs(queryParams.endDate) : undefined,
+            ]
+          : undefined,
+    });
+  }, [queryParams]);
 
   // ==================== URL 同步 ====================
   const updateUrlParams = useCallback(
@@ -159,10 +172,52 @@ const PaymentBatches: React.FC = () => {
     [setSearchParams],
   );
 
+  const handleSearchSubmit = useCallback(
+    (values: Record<string, any>) => {
+      const nextParams: PaymentBatchQueryParams = {
+        ...queryParams,
+        current: 1,
+        keyword: values.keyword?.trim() || undefined,
+        status: values.status || undefined,
+        paymentType: values.paymentType || undefined,
+        startDate: values.submitRange?.[0]?.format('YYYY-MM-DD'),
+        endDate: values.submitRange?.[1]?.format('YYYY-MM-DD'),
+      };
+      updateUrlParams(nextParams);
+      setSelectedRowKeys([]);
+    },
+    [queryParams, updateUrlParams],
+  );
+
+  const handleSearchReset = useCallback(() => {
+    updateUrlParams({ current: 1, pageSize: queryParams.pageSize, sortBy: 'submitTime', order: 'desc' });
+    setSelectedRowKeys([]);
+  }, [queryParams.pageSize, updateUrlParams]);
+
+  const handleTableChange = useCallback(
+    (pagination: { current?: number; pageSize?: number }, sorter: any) => {
+      const activeSorter = Array.isArray(sorter) ? sorter[0] : sorter;
+      const nextParams: PaymentBatchQueryParams = {
+        ...queryParams,
+        current: pagination.current ?? 1,
+        pageSize: pagination.pageSize ?? queryParams.pageSize ?? 10,
+        sortBy: typeof activeSorter?.field === 'string' ? activeSorter.field : queryParams.sortBy,
+        order:
+          activeSorter?.order === 'ascend'
+            ? 'asc'
+            : activeSorter?.order === 'descend'
+              ? 'desc'
+              : queryParams.order,
+      };
+      updateUrlParams(nextParams);
+    },
+    [queryParams, updateUrlParams],
+  );
+
   // ==================== 统计数据 ====================
   const summary = useMemo(() => {
-    const list = tableResult?.list ?? batchesQuery.data?.list ?? [];
-    const total = tableResult?.total ?? batchesQuery.data?.total ?? list.length;
+    const list = batchesQuery.data?.list ?? [];
+    const total = batchesQuery.data?.total ?? list.length;
     const processing = list.filter((b: PaymentBatch) => b.status === 'processing').length;
     const completed = list.filter((b: PaymentBatch) => b.status === 'completed').length;
     const failed = list.filter((b: PaymentBatch) => b.status === 'failed').length;
@@ -173,7 +228,7 @@ const PaymentBatches: React.FC = () => {
     );
     const totalCount = list.reduce((acc: number, b: PaymentBatch) => acc + (b.totalCount || 0), 0);
     return { total, processing, completed, failed, readyToStart, totalAmount, totalCount };
-  }, [batchesQuery.data, tableResult]);
+  }, [batchesQuery.data]);
 
   const summaryCards = useMemo(
     () => [
@@ -188,28 +243,28 @@ const PaymentBatches: React.FC = () => {
         title: '待启动批次',
         value: summary.readyToStart,
         prefix: <PlayCircleOutlined />,
-        valueStyle: { color: '#1677ff' },
+        valueStyle: { color: 'var(--primary)' },
       },
       {
         key: 'processing',
         title: '处理中批次',
         value: summary.processing,
         prefix: <SyncOutlined />,
-        valueStyle: { color: '#fa8c16' },
+        valueStyle: { color: 'var(--warning)' },
       },
       {
         key: 'completed',
         title: '已完成批次',
         value: summary.completed,
         prefix: <CheckCircleOutlined />,
-        valueStyle: { color: '#52c41a' },
+        valueStyle: { color: 'var(--success)' },
       },
       {
         key: 'failed',
         title: '失败批次',
         value: summary.failed,
         prefix: <CloseCircleOutlined />,
-        valueStyle: { color: '#ff4d4f' },
+        valueStyle: { color: 'var(--danger)' },
       },
       {
         key: 'amount',
@@ -292,23 +347,23 @@ const PaymentBatches: React.FC = () => {
             const validation = await checkBatchTransfer(batch.batchNo, true);
             if (!validation.pass) {
               showBlockedValidationModal(batch.batchNo, validation.blockedRecords || []);
-              actionRef.current?.reload();
+              refetchBatches();
               return;
             }
             await startTransferMutation.mutateAsync(batch.batchNo);
             message.success('批次转账已启动，正在后台处理');
-            actionRef.current?.reload();
+            refetchBatches();
           } catch (error: any) {
             message.error(withActionPrefix('启动失败', error));
           }
         },
       });
     },
-    [startTransferMutation, message, modal, showBlockedValidationModal],
+    [startTransferMutation, message, modal, showBlockedValidationModal, refetchBatches],
   );
 
   const handleBatchStart = useCallback(async () => {
-    const sourceBatches = tableResult?.list ?? batchesQuery.data?.list ?? [];
+    const sourceBatches = batchesQuery.data?.list ?? [];
     const selectedBatches = sourceBatches.filter(
       (b: PaymentBatch) => selectedRowKeys.includes(b.batchNo) && isStartablePaymentBatch(b),
     );
@@ -381,7 +436,7 @@ const PaymentBatches: React.FC = () => {
           }
 
           setSelectedRowKeys([]);
-          actionRef.current?.reload();
+          refetchBatches();
         } catch (error: any) {
           message.error(withActionPrefix('批量启动失败', error));
         }
@@ -389,12 +444,12 @@ const PaymentBatches: React.FC = () => {
     });
   }, [
     selectedRowKeys,
-    tableResult,
     batchesQuery.data,
     startTransferMutation,
     message,
     modal,
     showBlockedValidationModal,
+    refetchBatches,
   ]);
 
   const handleViewDetail = useCallback((batch: PaymentBatch) => {
@@ -568,9 +623,16 @@ const PaymentBatches: React.FC = () => {
     },
     {
       title: '时间信息',
-      dataIndex: 'timeInfo',
+      dataIndex: 'submitTime',
       width: 160,
       search: false,
+      sorter: true,
+      sortOrder:
+        queryParams.sortBy === 'submitTime'
+          ? queryParams.order === 'asc'
+            ? 'ascend'
+            : 'descend'
+          : undefined,
       render: (_, record) => (
         <div style={{ fontSize: 12 }}>
           {record.submitTime && (
@@ -762,15 +824,20 @@ const PaymentBatches: React.FC = () => {
   // ==================== 渲染 ====================
   return (
     <PageContainer
+      className="payment-batches-page"
       header={{
         title: '支付批次管理',
         subTitle: '管理批量支付操作和转账状态',
       }}
       content={
-        <Row gutter={[16, 16]}>
+        <div className="payment-batches-summary">
+          <Text type="secondary" className="payment-batches-summary-label">
+            当前筛选结果 · 第 {queryParams.current} 页
+          </Text>
+          <Row gutter={[12, 12]}>
           {summaryCards.map((item) => (
             <Col key={item.key} xs={24} sm={12} md={8} lg={6} xl={6} xxl={4}>
-              <Card size="small">
+              <Card size="small" className="payment-batches-summary-card">
                 <Statistic
                   title={item.title}
                   value={item.value}
@@ -780,48 +847,21 @@ const PaymentBatches: React.FC = () => {
               </Card>
             </Col>
           ))}
-        </Row>
+          </Row>
+        </div>
       }
     >
       <ProTable<PaymentBatch>
         cardBordered
         headerTitle="批次列表"
         columns={columns}
-        actionRef={actionRef}
         formRef={formRef}
-        request={async (params) => {
-          const newParams: PaymentBatchQueryParams = {
-            current: params.current || 1,
-            pageSize: params.pageSize || 10,
-            keyword: params.keyword,
-            status: params.status,
-            paymentType: params.paymentType,
-            startDate: params.startDate,
-            endDate: params.endDate,
-            sortBy: Object.keys(params.sort || {})[0] || 'submitTime',
-            order:
-              Object.keys(params.sort || {}).length > 0
-                ? Object.values(params.sort || {})[0] === 'ascend'
-                  ? 'asc'
-                  : 'desc'
-                : 'desc',
-          };
-
-          setQueryParams(newParams);
-          updateUrlParams(newParams);
-
-          try {
-            const result = await fetchPaymentBatches(newParams);
-            setTableResult(result);
-            return {
-              data: result.list,
-              success: true,
-              total: result.total || 0,
-            };
-          } catch {
-            return { data: [], success: false, total: 0 };
-          }
-        }}
+        dataSource={batchesQuery.data?.list ?? []}
+        onSubmit={handleSearchSubmit}
+        onReset={handleSearchReset}
+        onChange={(pagination, _filters, sorter) =>
+          handleTableChange(pagination, sorter)
+        }
         rowKey="batchNo"
         search={{
           labelWidth: 'auto',
@@ -833,6 +873,7 @@ const PaymentBatches: React.FC = () => {
         pagination={{
           pageSize: queryParams.pageSize,
           current: queryParams.current,
+          total: batchesQuery.data?.total ?? 0,
           showSizeChanger: true,
           showQuickJumper: true,
           showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条/共 ${total} 条`,
@@ -892,8 +933,9 @@ const PaymentBatches: React.FC = () => {
             </Button>,
           ].filter(Boolean) as React.ReactNode[]
         }
-        options={{ reload: true, density: true, setting: true }}
-        scroll={{ x: 1400 }}
+        options={{ reload: false, density: true, setting: true }}
+        scroll={{ x: 1180 }}
+        className="payment-batches-table"
       />
 
       {/* 批次详情 Drawer */}
@@ -904,7 +946,8 @@ const PaymentBatches: React.FC = () => {
             批次详情 - {drawerBatchNo}
           </Space>
         }
-        size={800}
+        size="large"
+        className="payment-batches-detail-drawer"
         open={drawerVisible}
         onClose={() => {
           setDrawerVisible(false);
@@ -917,7 +960,7 @@ const PaymentBatches: React.FC = () => {
             <Space orientation="vertical" size={16} style={{ width: '100%' }}>
               {/* 基本信息 */}
               <Card size="small" title="基本信息">
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 16 }}>
+                <div className="payment-batches-detail-grid">
                   <div>
                     <Text type="secondary">批次号：</Text>
                     <Text code>{batchDetailQuery.data.batchNo}</Text>
@@ -942,7 +985,7 @@ const PaymentBatches: React.FC = () => {
                   </div>
                   <div>
                     <Text type="secondary">支付总额：</Text>
-                    <Text strong style={{ color: '#52c41a' }}>
+                    <Text strong style={{ color: 'var(--success)' }}>
                       {formatAmount(batchDetailQuery.data.totalAmount)}
                     </Text>
                   </div>
@@ -961,21 +1004,21 @@ const PaymentBatches: React.FC = () => {
                     status={batchDetailQuery.data.status === 'failed' ? 'exception' : 'active'}
                   />
                 </div>
-                <Space size={32}>
+                <Space size={32} wrap className="payment-batches-detail-stats">
                   <Statistic
                     title="成功"
                     value={batchDetailQuery.data.successCount}
-                    styles={{ content: { color: '#52c41a' } }}
+                    styles={{ content: { color: 'var(--success)' } }}
                   />
                   <Statistic
                     title="失败"
                     value={batchDetailQuery.data.failedCount}
-                    styles={{ content: { color: '#ff4d4f' } }}
+                    styles={{ content: { color: 'var(--danger)' } }}
                   />
                   <Statistic
                     title="待处理"
                     value={batchDetailQuery.data.pendingCount}
-                    styles={{ content: { color: '#1890ff' } }}
+                    styles={{ content: { color: 'var(--primary)' } }}
                   />
                   <Statistic
                     title="成功率"
@@ -1065,14 +1108,17 @@ const PaymentBatches: React.FC = () => {
                   </Space>
                 }
               >
-                <Table
+                <div className="payment-batches-record-table">
+                  <Table
                   columns={recordColumns as any}
                   dataSource={recordsQuery.data || []}
                   rowKey="id"
                   pagination={{ pageSize: 5, size: 'small' }}
                   loading={recordsQuery.isLoading}
                   size="small"
-                />
+                  scroll={{ x: 1260 }}
+                  />
+                </div>
               </Card>
             </Space>
           )}

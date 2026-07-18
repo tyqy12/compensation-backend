@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Layout, Menu, Button, Space, Avatar, Dropdown, Badge, Tooltip, Typography } from 'antd';
 import { Link, useLocation } from 'react-router-dom';
 import { useLogoutMutation } from '@services/queries/auth';
@@ -11,6 +11,7 @@ import {
   BarChartOutlined,
   BellOutlined,
   CheckCircleOutlined,
+  CloseOutlined,
   ControlOutlined,
   DashboardOutlined,
   FileSearchOutlined,
@@ -45,6 +46,31 @@ const { Header, Content, Sider } = Layout;
 const { Text } = Typography;
 
 type Props = { children?: React.ReactNode };
+
+const MOBILE_BREAKPOINT = '(max-width: 991px)';
+
+const useIsMobile = () => {
+  const getMatches = () => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia(MOBILE_BREAKPOINT).matches || window.innerWidth < 992;
+  };
+  const [isMobile, setIsMobile] = useState(getMatches);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia(MOBILE_BREAKPOINT);
+    const update = () => setIsMobile(mediaQuery.matches || window.innerWidth < 992);
+    update();
+    mediaQuery.addEventListener?.('change', update);
+    window.addEventListener('resize', update);
+
+    return () => {
+      mediaQuery.removeEventListener?.('change', update);
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+
+  return isMobile;
+};
 
 const MENU_ICONS: Record<string, React.ReactNode> = {
   appstore: <AppstoreOutlined />,
@@ -97,6 +123,61 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
   const setCollapsed = useUIStore((state) => state.setCollapsed);
   const toggleCollapsed = useUIStore((state) => state.toggleCollapsed);
   const toggleTheme = useUIStore((state) => state.toggleTheme);
+  const isMobile = useIsMobile();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  const navToggleLabel = isMobile
+    ? mobileNavOpen
+      ? '关闭侧边导航'
+      : '打开侧边导航'
+    : collapsed
+      ? '展开侧边导航'
+      : '折叠侧边导航';
+  const siderCollapsed = isMobile ? !mobileNavOpen : collapsed;
+
+  useEffect(() => {
+    if (!isMobile) {
+      setMobileNavOpen(false);
+    }
+  }, [isMobile]);
+
+  useEffect(() => {
+    if (isMobile) {
+      setMobileNavOpen(false);
+    }
+  }, [isMobile, pathname]);
+
+  useEffect(() => {
+    if (!isMobile || !mobileNavOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMobileNavOpen(false);
+    };
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isMobile, mobileNavOpen]);
+
+  const handleNavToggle = () => {
+    if (isMobile) {
+      setMobileNavOpen((open) => !open);
+      return;
+    }
+    toggleCollapsed();
+  };
+
+  const handleSiderCollapse = (nextCollapsed: boolean) => {
+    if (isMobile) {
+      setMobileNavOpen(!nextCollapsed);
+      return;
+    }
+    setCollapsed(nextCollapsed);
+  };
 
   useWecomRegister();
   useMenuRefresh();
@@ -148,14 +229,27 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
     <Layout className="app-shell">
       <Header className="app-header">
         <div className="app-header-left">
-          <Tooltip title={collapsed ? '展开侧边导航' : '折叠侧边导航'}>
+          <Tooltip title={navToggleLabel}>
             <Button
               className="app-header-icon-button"
               type="text"
-              aria-label={collapsed ? '展开侧边导航' : '折叠侧边导航'}
-              aria-pressed={collapsed}
-              onClick={toggleCollapsed}
-              icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+              aria-label={navToggleLabel}
+              aria-pressed={isMobile ? mobileNavOpen : collapsed}
+              onClick={handleNavToggle}
+              aria-expanded={!siderCollapsed}
+              icon={
+                isMobile ? (
+                  mobileNavOpen ? (
+                    <CloseOutlined />
+                  ) : (
+                    <MenuOutlined />
+                  )
+                ) : collapsed ? (
+                  <MenuUnfoldOutlined />
+                ) : (
+                  <MenuFoldOutlined />
+                )
+              }
             />
           </Tooltip>
           <Link className="app-brand" to="/">
@@ -172,7 +266,7 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
         <div className="app-header-right">
           <Tooltip title="全局搜索">
             <Button
-              className="app-header-icon-button"
+              className="app-header-icon-button app-header-optional"
               type="text"
               icon={<SearchOutlined />}
               aria-label="全局搜索"
@@ -180,7 +274,7 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
           </Tooltip>
           <Tooltip title="帮助中心">
             <Button
-              className="app-header-icon-button"
+              className="app-header-icon-button app-header-optional"
               type="text"
               icon={<QuestionCircleOutlined />}
               aria-label="帮助中心"
@@ -229,15 +323,24 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
         </div>
       </Header>
 
+      {isMobile && mobileNavOpen && (
+        <button
+          className="app-mobile-nav-backdrop"
+          type="button"
+          aria-label="关闭侧边导航"
+          onClick={() => setMobileNavOpen(false)}
+        />
+      )}
+
       <Layout className="app-body">
         <Sider
           className="app-sider"
           width={232}
           theme={theme === 'dark' ? 'dark' : 'light'}
           collapsible
-          breakpoint="lg"
-          collapsed={collapsed}
-          onCollapse={setCollapsed}
+          collapsedWidth={isMobile ? 0 : 80}
+          collapsed={siderCollapsed}
+          onCollapse={handleSiderCollapse}
           trigger={null}
         >
           <div className="app-sider-inner">
@@ -251,6 +354,9 @@ export const AppLayout: React.FC<Props> = ({ children }) => {
                 aria-label="主导航"
                 selectedKeys={selectedMenuKey ? [selectedMenuKey] : []}
                 items={menuItems}
+                onClick={() => {
+                  if (isMobile) setMobileNavOpen(false);
+                }}
               />
             )}
           </div>

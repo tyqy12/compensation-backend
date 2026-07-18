@@ -558,7 +558,7 @@ const CyclesPage: React.FC = () => {
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Row gutter={12}>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Form.Item
                 name="type"
                 label="主类型"
@@ -573,7 +573,7 @@ const CyclesPage: React.FC = () => {
                 />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Form.Item
                 name="cycleType"
                 label="周期类型"
@@ -588,7 +588,7 @@ const CyclesPage: React.FC = () => {
                 />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Form.Item
                 name="periodLabel"
                 label="周期标签"
@@ -600,7 +600,7 @@ const CyclesPage: React.FC = () => {
                 <Input placeholder="如：2025-01" />
               </Form.Item>
             </Col>
-            <Col span={12}>
+            <Col xs={24} sm={12}>
               <Form.Item
                 name="cycleCode"
                 label="周期编码"
@@ -633,32 +633,32 @@ const CyclesPage: React.FC = () => {
           </Form.Item>
 
           <Row gutter={12}>
-            <Col span={8}>
+            <Col xs={24} sm={12} md={8}>
               <Form.Item name="cutoffDate" label="截数日">
                 <DatePicker placeholder="选择截数日" style={{ width: '100%' }} />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col xs={24} sm={12} md={8}>
               <Form.Item name="payDay" label="发薪日">
                 <InputNumber min={1} max={31} style={{ width: '100%' }} placeholder="1-31" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col xs={24} sm={12} md={8}>
               <Form.Item name="timezone" label="时区">
                 <Input placeholder="如：UTC+8" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col xs={24} sm={12} md={8}>
               <Form.Item name="leadDays" label="提前天数">
                 <InputNumber min={0} max={365} style={{ width: '100%' }} placeholder="0-365" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col xs={24} sm={12} md={8}>
               <Form.Item name="graceDays" label="宽限天数">
                 <InputNumber min={0} max={365} style={{ width: '100%' }} placeholder="0-365" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col xs={24} sm={12} md={8}>
               <Form.Item
                 name="status"
                 label="状态"

@@ -257,7 +257,7 @@ const UserList: React.FC = () => {
       <Card>
         {/* 搜索区域 */}
         <Form form={form} layout="inline" onFinish={handleSearch} style={{ marginBottom: 16 }}>
-          <Form.Item name="searchText" style={{ width: 400 }}>
+          <Form.Item name="searchText" style={{ width: 'min(400px, 100%)' }}>
             <Input
               placeholder="搜索用户、员工姓名、工号..."
               prefix={<SearchOutlined />}

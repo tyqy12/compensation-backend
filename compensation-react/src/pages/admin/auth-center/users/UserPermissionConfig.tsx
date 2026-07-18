@@ -739,16 +739,16 @@ const UserPermissionConfig: React.FC = () => {
 
         <Card title="权限统计" size="small">
           <Row gutter={16}>
-            <Col span={6}>
+            <Col xs={12} sm={6}>
               <Statistic title="菜单权限" value={permissionStats.menuCount} suffix="项" />
             </Col>
-            <Col span={6}>
+            <Col xs={12} sm={6}>
               <Statistic title="API权限" value={permissionStats.apiCount} suffix="项" />
             </Col>
-            <Col span={6}>
+            <Col xs={12} sm={6}>
               <Statistic title="操作权限" value={permissionStats.actionCount} suffix="项" />
             </Col>
-            <Col span={6}>
+            <Col xs={12} sm={6}>
               <Statistic title="总计" value={permissionStats.total} suffix="项" />
             </Col>
           </Row>

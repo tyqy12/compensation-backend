@@ -26,16 +26,14 @@ vi.mock('react-router-dom', async () => {
 // Mock payment batch queries
 const mockBatchesQuery = vi.fn();
 const mockStartTransferMutation = vi.fn();
-const mockFetchPaymentBatches = vi.fn();
 const mockCheckBatchTransfer = vi.fn();
 
 vi.mock('@services/queries/paymentBatch', async () => {
   const actual = await vi.importActual('@services/queries/paymentBatch');
   return {
     ...actual,
-    usePaymentBatchesQuery: () => mockBatchesQuery(),
+    usePaymentBatchesQuery: (...args: unknown[]) => mockBatchesQuery(...args),
     useStartBatchTransferMutation: () => mockStartTransferMutation(),
-    fetchPaymentBatches: (...args: any[]) => mockFetchPaymentBatches(...args),
     checkBatchTransfer: (...args: any[]) => mockCheckBatchTransfer(...args),
   };
 });
@@ -169,7 +167,6 @@ describe('Batches', () => {
     vi.clearAllMocks();
     mockBatchesQuery.mockReset();
     mockStartTransferMutation.mockReset();
-    mockFetchPaymentBatches.mockReset();
     mockCheckBatchTransfer.mockReset();
     mockSearchParams.forEach((_, key) => mockSearchParams.delete(key));
 
@@ -186,7 +183,6 @@ describe('Batches', () => {
       mutateAsync: vi.fn(),
       isPending: false,
     });
-    mockFetchPaymentBatches.mockResolvedValue(mockPagedResponse);
     mockCheckBatchTransfer.mockResolvedValue({
       batchNo: 'BATCH_20240115002',
       pendingCount: 0,
@@ -325,7 +321,7 @@ describe('Batches', () => {
 
     await waitFor(() => {
       expect(screen.getAllByText('处理进度').length).toBeGreaterThan(0);
-      expect(mockFetchPaymentBatches).toHaveBeenCalled();
+      expect(mockBatchesQuery).toHaveBeenCalled();
     });
   });
 
@@ -345,6 +341,34 @@ describe('Batches', () => {
       expect(detailLink.closest('a')).toHaveAttribute(
         'href',
         expect.stringContaining('/payments/batches/BATCH_20240115001'),
+      );
+    });
+  });
+
+  it('should build the list query from URL parameters', async () => {
+    mockSearchParams.set('current', '1');
+    mockSearchParams.set('pageSize', '10');
+    mockSearchParams.set('keyword', '工资');
+    mockSearchParams.set('status', 'processing');
+    mockSearchParams.set('sortBy', 'submitTime');
+    mockSearchParams.set('order', 'desc');
+
+    render(
+      <TestWrapper>
+        <Batches />
+      </TestWrapper>,
+    );
+
+    await waitFor(() => {
+      expect(mockBatchesQuery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          current: 1,
+          pageSize: 10,
+          keyword: '工资',
+          status: 'processing',
+          sortBy: 'submitTime',
+          order: 'desc',
+        }),
       );
     });
   });
@@ -401,7 +425,6 @@ describe('Batches', () => {
   });
 
   it('should handle error state', async () => {
-    mockFetchPaymentBatches.mockRejectedValueOnce(new Error('网络连接失败'));
     mockBatchesQuery.mockReturnValue({
       data: null,
       isLoading: false,
@@ -422,13 +445,6 @@ describe('Batches', () => {
   });
 
   it('should handle empty state', async () => {
-    mockFetchPaymentBatches.mockResolvedValueOnce({
-      list: [],
-      records: [],
-      total: 0,
-      current: 1,
-      size: 10,
-    });
     mockBatchesQuery.mockReturnValue({
       data: { list: [], records: [], total: 0, current: 1, size: 10 },
       isLoading: false,

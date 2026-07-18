@@ -44,3 +44,33 @@ export const appTheme = {
     },
   },
 };
+
+export const getAppTheme = (mode: 'light' | 'dark') => {
+  if (mode === 'light') return appTheme;
+
+  return {
+    tokens: {
+      ...appTheme.tokens,
+      colorPrimary: '#6da8e8',
+      colorInfo: '#6da8e8',
+      colorSuccess: '#5fc694',
+      colorWarning: '#e3a63a',
+      colorError: '#f08484',
+      colorBgLayout: '#111923',
+      colorBgContainer: '#182331',
+      colorBgElevated: '#1d2a3a',
+      colorText: '#edf3f8',
+      colorTextSecondary: '#a7b4c2',
+      colorBorder: '#304154',
+      colorBorderSecondary: '#273748',
+    },
+    components: {
+      ...appTheme.components,
+      Table: {
+        ...appTheme.components.Table,
+        headerBg: '#1d2a3a',
+        rowHoverBg: '#243447',
+      },
+    },
+  };
+};

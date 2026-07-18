@@ -1,19 +1,21 @@
 .role-edit-page,
 .role-members-page,
 .role-permission-page {
-  --role-ink: #172b4d;
-  --role-muted: #6b7785;
-  --role-border: #e5eaf0;
-  --role-border-strong: #d4dde8;
-  --role-surface: #ffffff;
-  --role-subtle: #f7f9fc;
-  --role-blue: #1677ff;
-  --role-green: #2f9e72;
-  --role-amber: #d48806;
-  --role-red: #d64545;
+  --role-ink: var(--ink);
+  --role-muted: var(--muted);
+  --role-border: var(--border);
+  --role-border-strong: var(--border);
+  --role-surface: var(--surface);
+  --role-subtle: var(--surface-subtle);
+  --role-blue: var(--primary);
+  --role-green: var(--success);
+  --role-amber: var(--warning);
+  --role-red: var(--danger);
+  width: 100%;
+  min-width: 0;
   min-height: 100%;
   padding: 18px 0 32px;
-  background: #f6f8fb;
+  background: var(--page-bg);
   color: var(--role-ink);
 }
 
@@ -23,7 +25,7 @@
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: #f6f8fb;
+  background: var(--page-bg);
 }
 
 .role-page-state .ant-alert {
@@ -55,7 +57,7 @@
   justify-content: center;
   border-radius: 10px;
   color: var(--role-blue);
-  background: #eaf2ff;
+  background: var(--primary-soft);
   font-size: 20px;
 }
 
@@ -100,12 +102,12 @@
 
 .role-context-icon.is-members {
   color: var(--role-green);
-  background: #e7f7f1;
+  background: var(--success-soft);
 }
 
 .role-context-icon.is-permission {
   color: var(--role-amber);
-  background: #fff5db;
+  background: var(--warning-soft);
 }
 
 .role-context-copy {
@@ -368,7 +370,7 @@
 
 .role-members-table .ant-table-thead > tr > th {
   color: #718096;
-  background: #fbfcfe;
+  background: var(--role-subtle);
   font-size: 12px;
   font-weight: 600;
 }
@@ -386,7 +388,7 @@
 
 .role-user-cell .ant-avatar {
   color: var(--role-blue);
-  background: #eaf2ff;
+  background: var(--primary-soft);
 }
 
 .role-user-cell-copy,
@@ -457,7 +459,7 @@
   gap: 10px;
   padding: 15px 22px;
   border-bottom: 1px solid var(--role-border);
-  background: #fbfcfe;
+  background: var(--role-subtle);
 }
 
 .permission-filterbar > .ant-input-affix-wrapper {
@@ -526,7 +528,7 @@
   padding: 10px 8px;
   border: 1px solid var(--role-border);
   border-radius: 7px;
-  background: #fcfdff;
+  background: var(--role-subtle);
 }
 
 .permission-tree-shell .ant-tree {
@@ -571,7 +573,7 @@
 }
 
 .permission-action-panel {
-  background: #fbfcfe;
+  background: var(--role-subtle);
 }
 
 .permission-bulk-editor {
@@ -581,7 +583,7 @@
   padding: 14px;
   border: 1px solid #dbe7f5;
   border-radius: 7px;
-  background: #f4f8fd;
+  background: var(--primary-soft);
 }
 
 .permission-bulk-heading {
@@ -862,6 +864,6 @@
     margin: 0 -15px;
     padding: 12px 15px;
     border-top: 1px solid var(--role-border);
-    background: rgba(246, 248, 251, 0.96);
+    background: var(--page-bg);
   }
 }

@@ -1,4 +1,6 @@
 .payroll-entry-shell {
+  width: 100%;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -284,6 +286,28 @@
 
   .payroll-entry-ledger-heading .ant-input-search {
     width: 100% !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .payroll-entry-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .payroll-entry-source-column,
+  .payroll-entry-issue-column {
+    position: static;
+  }
+
+  .payroll-entry-issue-column {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .payroll-entry-issue-column {
+    display: flex;
   }
 }
 

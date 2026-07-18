@@ -1,11 +1,10 @@
-version: "3.9"
-
 services:
   redis:
     image: redis:7.2
     container_name: comp-redis
+    restart: unless-stopped
     environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     command:
       - /bin/sh
       - -c
@@ -16,22 +15,62 @@ services:
           exec redis-server --appendonly yes
         fi
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          if [ -n "$$REDIS_PASSWORD" ]; then
+            redis-cli -a "$$REDIS_PASSWORD" ping;
+          else
+            redis-cli ping;
+          fi | grep -q PONG
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
   app:
     build: .
     container_name: comp-app
+    restart: unless-stopped
+    init: true
     environment:
       SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: ${SPRING_DATASOURCE_URL:?SPRING_DATASOURCE_URL is required}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME:?SPRING_DATASOURCE_USERNAME is required}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD:?SPRING_DATASOURCE_PASSWORD is required}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
-      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      EXTERNAL_API_JWT_SECRET: ${EXTERNAL_API_JWT_SECRET:?EXTERNAL_API_JWT_SECRET is required}
+      ENCRYPTION_SM4_KEY: ${ENCRYPTION_SM4_KEY:?ENCRYPTION_SM4_KEY is required}
+      ENCRYPTION_AES_KEY: ${ENCRYPTION_AES_KEY:?ENCRYPTION_AES_KEY is required}
+      JAVA_OPTS: "${JAVA_OPTS:--Xms256m -Xmx1024m -XX:+UseContainerSupport -Duser.timezone=Asia/Shanghai -Djava.security.egd=file:/dev/./urandom}"
+      FILE_STORAGE_LOCAL_BASE_PATH: ${FILE_STORAGE_LOCAL_BASE_PATH:-/var/lib/compensation/files}
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:-20}
+      SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:-5}
+      SPRING_RABBITMQ_LISTENER_SIMPLE_AUTO_STARTUP: ${SPRING_RABBITMQ_LISTENER_SIMPLE_AUTO_STARTUP:-false}
+      OAUTH_TRUSTED_REDIRECT_HOSTS: ${OAUTH_TRUSTED_REDIRECT_HOSTS:?OAUTH_TRUSTED_REDIRECT_HOSTS is required}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./runtime/logs:/var/log/compensation
+      - ./runtime/files:/var/lib/compensation/files
+    mem_limit: 1536m
+    mem_reservation: 512m
+    cpus: "2.0"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
 volumes:
   redisdata:

@@ -39,6 +39,7 @@ export function useMeResourcesQuery(options?: UseQueryOptions<MeResourcesData>) 
     },
     // hydrate with cache if available to avoid layout jank
     initialData: cached,
+    initialDataUpdatedAt: cached ? 0 : undefined,
     // 菜单数据设置较短的 staleTime，保证相对新鲜的缓存
     staleTime: 10_000,
     gcTime: 5 * 60_000,

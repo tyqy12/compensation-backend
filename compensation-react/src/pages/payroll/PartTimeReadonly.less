@@ -1,0 +1,257 @@
+.part-time-readonly-page {
+  min-width: 0;
+}
+
+.part-time-workspace {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.part-time-section {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-soft);
+}
+
+.part-time-section-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.part-time-section-heading > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.part-time-section-kicker {
+  color: var(--muted-light);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.part-time-section-title {
+  margin: 0 !important;
+  color: var(--ink) !important;
+  font-size: 18px !important;
+}
+
+.part-time-credential-form,
+.part-time-filter-form,
+.part-time-payslip-form {
+  min-width: 0;
+}
+
+.part-time-credential-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) minmax(120px, 0.55fr);
+  gap: 12px 16px;
+  align-items: end;
+}
+
+.part-time-credential-grid .ant-form-item,
+.part-time-filter-form .ant-form-item,
+.part-time-payslip-form .ant-form-item {
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.part-time-credential-grid .ant-input,
+.part-time-credential-grid .ant-input-affix-wrapper,
+.part-time-filter-form .ant-select,
+.part-time-filter-form .ant-picker,
+.part-time-payslip-form .ant-input,
+.part-time-payslip-form .ant-picker {
+  width: 100%;
+}
+
+.part-time-renew-field .ant-form-item-control-input-content {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+}
+
+.part-time-credential-actions,
+.part-time-filter-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.part-time-credential-actions {
+  margin-top: 16px;
+}
+
+.part-time-token-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.part-time-filter-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 240px) minmax(160px, 220px) auto;
+  gap: 12px 16px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.part-time-filter-actions {
+  min-height: 56px;
+  padding-bottom: 1px;
+}
+
+.part-time-table-shell {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.part-time-table-shell .ant-pro-table,
+.part-time-table-shell .ant-pro-card {
+  min-width: 0;
+}
+
+.part-time-table-shell .ant-table-wrapper {
+  max-width: 100%;
+}
+
+.part-time-table-shell .ant-table-tbody > tr {
+  cursor: pointer;
+}
+
+.part-time-detail-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.part-time-detail-summary > div {
+  display: grid;
+  min-width: 0;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 7px;
+  background: var(--surface-subtle);
+}
+
+.part-time-detail-summary .ant-typography:not(.ant-typography-secondary) {
+  overflow-wrap: anywhere;
+}
+
+.part-time-line-toolbar {
+  width: min(100%, 360px);
+  margin-bottom: 14px;
+}
+
+.part-time-line-toolbar .ant-input-search {
+  width: 100%;
+}
+
+.part-time-payslip-form {
+  display: grid;
+  grid-template-columns: minmax(220px, 300px) minmax(180px, 220px) auto;
+  gap: 12px 16px;
+  align-items: end;
+  margin-bottom: 18px;
+}
+
+.part-time-payslip-list {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
+.part-time-payslip-item {
+  min-width: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.part-time-payslip-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.part-time-payslip-heading > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+@media (max-width: 900px) {
+  .part-time-credential-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .part-time-filter-form,
+  .part-time-payslip-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .part-time-filter-actions {
+    grid-column: 1 / -1;
+  }
+
+  .part-time-detail-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .part-time-section {
+    padding: 16px;
+  }
+
+  .part-time-section-heading,
+  .part-time-payslip-heading {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .part-time-section-heading > .ant-btn,
+  .part-time-section-heading > .ant-tag {
+    align-self: flex-start;
+  }
+
+  .part-time-credential-grid,
+  .part-time-filter-form,
+  .part-time-payslip-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .part-time-filter-actions {
+    grid-column: auto;
+    min-height: 0;
+  }
+
+  .part-time-detail-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .part-time-token-meta {
+    display: grid;
+    gap: 4px;
+  }
+}
+
+@media (max-width: 480px) {
+  .part-time-detail-summary {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

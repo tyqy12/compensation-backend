@@ -444,22 +444,22 @@ const UserPermissionView: React.FC = () => {
           size="small"
         >
           <Row gutter={16}>
-            <Col span={4}>
+            <Col xs={12} sm={8} lg={4}>
               <Statistic title="菜单权限" value={permissionStats.menuCount} suffix="项" />
             </Col>
-            <Col span={4}>
+            <Col xs={12} sm={8} lg={4}>
               <Statistic title="API权限" value={permissionStats.apiCount} suffix="项" />
             </Col>
-            <Col span={4}>
+            <Col xs={12} sm={8} lg={4}>
               <Statistic title="操作权限" value={permissionStats.actionCount} suffix="项" />
             </Col>
-            <Col span={4}>
+            <Col xs={12} sm={8} lg={4}>
               <Statistic title="个性化" value={permissionStats.personalizedCount} suffix="项" />
             </Col>
-            <Col span={4}>
+            <Col xs={12} sm={8} lg={4}>
               <Statistic title="继承" value={permissionStats.inheritedCount} suffix="项" />
             </Col>
-            <Col span={4}>
+            <Col xs={12} sm={8} lg={4}>
               <Statistic title="总计" value={permissionStats.total} suffix="项" />
             </Col>
           </Row>

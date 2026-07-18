@@ -1,0 +1,118 @@
+.payment-batches-page {
+  min-width: 0;
+}
+
+.payment-batches-summary {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.payment-batches-summary-label {
+  font-size: 12px;
+}
+
+.payment-batches-summary-card {
+  height: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow-soft);
+}
+
+.payment-batches-summary-card .ant-card-body {
+  padding: 14px 16px;
+}
+
+.payment-batches-summary-card .ant-statistic-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.payment-batches-page .ant-pro-table {
+  min-width: 0;
+}
+
+.payment-batches-page .ant-pro-table-list-toolbar {
+  gap: 12px;
+}
+
+.payment-batches-page .ant-pro-table-list-toolbar-container {
+  min-width: 0;
+}
+
+.payment-batches-table .ant-table-wrapper {
+  max-width: 100%;
+}
+
+.payment-batches-detail-drawer .ant-drawer-body {
+  padding: 20px;
+}
+
+.payment-batches-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 18px;
+}
+
+.payment-batches-detail-grid > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.payment-batches-detail-stats {
+  max-width: 100%;
+}
+
+.payment-batches-record-table {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.payment-batches-record-table .ant-table-wrapper {
+  min-width: 0;
+}
+
+@media (max-width: 767px) {
+  .payment-batches-page .ant-pro-page-container-children-container {
+    padding-inline: 0;
+  }
+
+  .payment-batches-summary-card .ant-card-body {
+    padding: 13px 14px;
+  }
+
+  .payment-batches-page .ant-pro-table-search .ant-form-item {
+    width: 100%;
+  }
+
+  .payment-batches-page .ant-pro-table-search .ant-form-item-control,
+  .payment-batches-page .ant-pro-table-search .ant-form-item-control-input,
+  .payment-batches-page .ant-pro-table-search .ant-select,
+  .payment-batches-page .ant-pro-table-search .ant-picker,
+  .payment-batches-page .ant-pro-table-search .ant-input-affix-wrapper {
+    width: 100% !important;
+  }
+
+  .payment-batches-detail-drawer .ant-drawer-body {
+    padding: 14px;
+  }
+
+  .payment-batches-detail-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .payment-batches-detail-stats {
+    width: 100%;
+    gap: 18px !important;
+  }
+
+  .payment-batches-detail-drawer .ant-card-head-wrapper {
+    align-items: flex-start;
+  }
+
+  .payment-batches-detail-drawer .ant-card-extra {
+    max-width: 100%;
+  }
+}

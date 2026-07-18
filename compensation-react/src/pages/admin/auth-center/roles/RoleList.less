@@ -1,17 +1,19 @@
 .role-management-page {
-  --role-ink: #172b4d;
-  --role-muted: #6b7785;
-  --role-border: #e5eaf0;
-  --role-border-strong: #d4dde8;
-  --role-surface: #ffffff;
-  --role-subtle: #f7f9fc;
-  --role-blue: #1677ff;
-  --role-green: #2f9e72;
-  --role-amber: #d48806;
-  --role-red: #d64545;
+  --role-ink: var(--ink);
+  --role-muted: var(--muted);
+  --role-border: var(--border);
+  --role-border-strong: var(--border);
+  --role-surface: var(--surface);
+  --role-subtle: var(--surface-subtle);
+  --role-blue: var(--primary);
+  --role-green: var(--success);
+  --role-amber: var(--warning);
+  --role-red: var(--danger);
+  width: 100%;
+  min-width: 0;
   min-height: 100%;
   padding: 18px 0 32px;
-  background: #f6f8fb;
+  background: var(--page-bg);
   color: var(--role-ink);
 }
 
@@ -48,22 +50,22 @@
 
 .role-summary-item.is-blue .role-summary-icon {
   color: var(--role-blue);
-  background: #eaf2ff;
+  background: var(--primary-soft);
 }
 
 .role-summary-item.is-green .role-summary-icon {
   color: var(--role-green);
-  background: #e7f7f1;
+  background: var(--success-soft);
 }
 
 .role-summary-item.is-amber .role-summary-icon {
   color: var(--role-amber);
-  background: #fff5db;
+  background: var(--warning-soft);
 }
 
 .role-summary-item.is-red .role-summary-icon {
   color: var(--role-red);
-  background: #fff0f0;
+  background: var(--danger-soft);
 }
 
 .role-summary-content {
@@ -103,6 +105,7 @@
 }
 
 .role-workspace {
+  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--role-border);
   border-radius: 8px;
@@ -199,7 +202,7 @@
   padding: 0 5px;
   border-radius: 10px;
   color: #718096;
-  background: #eef2f6;
+  background: var(--surface-hover);
   font-size: 10px;
   line-height: 1;
 }
@@ -238,7 +241,7 @@
 }
 
 .role-card.is-disabled {
-  background: #fbfcfe;
+  background: var(--role-subtle);
 }
 
 .role-card-header {
@@ -265,28 +268,28 @@
   justify-content: center;
   border-radius: 9px;
   color: var(--role-blue);
-  background: #eaf2ff;
+  background: var(--primary-soft);
   font-size: 17px;
 }
 
 .role-card.is-system .role-card-icon {
   color: var(--role-red);
-  background: #fff0f0;
+  background: var(--danger-soft);
 }
 
 .role-card.is-business .role-card-icon {
   color: var(--role-blue);
-  background: #eaf2ff;
+  background: var(--primary-soft);
 }
 
 .role-card.is-custom .role-card-icon {
   color: var(--role-green);
-  background: #e7f7f1;
+  background: var(--success-soft);
 }
 
 .role-card.is-disabled .role-card-icon {
   color: #8b98a7;
-  background: #eef2f6;
+  background: var(--surface-hover);
 }
 
 .role-card-title-group {
@@ -418,7 +421,7 @@
   justify-content: center;
   border: 1px dashed var(--role-border-strong);
   border-radius: 8px;
-  background: #fbfcfe;
+  background: var(--role-subtle);
 }
 
 .role-copy-form {
@@ -446,6 +449,15 @@
 
   .role-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .role-workspace-toolbar {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .role-filters {
+    flex-wrap: wrap;
   }
 }
 
