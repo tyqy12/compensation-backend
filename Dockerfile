@@ -1,13 +1,38 @@
-## Runtime-only image: copy prebuilt JAR into container and run
-FROM mcr.microsoft.com/openjdk/jdk:17-ubuntu
+# syntax=docker/dockerfile:1.7
+
+ARG MAVEN_IMAGE=maven:3.9-eclipse-temurin-17
+ARG JRE_IMAGE=eclipse-temurin:17-jre-jammy
+
+FROM ${MAVEN_IMAGE} AS backend-builder
+WORKDIR /build
+
+COPY mvnw pom.xml ./
+COPY .mvn ./.mvn
+RUN chmod +x mvnw
+
+COPY src ./src
+RUN ./mvnw -B -DskipTests package
+
+FROM ${JRE_IMAGE} AS app-runtime
 WORKDIR /app
 
-# Copy the prebuilt jar from host (run mvn package before docker build)
-COPY target/compensation-0.0.1-SNAPSHOT.jar /app/app.jar
+# Keep the JVM process non-root while retaining compatibility with bind-mounted
+# runtime directories created by Docker as root.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl gosu \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 compensation \
+    && useradd --system --uid 10001 --gid compensation --home-dir /nonexistent --shell /usr/sbin/nologin compensation \
+    && mkdir -p /app /var/log/compensation /var/lib/compensation/files \
+    && chown -R compensation:compensation /app /var/log/compensation /var/lib/compensation/files
 
-# Default env (override in compose if needed)
+COPY --from=backend-builder --chown=compensation:compensation \
+    /build/target/compensation-0.0.1-SNAPSHOT.jar /app/app.jar
+COPY docker/app-entrypoint.sh /usr/local/bin/app-entrypoint.sh
+RUN chmod 755 /usr/local/bin/app-entrypoint.sh
+
 ENV SPRING_PROFILES_ACTIVE=prod \
     JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75 -Duser.timezone=Asia/Shanghai -Djava.security.egd=file:/dev/./urandom"
 
 EXPOSE 8080
-ENTRYPOINT ["sh","-c","java $JAVA_OPTS -jar /app/app.jar"]
+ENTRYPOINT ["/usr/local/bin/app-entrypoint.sh"]

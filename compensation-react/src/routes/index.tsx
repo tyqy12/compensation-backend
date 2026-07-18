@@ -16,12 +16,10 @@ const OrgSyncPage = React.lazy(() => import('@pages/system/OrgSync'));
 const UserBindingPage = React.lazy(() => import('@pages/admin/UserBinding'));
 const ResourcesV2Page = React.lazy(() => import('@pages/admin/ResourcesV2'));
 const PayrollOperationsPage = React.lazy(() => import('@pages/payroll/Operations'));
-const PayrollBatchesLegacyPage = React.lazy(() => import('@pages/payroll/Batches'));
 const PayrollBatchEntryPage = React.lazy(() => import('@pages/payroll/Entry'));
 const PayrollRulesPage = React.lazy(() => import('@pages/payroll/Rules'));
 const PayrollCalendarPage = React.lazy(() => import('@pages/payroll/Calendar'));
-const PayrollTemplatesLegacyPage = React.lazy(() => import('@pages/payroll/Templates'));
-const PayrollCyclesLegacyPage = React.lazy(() => import('@pages/payroll/Cycles'));
+const PayrollCompliancePage = React.lazy(() => import('@pages/payroll/Compliance'));
 const AppRegistryPage = React.lazy(() => import('@pages/admin/AppRegistry'));
 const EmployeesList = React.lazy(() => import('@pages/employees/List'));
 const EmployeeProfile = React.lazy(() => import('@pages/employees/Profile'));
@@ -184,14 +182,6 @@ export const router = createBrowserRouter(
           ),
         },
         {
-          path: 'payroll/batches/legacy',
-          element: withGuard(
-            <Suspense fallback={<Loading />}>
-              <PayrollBatchesLegacyPage />
-            </Suspense>,
-          ),
-        },
-        {
           path: 'payroll/batches/:batchId/entry',
           element: withGuard(
             <Suspense fallback={<Loading />}>
@@ -200,7 +190,7 @@ export const router = createBrowserRouter(
           ),
         },
         {
-          path: 'payroll/templates',
+          path: 'payroll/rules',
           element: withGuard(
             <Suspense fallback={<Loading />}>
               <PayrollRulesPage />
@@ -208,26 +198,18 @@ export const router = createBrowserRouter(
           ),
         },
         {
-          path: 'payroll/templates/legacy',
+          path: 'payroll/compliance',
           element: withGuard(
             <Suspense fallback={<Loading />}>
-              <PayrollTemplatesLegacyPage />
+              <PayrollCompliancePage />
             </Suspense>,
           ),
         },
         {
-          path: 'payroll/cycles',
+          path: 'payroll/calendar',
           element: withGuard(
             <Suspense fallback={<Loading />}>
               <PayrollCalendarPage />
-            </Suspense>,
-          ),
-        },
-        {
-          path: 'payroll/cycles/legacy',
-          element: withGuard(
-            <Suspense fallback={<Loading />}>
-              <PayrollCyclesLegacyPage />
             </Suspense>,
           ),
         },

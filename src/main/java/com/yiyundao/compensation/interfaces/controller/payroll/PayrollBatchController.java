@@ -219,6 +219,12 @@ public class PayrollBatchController {
         b.setConfirmationMode(req.getConfirmationMode() != null
                 ? PayrollConfirmationMode.fromCode(req.getConfirmationMode()).getCode()
                 : PayrollConfirmationMode.INDIVIDUAL.getCode());
+        b.setPayDate(req.getPayDate());
+        b.setTaxYear(req.getTaxYear());
+        b.setTaxMonth(req.getTaxMonth());
+        b.setTaxWithholdingEntityId(req.getTaxWithholdingEntityId());
+        b.setTaxBasicDeductionMonths(req.getTaxBasicDeductionMonths());
+        b.setPolicyPackageId(req.getPolicyPackageId());
         b.setStatus(PayrollBatchStatus.DRAFT);
         b.setCalculationStatus(PayrollCalculationStatus.DRAFT);
         b.setBatchRevision(1);
@@ -246,6 +252,12 @@ public class PayrollBatchController {
             b.setConfirmationMode(PayrollConfirmationMode.fromCode(req.getConfirmationMode()).getCode());
         }
         if (req.getRemark() != null) b.setRemark(req.getRemark());
+        if (req.getPayDate() != null) b.setPayDate(req.getPayDate());
+        if (req.getTaxYear() != null) b.setTaxYear(req.getTaxYear());
+        if (req.getTaxMonth() != null) b.setTaxMonth(req.getTaxMonth());
+        if (req.getTaxWithholdingEntityId() != null) b.setTaxWithholdingEntityId(req.getTaxWithholdingEntityId());
+        if (req.getTaxBasicDeductionMonths() != null) b.setTaxBasicDeductionMonths(req.getTaxBasicDeductionMonths());
+        if (req.getPolicyPackageId() != null) b.setPolicyPackageId(req.getPolicyPackageId());
         return payCycle;
     }
 

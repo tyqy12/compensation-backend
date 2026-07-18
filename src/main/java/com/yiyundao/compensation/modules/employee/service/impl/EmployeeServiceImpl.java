@@ -26,9 +26,11 @@ import com.yiyundao.compensation.modules.employee.dto.BindPlatformRequest;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult.ConflictInfo;
 import com.yiyundao.compensation.modules.employee.dto.BindResult;
+import com.yiyundao.compensation.modules.employee.dto.EmployeeBatchImportResult;
 import com.yiyundao.compensation.modules.employee.dto.EmployeeProfileChangePayload;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 import com.yiyundao.compensation.infrastructure.dao.EmployeeMapper;
+import com.yiyundao.compensation.modules.employee.service.EmployeeDepartmentService;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.common.utils.ValidationUtils;
 import com.yiyundao.compensation.modules.payment.entity.PaymentRecord;
@@ -47,6 +49,7 @@ import com.yiyundao.compensation.modules.user.service.UserBindingService;
 import com.yiyundao.compensation.service.EncryptionService;
 import com.yiyundao.compensation.common.exception.BusinessException;
 import com.yiyundao.compensation.common.response.ErrorCode;
+import com.yiyundao.compensation.security.SecurityConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -55,6 +58,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -83,23 +87,46 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     private final PaymentRecordService paymentRecordService;
     private final VOConverter voConverter;
     private final ObjectMapper objectMapper;
+    private final EmployeeDepartmentService employeeDepartmentService;
 
     private void validateEmployeeData(Employee employee) {
+        validateEmployeeFields(employee);
+        normalizeEmploymentType(employee);
+        validateFinancialData(employee.getSettlementAccountType(), employee.getSettlementAccount(), employee.getBankAccount());
+        log.debug("员工数据验证通过");
+    }
+
+    private void validateEmployeeFields(Employee employee) {
+        if (employee == null) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "员工信息不能为空");
+        }
         log.debug("验证员工数据: {}", employee.getName());
+        validateLength(employee.getEmployeeId(), 50, "员工工号");
+        validateLength(employee.getName(), 100, "员工姓名");
+        validateLength(employee.getPhone(), 20, "手机号");
+        validateLength(employee.getEmail(), 100, "邮箱");
+        validateLength(employee.getDepartment(), 500, "部门");
+        validateLength(employee.getPosition(), 100, "职位");
+        validateLength(employee.getSettlementAccountName(), 100, "收款账户实名");
+        validateLength(employee.getBankName(), 100, "开户银行");
+        validateLength(employee.getBankBranchName(), 120, "开户支行");
         if (StringUtils.hasText(employee.getPhone()) && !ValidationUtils.isValidPhone(employee.getPhone())) {
             throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "手机号格式不正确");
         }
         if (StringUtils.hasText(employee.getEmail()) && !ValidationUtils.isValidEmail(employee.getEmail())) {
             throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "邮箱格式不正确");
         }
-        normalizeEmploymentType(employee);
-        validateFinancialData(employee.getSettlementAccountType(), employee.getSettlementAccount(), employee.getBankAccount());
-        log.debug("员工数据验证通过");
+        if (StringUtils.hasText(employee.getEncryptedIdCard())
+                && !ValidationUtils.isValidIdCard(employee.getEncryptedIdCard())) {
+            throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, "身份证号格式不正确");
+        }
     }
 
     @Override
     @Transactional
     public EmployeeVO createEmployee(Employee employee) {
+        normalizeEmployeeIdentityFields(employee, true);
+        normalizeDepartmentFields(employee);
         log.info("创建员工: {}", employee.getName());
         PlatformBinding platformBinding = extractPlatformBinding(employee);
         normalizeFinancialFields(employee);
@@ -111,7 +138,10 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         setDefaultValues(employee);
         employee.setProvider(null);
         employee.setSubjectId(null);
-        save(employee);
+        if (!save(employee)) {
+            throw new BusinessException(ErrorCode.DATABASE_ERROR, "员工保存失败");
+        }
+        syncEmployeeDepartments(employee.getId(), platformBinding, employee);
         upsertPlatformBinding(platformBinding, employee.getId(), null, "manual");
         log.info("员工创建成功: id={}, employeeId={}", employee.getId(), employee.getEmployeeId());
         return voConverter.toEmployeeVO(employee);
@@ -121,11 +151,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     @Transactional
     public EmployeeVO createEmployeeWithUser(Employee employee, String username) {
         EmployeeVO vo = createEmployee(employee);
-        try {
-            userBindingServiceProvider.getObject().ensureUserForEmployee(employee, username);
-        } catch (Exception ex) {
-            log.warn("自动创建用户失败: {}", ex.getMessage());
-        }
+        userBindingServiceProvider.getObject().ensureUserForEmployee(employee, username);
         return vo;
     }
 
@@ -137,16 +163,24 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (existingEmployee == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "员工不存在: " + id);
         }
+        normalizeEmployeeIdentityFields(updateInfo, false);
+        normalizeDepartmentFields(updateInfo);
+        validateEmployeeFields(updateInfo);
+        normalizeEmploymentType(updateInfo);
         PlatformBinding platformBinding = extractPlatformBinding(updateInfo);
         validateFinancialDataForUpdate(existingEmployee, updateInfo);
         if (StringUtils.hasText(updateInfo.getName())) existingEmployee.setName(updateInfo.getName());
-        if (StringUtils.hasText(updateInfo.getPhone())) existingEmployee.setPhone(updateInfo.getPhone());
-        if (StringUtils.hasText(updateInfo.getEmail())) existingEmployee.setEmail(updateInfo.getEmail());
-        if (updateInfo.getDepartment() != null) {
+        if (updateInfo.getPhone() != null) existingEmployee.setPhone(trimToNull(updateInfo.getPhone()));
+        if (updateInfo.getEmail() != null) existingEmployee.setEmail(trimToNull(updateInfo.getEmail()));
+        if (updateInfo.getDepartments() != null) {
+            List<String> departments = normalizeDepartmentNames(updateInfo.getDepartments());
+            existingEmployee.setDepartment(departments.isEmpty() ? null : String.join(",", departments));
+            existingEmployee.setDepartments(departments);
+        } else if (updateInfo.getDepartment() != null) {
             String department = updateInfo.getDepartment().trim();
             existingEmployee.setDepartment(StringUtils.hasText(department) ? department : null);
         }
-        if (StringUtils.hasText(updateInfo.getPosition())) existingEmployee.setPosition(updateInfo.getPosition());
+        if (updateInfo.getPosition() != null) existingEmployee.setPosition(trimToNull(updateInfo.getPosition()));
         if (StringUtils.hasText(updateInfo.getEmploymentType())) {
             existingEmployee.setEmploymentType(normalizeEmploymentType(updateInfo.getEmploymentType()));
         }
@@ -164,11 +198,11 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (StringUtils.hasText(updateInfo.getSettlementAccountType())) {
             existingEmployee.setSettlementAccountType(normalizeSettlementAccountType(updateInfo.getSettlementAccountType()));
         }
-        if (StringUtils.hasText(updateInfo.getSettlementAccountName())) {
-            existingEmployee.setSettlementAccountName(updateInfo.getSettlementAccountName().trim());
+        if (updateInfo.getSettlementAccountName() != null) {
+            existingEmployee.setSettlementAccountName(trimToNull(updateInfo.getSettlementAccountName()));
         }
-        if (StringUtils.hasText(updateInfo.getBankBranchName())) {
-            existingEmployee.setBankBranchName(updateInfo.getBankBranchName().trim());
+        if (updateInfo.getBankBranchName() != null) {
+            existingEmployee.setBankBranchName(trimToNull(updateInfo.getBankBranchName()));
         }
         String encryptedSettlementAccount = null;
         if (StringUtils.hasText(updateInfo.getSettlementAccount())) {
@@ -180,7 +214,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
             encryptedBankAccount = encryptionService.encrypt(updateInfo.getBankAccount().trim());
             existingEmployee.setBankAccount(encryptedBankAccount);
         }
-        if (StringUtils.hasText(updateInfo.getBankName())) existingEmployee.setBankName(updateInfo.getBankName());
+        if (updateInfo.getBankName() != null) existingEmployee.setBankName(trimToNull(updateInfo.getBankName()));
 
         if (StringUtils.hasText(updateInfo.getSettlementAccount())
                 && SettlementAccountType.BANK_CARD.getCode().equals(resolveSettlementType(existingEmployee))
@@ -213,7 +247,11 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
             existingEmployee.setSettlementAccountType(SettlementAccountType.BANK_CARD.getCode());
         }
 
-        updateById(existingEmployee);
+        if (!updateById(existingEmployee)) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "员工信息已被其他操作修改，请刷新后重试");
+        }
+        syncUserProfile(existingEmployee);
+        syncEmployeeDepartments(existingEmployee.getId(), platformBinding, updateInfo);
         if (statusUpdated) {
             syncUserStatusAfterEmployeeStatusChange(existingEmployee.getId(), existingEmployee.getStatus());
         }
@@ -268,7 +306,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         Map<String, Object> workflowData = buildProfileChangeWorkflowData(employee, normalizedPayload, reason);
         ApprovalEngine approvalEngine = approvalEngineProvider.getObject();
         Long workflowId = approvalEngine.startWorkflow(
-                WorkflowType.OFFLINE,
+                WorkflowType.EMPLOYEE_PROFILE_CHANGE,
                 buildEmployeeProfileChangeBusinessKey(employee.getId()),
                 BUSINESS_TYPE_EMPLOYEE_PROFILE_CHANGE,
                 userId,
@@ -436,12 +474,18 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
                                                           Long managerId, String sortBy, String order) {
         log.info("分页查询员工: page={}, size={}, keyword={}", pageNum, pageSize, keyword);
         Page<Employee> page = new Page<>(safePage(pageNum), safeSize(pageSize));
-        LambdaQueryWrapper<Employee> queryWrapper = buildQueryWrapper(keyword, department, status, isOffline, provider, managerId, sortBy, order);
+        Long scopedManagerId = resolveManagerScope(managerId);
+        LambdaQueryWrapper<Employee> queryWrapper = buildQueryWrapper(keyword, department, status, isOffline, provider,
+                scopedManagerId, sortBy, order);
         Page<Employee> result = page(page, queryWrapper);
         Map<Long, ExternalIdentity> identityMap = buildPrimaryIdentityMap(result.getRecords());
+        Map<Long, List<String>> loadedDepartmentMap = employeeDepartmentService.findDepartmentNamesByEmployeeIds(
+                result.getRecords().stream().map(Employee::getId).toList());
+        Map<Long, List<String>> departmentMap = loadedDepartmentMap != null ? loadedDepartmentMap : Map.of();
         List<EmployeeListItemVO> voList = result.getRecords().stream()
                 .map(employee -> {
-                    EmployeeListItemVO vo = voConverter.toEmployeeListItemVO(employee);
+                    List<String> departments = departmentMap.getOrDefault(employee.getId(), List.of());
+                    EmployeeListItemVO vo = voConverter.toEmployeeListItemVO(employee, departments);
                     ExternalIdentity identity = identityMap.get(employee.getId());
                     if (identity != null) {
                         vo.setProvider(identity.getProvider());
@@ -456,10 +500,11 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     @Override
     public List<EmployeeVO> getOfflineEmployees(Long managerId) {
         log.info("查询架构外员工列表: managerId={}", managerId);
+        Long scopedManagerId = resolveManagerScope(managerId);
         LambdaQueryWrapper<Employee> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(Employee::getOffline, true)
                    .eq(Employee::getStatus, EmployeeStatus.ACTIVE.getCode());
-        if (managerId != null) queryWrapper.eq(Employee::getManagerId, managerId);
+        if (scopedManagerId != null) queryWrapper.eq(Employee::getManagerId, scopedManagerId);
         return list(queryWrapper).stream()
                 .map(voConverter::toEmployeeVO)
                 .toList();
@@ -468,12 +513,47 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
     @Override
     public List<EmployeeVO> getResignedEmployees(Long managerId) {
         log.info("查询离职员工列表: managerId={}", managerId);
+        Long scopedManagerId = resolveManagerScope(managerId);
         LambdaQueryWrapper<Employee> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(Employee::getStatus, EmployeeStatus.INACTIVE.getCode());
-        if (managerId != null) queryWrapper.eq(Employee::getManagerId, managerId);
+        if (scopedManagerId != null) queryWrapper.eq(Employee::getManagerId, scopedManagerId);
         return list(queryWrapper).stream()
                 .map(voConverter::toEmployeeVO)
                 .toList();
+    }
+
+    private Long resolveManagerScope(Long requestedManagerId) {
+        if (!isManagerOnlyAccess()) {
+            return requestedManagerId;
+        }
+        Long userId = getCurrentUserId();
+        Employee currentEmployee;
+        try {
+            currentEmployee = resolveEmployeeByUserId(userId);
+        } catch (Exception ex) {
+            throw new BusinessException(ErrorCode.ACCESS_DENIED, "当前经理账号未关联员工，无法查看负责人范围");
+        }
+        Long currentEmployeeId = currentEmployee.getId();
+        if (requestedManagerId != null && !requestedManagerId.equals(currentEmployeeId)) {
+            throw new BusinessException(ErrorCode.ACCESS_DENIED, "经理只能查看自己负责的员工");
+        }
+        return currentEmployeeId;
+    }
+
+    private boolean isManagerOnlyAccess() {
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication.getAuthorities() == null) {
+            return false;
+        }
+        Set<String> authorities = authentication.getAuthorities().stream()
+                .map(granted -> granted.getAuthority())
+                .collect(Collectors.toSet());
+        return authorities.contains(SecurityConstants.ROLE_MANAGER)
+                && authorities.stream().noneMatch(authority -> Set.of(
+                        SecurityConstants.ROLE_ADMIN,
+                        SecurityConstants.ROLE_FINANCE,
+                        SecurityConstants.ROLE_HR
+                ).contains(authority));
     }
 
     @Override
@@ -580,21 +660,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
             }
         }
 
-        ExternalIdentity identity = externalIdentityService.findPrimaryByEmployeeId(employeeId);
-        if (identity == null && userId != null) {
-            identity = externalIdentityService.findPrimaryByUserId(userId);
-        }
-        if (identity != null) {
-            externalIdentityService.deactivatePlatformIdentity(
-                    identity.getProvider(),
-                    identity.getTenantKey(),
-                    identity.getSubjectType(),
-                    identity.getSubjectId(),
-                    employeeId,
-                    userId,
-                    "manual"
-            );
-        }
+        externalIdentityService.deactivatePlatformIdentities(employeeId, userId, "manual");
 
         log.info("平台用户解绑成功: employeeId={}, userId={}, reason={}", employeeId, userId, reason);
     }
@@ -744,7 +810,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
 
         ApprovalEngine approvalEngine = approvalEngineProvider.getObject();
         Long workflowId = approvalEngine.startWorkflow(
-                WorkflowType.OFFLINE,
+                WorkflowType.PLATFORM_BIND,
                 buildEmployeeApprovalBusinessKey(employee.getId()),
                 "PLATFORM_BIND",
                 operatorId,
@@ -875,16 +941,21 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (binding == null) {
             return;
         }
-        externalIdentityService.upsertPlatformIdentity(
-                binding.provider(),
-                ExternalIdentityService.DEFAULT_TENANT_KEY,
-                ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
-                binding.subjectId(),
-                employeeId,
-                userId,
-                source,
-                true
-        );
+        try {
+            externalIdentityService.upsertPlatformIdentity(
+                    binding.provider(),
+                    ExternalIdentityService.DEFAULT_TENANT_KEY,
+                    ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
+                    binding.subjectId(),
+                    employeeId,
+                    userId,
+                    source,
+                    true
+            );
+        } catch (IllegalStateException ex) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT,
+                    "平台账号绑定冲突，请使用平台绑定接口发起审批: " + ex.getMessage());
+        }
     }
 
     private record PlatformBinding(String provider, String subjectId) { }
@@ -1096,8 +1167,13 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (employee == null) {
             throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "员工不存在: " + employeeId);
         }
+        if (status == null) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "员工状态不能为空");
+        }
         employee.setStatus(status != null ? status.getCode() : null);
-        updateById(employee);
+        if (!updateById(employee)) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "员工状态已被其他操作修改，请刷新后重试");
+        }
         syncUserStatusAfterEmployeeStatusChange(employeeId, status != null ? status.getCode() : null);
         log.info("员工状态更新成功");
     }
@@ -1125,59 +1201,87 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
                 .eq("employee_id", employeeId)
                 .eq("status", UserStatus.ACTIVE.getCode())
                 .set("status", UserStatus.INACTIVE.getCode()));
-        if (updated) {
-            sysUserService.batchIncrementPermissionVersion(userIds);
-            log.info("员工非在职后已禁用关联用户: employeeId={}, userIds={}", employeeId, userIds);
+        if (!updated) {
+            List<SysUser> stillActiveUsers = sysUserService.list(new QueryWrapper<SysUser>()
+                    .select("id")
+                    .eq("employee_id", employeeId)
+                    .eq("status", UserStatus.ACTIVE.getCode()));
+            if (stillActiveUsers != null && !stillActiveUsers.isEmpty()) {
+                throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "关联系统用户状态已被其他操作修改，请刷新后重试");
+            }
+            return;
         }
+        sysUserService.batchIncrementPermissionVersion(userIds);
+        log.info("员工非在职后已禁用关联用户: employeeId={}, userIds={}", employeeId, userIds);
     }
 
     @Override
     @Transactional
-    public void batchImport(List<Employee> employees) {
+    public EmployeeBatchImportResult batchImport(List<Employee> employees) {
+        EmployeeBatchImportResult result = new EmployeeBatchImportResult();
+        if (employees == null || employees.isEmpty()) {
+            return result;
+        }
+        result.setTotal(employees.size());
         log.info("批量导入员工: count={}", employees.size());
-        Map<Employee, PlatformBinding> bindingMap = new HashMap<>();
+        Map<String, PlatformBinding> bindingMap = new HashMap<>();
         Set<String> seenEmployeeIds = new HashSet<>();
-        List<Employee> toSave = employees.stream().filter(e -> {
-            if (!StringUtils.hasText(e.getEmployeeId()) || !StringUtils.hasText(e.getName())) {
+        List<Employee> toSave = new ArrayList<>();
+        for (Employee e : employees) {
+            if (e == null || !StringUtils.hasText(e.getEmployeeId()) || !StringUtils.hasText(e.getName())) {
+                result.setSkipped(result.getSkipped() + 1);
                 log.warn("跳过无效数据: 员工工号或姓名为空");
-                return false;
+                continue;
             }
             String employeeId = e.getEmployeeId().trim();
             e.setEmployeeId(employeeId);
+            e.setName(e.getName().trim());
+            normalizeDepartmentFields(e);
+            validateLength(employeeId, 50, "员工工号");
+            validateLength(e.getName(), 100, "员工姓名");
             if (!seenEmployeeIds.add(employeeId)) {
+                result.setSkipped(result.getSkipped() + 1);
                 log.warn("跳过本次导入内重复员工工号: {}", employeeId);
-                return false;
+                continue;
             }
             if (existsByEmployeeId(employeeId)) {
+                result.setSkipped(result.getSkipped() + 1);
                 log.warn("跳过已存在员工工号: {}", employeeId);
-                return false;
+                continue;
             }
-            return true;
-        }).peek(e -> {
             PlatformBinding platformBinding = extractPlatformBinding(e);
             if (platformBinding != null) {
-                bindingMap.put(e, platformBinding);
+                bindingMap.put(employeeId, platformBinding);
             }
             e.setProvider(null);
             e.setSubjectId(null);
-        }).peek(this::normalizeFinancialFields)
-                .peek(this::validateEmployeeData)
-                .peek(this::normalizeEmploymentType)
-                .peek(this::encryptSensitiveData)
-                .peek(this::setDefaultValues)
-                .toList();
+            normalizeFinancialFields(e);
+            validateEmployeeData(e);
+            normalizeEmploymentType(e);
+            encryptSensitiveData(e);
+            setDefaultValues(e);
+            toSave.add(e);
+        }
         if (toSave.isEmpty()) {
             log.info("批量导入完成: 无有效员工可导入");
-            return;
+            return result;
         }
-        saveBatch(toSave);
+        if (!saveBatch(toSave)) {
+            throw new BusinessException(ErrorCode.DATABASE_ERROR, "批量保存员工失败");
+        }
+        int bound = 0;
         for (Employee employee : toSave) {
-            PlatformBinding binding = bindingMap.get(employee);
+            PlatformBinding binding = bindingMap.get(employee.getEmployeeId());
+            syncEmployeeDepartments(employee.getId(), binding, employee);
             if (binding != null) {
                 upsertPlatformBinding(binding, employee.getId(), null, "sync");
+                bound++;
             }
         }
-        log.info("批量导入完成: 成功导入{}个员工", toSave.size());
+        result.setImported(toSave.size());
+        result.setBound(bound);
+        log.info("批量导入完成: 成功导入{}个员工, 绑定{}个员工", toSave.size(), bound);
+        return result;
     }
 
     @Override
@@ -1186,14 +1290,14 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (employee != null && StringUtils.hasText(employee.getEncryptedIdCard())) {
             return encryptionService.decryptIdCard(employee.getEncryptedIdCard());
         }
-        return ""; // 返回空字符串而非 null，避免前端处理困难
+        return null;
     }
 
     @Override
     public String getDecryptedBankAccount(Long employeeId) {
         Employee employee = getById(employeeId);
         if (employee == null) {
-            return "";
+            return null;
         }
         if (StringUtils.hasText(employee.getBankAccount())) {
             return encryptionService.decrypt(employee.getBankAccount());
@@ -1202,14 +1306,14 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
                 && StringUtils.hasText(employee.getSettlementAccount())) {
             return encryptionService.decrypt(employee.getSettlementAccount());
         }
-        return ""; // 返回空字符串而非 null，避免前端处理困难
+        return null;
     }
 
     @Override
     public String getDecryptedSettlementAccount(Long employeeId) {
         Employee employee = getById(employeeId);
         if (employee == null) {
-            return "";
+            return null;
         }
         if (StringUtils.hasText(employee.getSettlementAccount())) {
             return encryptionService.decrypt(employee.getSettlementAccount());
@@ -1217,7 +1321,7 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (StringUtils.hasText(employee.getBankAccount())) {
             return encryptionService.decrypt(employee.getBankAccount());
         }
-        return "";
+        return null;
     }
 
     @Override
@@ -1265,9 +1369,138 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
             if (manager == null) {
                 throw new BusinessException(ErrorCode.RESOURCE_NOT_FOUND, "负责人不存在: " + managerId);
             }
+            if (employeeId.equals(managerId)) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "员工不能指定自己为负责人");
+            }
+            if (!EmployeeStatus.ACTIVE.getCode().equals(manager.getStatus())) {
+                throw new BusinessException(ErrorCode.INVALID_STATUS, "负责人必须是在职员工");
+            }
+            assertManagerChainDoesNotCycle(employeeId, manager);
         }
         employee.setManagerId(managerId);
-        updateById(employee);
+        if (!updateById(employee)) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "负责人关系已被其他操作修改，请刷新后重试");
+        }
+    }
+
+    private void assertManagerChainDoesNotCycle(Long employeeId, Employee manager) {
+        Set<Long> visited = new HashSet<>();
+        Employee current = manager;
+        while (current != null && current.getId() != null) {
+            if (!visited.add(current.getId())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "负责人关系存在循环");
+            }
+            if (employeeId.equals(current.getId())) {
+                throw new BusinessException(ErrorCode.PARAM_INVALID, "负责人关系不能形成循环");
+            }
+            if (current.getManagerId() == null) {
+                return;
+            }
+            current = getById(current.getManagerId());
+        }
+    }
+
+    private void normalizeEmployeeIdentityFields(Employee employee, boolean required) {
+        if (employee == null) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "员工信息不能为空");
+        }
+        if (StringUtils.hasText(employee.getEmployeeId())) {
+            employee.setEmployeeId(employee.getEmployeeId().trim());
+        } else if (required) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "员工工号不能为空");
+        }
+        if (StringUtils.hasText(employee.getName())) {
+            employee.setName(employee.getName().trim());
+        } else if (required) {
+            throw new BusinessException(ErrorCode.PARAM_MISSING, "员工姓名不能为空");
+        }
+    }
+
+    private void normalizeDepartmentFields(Employee employee) {
+        if (employee == null) {
+            return;
+        }
+        if (employee.getDepartments() != null) {
+            List<String> names = normalizeDepartmentNames(employee.getDepartments());
+            employee.setDepartments(names);
+            employee.setDepartment(names.isEmpty() ? null : String.join(",", names));
+            return;
+        }
+        if (employee.getDepartment() != null) {
+            List<String> names = splitDepartmentNames(employee.getDepartment());
+            employee.setDepartments(names);
+            employee.setDepartment(names.isEmpty() ? null : String.join(",", names));
+        }
+    }
+
+    private void validateLength(String value, int maxLength, String fieldName) {
+        if (value != null && value.length() > maxLength) {
+            throw new BusinessException(ErrorCode.PARAM_FORMAT_ERROR, fieldName + "长度不能超过" + maxLength + "个字符");
+        }
+    }
+
+    private void syncUserProfile(Employee employee) {
+        if (employee == null || employee.getId() == null) {
+            return;
+        }
+        List<SysUser> users = sysUserService.list(new LambdaQueryWrapper<SysUser>()
+                .eq(SysUser::getEmployeeId, employee.getId()));
+        if (users == null || users.isEmpty()) {
+            return;
+        }
+        for (SysUser user : users) {
+            if (user == null || user.getId() == null) {
+                continue;
+            }
+            boolean changed = !Objects.equals(user.getRealName(), employee.getName())
+                    || !Objects.equals(user.getPhone(), employee.getPhone())
+                    || !Objects.equals(user.getEmail(), employee.getEmail());
+            if (!changed) {
+                continue;
+            }
+            user.setRealName(employee.getName());
+            user.setPhone(employee.getPhone());
+            user.setEmail(employee.getEmail());
+            if (!sysUserService.updateById(user)) {
+                throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "关联系统用户已被其他操作修改，请刷新后重试");
+            }
+        }
+    }
+
+    private void syncEmployeeDepartments(Long employeeId, PlatformBinding binding, Employee source) {
+        if (employeeId == null || source == null
+                || (source.getDepartments() == null && source.getDepartment() == null)) {
+            return;
+        }
+        List<String> names = source.getDepartments() != null
+                ? normalizeDepartmentNames(source.getDepartments())
+                : splitDepartmentNames(source.getDepartment());
+        String platform = binding != null ? binding.provider() : EmployeeDepartmentService.MANUAL_PLATFORM;
+        employeeDepartmentService.replaceDepartments(employeeId, platform, names);
+    }
+
+    private List<String> normalizeDepartmentNames(List<String> departments) {
+        if (departments == null || departments.isEmpty()) {
+            return List.of();
+        }
+        return departments.stream()
+                .filter(StringUtils::hasText)
+                .flatMap(value -> java.util.Arrays.stream(value.split("[,，、/]")))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
+    }
+
+    private List<String> splitDepartmentNames(String department) {
+        if (!StringUtils.hasText(department)) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(department.split("[,，、/]"))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
     }
 
     private void encryptSensitiveData(Employee employee) {
@@ -1564,7 +1797,17 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
                 .or().like(Employee::getEmail, keyword)
             );
         }
-        if (StringUtils.hasText(department)) queryWrapper.eq(Employee::getDepartment, department);
+        if (StringUtils.hasText(department)) {
+            String departmentName = department.trim();
+            List<Long> relatedEmployeeIds = employeeDepartmentService.findEmployeeIdsByDepartmentName(departmentName);
+            queryWrapper.and(wrapper -> {
+                wrapper.eq(Employee::getDepartment, departmentName)
+                        .or().like(Employee::getDepartment, departmentName);
+                if (relatedEmployeeIds != null && !relatedEmployeeIds.isEmpty()) {
+                    wrapper.or().in(Employee::getId, relatedEmployeeIds);
+                }
+            });
+        }
         if (StringUtils.hasText(status)) {
             queryWrapper.eq(Employee::getStatus, parseEmployeeStatus(status).getCode());
         }
@@ -1589,7 +1832,8 @@ public class EmployeeServiceImpl extends ServiceImpl<EmployeeMapper, Employee> i
         if (managerId != null) queryWrapper.eq(Employee::getManagerId, managerId);
 
         boolean asc = "asc".equalsIgnoreCase(order);
-        switch (sortBy.toLowerCase()) {
+        String normalizedSortBy = StringUtils.hasText(sortBy) ? sortBy : "createTime";
+        switch (normalizedSortBy.toLowerCase()) {
             case "name" -> queryWrapper.orderBy(true, asc, Employee::getName);
             case "employeeid" -> queryWrapper.orderBy(true, asc, Employee::getEmployeeId);
             case "hiredate" -> queryWrapper.orderBy(true, asc, Employee::getHireDate);

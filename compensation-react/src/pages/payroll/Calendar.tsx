@@ -396,7 +396,7 @@ const CalendarPage: React.FC = () => {
         title: '发薪日历',
         subTitle: '把期间、截数日、发薪日和运行状态放在同一条时间线上',
         extra: [
-          <Button key="rules" icon={<FileProtectOutlined />} onClick={() => navigate('/payroll/templates')}>
+          <Button key="rules" icon={<FileProtectOutlined />} onClick={() => navigate('/payroll/rules')}>
             查看规则中心
           </Button>,
           <Button key="create" type="primary" icon={<PlusOutlined />} onClick={openCreate}>
@@ -446,7 +446,7 @@ const CalendarPage: React.FC = () => {
           </Button>
         </Space>
         <Space wrap className="calendar-context-actions">
-          <Button icon={<FileProtectOutlined />} onClick={() => navigate(`/payroll/templates?type=${searchParams.get('type') || ''}`)}>
+          <Button icon={<FileProtectOutlined />} onClick={() => navigate(`/payroll/rules?type=${searchParams.get('type') || ''}`)}>
             按类型看规则
           </Button>
           <Button icon={<CalendarOutlined />} onClick={() => navigate(`/payroll/batches?period=${month.format('YYYY-MM')}`)}>
@@ -536,7 +536,7 @@ const CalendarPage: React.FC = () => {
                 ))}
               </div>
               <Space wrap className="calendar-detail-actions">
-                <Button icon={<FileProtectOutlined />} onClick={() => navigate(`/payroll/templates?type=${selected.type || ''}`)}>查看规则</Button>
+                <Button icon={<FileProtectOutlined />} onClick={() => navigate(`/payroll/rules?type=${selected.type || ''}`)}>查看规则</Button>
                 <Button type="primary" icon={<FieldTimeOutlined />} onClick={() => navigate(`/payroll/batches?period=${selected.periodLabel || ''}`)}>进入批次工作台</Button>
               </Space>
             </>

@@ -27,10 +27,15 @@ import com.yiyundao.compensation.modules.payroll.service.SalaryTemplateVersionSe
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.modules.payroll.service.PayrollCalculationService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollCumulativeTaxService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollContributionCalculationService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollContributionRecordService;
+import com.yiyundao.compensation.modules.payroll.compliance.CumulativeWithholdingTaxCalculator;
 import com.yiyundao.compensation.modules.payroll.support.PayrollCalculationSnapshotSupport;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -58,6 +63,35 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final PayrollValidationIssueSupport validationIssueSupport;
     private final PayrollCalculationFailureMarker calculationFailureMarker;
+
+    /** 累计预扣服务是新薪酬模型的唯一税额计算入口；本地离线试算仍允许注入内置政策表。 */
+    private PayrollCumulativeTaxService payrollCumulativeTaxService;
+    private PayrollContributionCalculationService payrollContributionCalculationService;
+    private PayrollContributionRecordService payrollContributionRecordService;
+    private com.yiyundao.compensation.modules.payroll.service.PayrollCalculationTraceService payrollCalculationTraceService;
+
+    @Autowired(required = false)
+    public void setPayrollCumulativeTaxService(PayrollCumulativeTaxService payrollCumulativeTaxService) {
+        this.payrollCumulativeTaxService = payrollCumulativeTaxService;
+    }
+
+    @Autowired(required = false)
+    public void setPayrollContributionCalculationService(
+            PayrollContributionCalculationService payrollContributionCalculationService) {
+        this.payrollContributionCalculationService = payrollContributionCalculationService;
+    }
+
+    @Autowired(required = false)
+    public void setPayrollContributionRecordService(
+            PayrollContributionRecordService payrollContributionRecordService) {
+        this.payrollContributionRecordService = payrollContributionRecordService;
+    }
+
+    @Autowired(required = false)
+    public void setPayrollCalculationTraceService(
+            com.yiyundao.compensation.modules.payroll.service.PayrollCalculationTraceService payrollCalculationTraceService) {
+        this.payrollCalculationTraceService = payrollCalculationTraceService;
+    }
 
     @Override
     public boolean dryRun(Long batchId) {
@@ -87,6 +121,7 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
         ctx.calculationRevision = revisionAdvance ? currentRevision + 1 : currentRevision;
         ctx.batch.setBatchRevision(ctx.calculationRevision);
         LinesSummary summary = computeLines(ctx);
+        pinTaxPolicyVersion(ctx);
         validatePersistedSnapshot(ctx);
         rejectBlockingIssuesBeforePersist(summary, ctx.globalIssues);
         applySnapshotMetadata(ctx);
@@ -121,6 +156,9 @@ public class PayrollCalculationServiceImpl implements PayrollCalculationService 
 
             if (!entities.isEmpty()) {
                 payrollLineService.saveOrUpdateBatch(entities);
+                recordTaxLedgers(ctx, entities);
+                recordContributionRecords(ctx, entities);
+                recordCalculationTraces(ctx, entities, summary);
             }
 
             updateBatchToConfirming(ctx.batch);
@@ -581,10 +619,51 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         case TAXABLE_EARNINGS_MINUS_DEDUCTIONS -> taxableEarnings.subtract(deductions);
     };
 
-    BigDecimal tax = ctx.rule.taxRate.multiply(maxZero(taxBase));
-    BigDecimal social = ctx.rule.socialRate.multiply(maxZero(socialBase));
+    BigDecimal fallbackSocial = ctx.rule.socialRate.multiply(maxZero(socialBase))
+            .setScale(ctx.rule.scale, ctx.rule.roundingMode);
+    PayrollContributionCalculationService.Result contributionResult = payrollContributionCalculationService == null
+            ? null
+            : payrollContributionCalculationService.calculate(
+                    empId,
+                    ctx.batch,
+                    maxZero(socialBase),
+                    fallbackSocial,
+                    ctx.rule.roundingMode
+            );
+    BigDecimal social = contributionResult != null && contributionResult.policyDriven()
+            ? contributionResult.employeeAmount().setScale(ctx.rule.scale, ctx.rule.roundingMode)
+            : fallbackSocial;
+    if (contributionResult != null) {
+        ctx.contributionComputations.put(empId, contributionResult);
+    }
+    PayrollCumulativeTaxService.TaxComputation computation = payrollCumulativeTaxService == null
+            ? calculateBuiltinCumulativeTax(ctx, taxBase, social)
+            : payrollCumulativeTaxService.calculate(
+                    empId,
+                    ctx.batch,
+                    maxZero(taxBase),
+                    social,
+                    BigDecimal.ZERO,
+                    currentOtherLawfulDeduction(safeList),
+                    ctx.rule.scale,
+                    ctx.rule.roundingMode
+            );
+    BigDecimal tax = computation.result().currentWithholdingTax();
+    PayrollPreviewDto.TaxBreakdownDto breakdown = new PayrollPreviewDto.TaxBreakdownDto();
+    breakdown.setMode("cumulative-withholding");
+    breakdown.setTaxYear(computation.taxYear());
+    breakdown.setTaxMonth(computation.taxMonth());
+    breakdown.setCumulativeTaxableIncome(computation.result().cumulativeTaxableIncome());
+    breakdown.setRate(computation.result().rate());
+    breakdown.setQuickDeduction(computation.result().quickDeduction());
+    breakdown.setCumulativeTax(computation.result().cumulativeTaxBeforeReduction());
+    breakdown.setCurrentWithholdingTax(computation.result().currentWithholdingTax());
+    breakdown.setBracketLevel(computation.result().bracketLevel());
+    breakdown.setFormula(computation.result().formula());
+    breakdown.setPolicyCode(computation.policyCode());
+    line.setTaxBreakdown(breakdown);
+    ctx.taxComputations.put(empId, computation);
     tax = tax.setScale(ctx.rule.scale, ctx.rule.roundingMode);
-    social = social.setScale(ctx.rule.scale, ctx.rule.roundingMode);
     line.setTaxAmount(tax);
     line.setSocialAmount(social);
     line.setNetAmount(earnings.subtract(deductions).subtract(tax).subtract(social)
@@ -674,6 +753,175 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
     return line;
 }
 
+    private PayrollCumulativeTaxService.TaxComputation calculateBuiltinCumulativeTax(
+            PreviewContext ctx,
+            BigDecimal taxBase,
+            BigDecimal social
+    ) {
+        int year = LocalDateTime.now().getYear();
+        int month = LocalDateTime.now().getMonthValue();
+        String period = ctx.batch == null ? null : ctx.batch.getPeriodLabel();
+        if (period != null && period.length() >= 7) {
+            try {
+                year = Integer.parseInt(period.substring(0, 4));
+                month = Integer.parseInt(period.substring(5, 7));
+            } catch (NumberFormatException ignored) {
+                // 兼容历史批次的非标准周期标签。
+            }
+        }
+        CumulativeWithholdingTaxCalculator.Result result = CumulativeWithholdingTaxCalculator.calculate(
+                new CumulativeWithholdingTaxCalculator.Input(
+                        maxZero(taxBase),
+                        BigDecimal.ZERO,
+                        new BigDecimal("5000"),
+                        social,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        BigDecimal.ZERO,
+                        ctx.rule.scale,
+                        ctx.rule.roundingMode
+                )
+        );
+        return new PayrollCumulativeTaxService.TaxComputation(
+                year,
+                month,
+                result,
+                "builtin:cn-resident-wage-withholding-v1"
+        );
+    }
+
+    private BigDecimal currentOtherLawfulDeduction(java.util.List<PayrollImportItem> items) {
+        if (items == null) {
+            return BigDecimal.ZERO;
+        }
+        return items.stream()
+                .filter(item -> item != null && item.getItemCode() != null)
+                .filter(item -> {
+                    String code = item.getItemCode().toLowerCase(Locale.ROOT);
+                    return code.contains("pension") || code.contains("annuity") || code.contains("other_tax_deduction");
+                })
+                .map(PayrollImportItem::getAmount)
+                .filter(Objects::nonNull)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private void recordTaxLedgers(PreviewContext ctx, java.util.List<PayrollLine> entities) {
+        if (payrollCumulativeTaxService == null || ctx == null || entities == null) {
+            return;
+        }
+        for (PayrollLine line : entities) {
+            PayrollCumulativeTaxService.TaxComputation computation = ctx.taxComputations.get(line.getEmployeeId());
+            if (computation != null) {
+                payrollCumulativeTaxService.recordLedger(line.getEmployeeId(), ctx.batch, line.getId(), computation);
+            }
+        }
+    }
+
+    private void recordContributionRecords(PreviewContext ctx, java.util.List<PayrollLine> entities) {
+        if (payrollContributionRecordService == null || ctx == null || entities == null) {
+            return;
+        }
+        payrollContributionRecordService.remove(new LambdaQueryWrapper<com.yiyundao.compensation.modules.payroll.entity.PayrollContributionRecord>()
+                .eq(com.yiyundao.compensation.modules.payroll.entity.PayrollContributionRecord::getPayrollBatchId, ctx.batch.getId()));
+        for (PayrollLine line : entities) {
+            PayrollContributionCalculationService.Result result = ctx.contributionComputations.get(line.getEmployeeId());
+            if (result == null || !result.policyDriven()) {
+                continue;
+            }
+            java.util.List<com.yiyundao.compensation.modules.payroll.entity.PayrollContributionRecord> records = new java.util.ArrayList<>();
+            for (PayrollContributionCalculationService.Line contribution : result.lines()) {
+                com.yiyundao.compensation.modules.payroll.entity.PayrollContributionRecord record = new com.yiyundao.compensation.modules.payroll.entity.PayrollContributionRecord();
+                record.setPayrollBatchId(ctx.batch.getId());
+                record.setPayrollLineId(line.getId());
+                record.setEmployeeId(line.getEmployeeId());
+                record.setContributionType(contribution.contributionType());
+                record.setRegionCode(contribution.regionCode());
+                record.setPolicyId(contribution.policyId());
+                record.setDeclaredWage(contribution.declaredWage());
+                record.setContributionBase(contribution.contributionBase());
+                record.setEmployerRate(contribution.employerRate());
+                record.setEmployeeRate(contribution.employeeRate());
+                record.setEmployerAmount(contribution.employerAmount());
+                record.setEmployeeAmount(contribution.employeeAmount());
+                record.setStatus("calculated");
+                record.setCalculationHash(contribution.calculationHash());
+                records.add(record);
+            }
+            if (!records.isEmpty()) {
+                payrollContributionRecordService.saveBatch(records);
+            }
+        }
+    }
+
+    private void recordCalculationTraces(PreviewContext ctx,
+                                         java.util.List<PayrollLine> entities,
+                                         LinesSummary summary) {
+        if (payrollCalculationTraceService == null || ctx == null || entities == null || summary == null) {
+            return;
+        }
+        java.util.List<com.yiyundao.compensation.modules.payroll.entity.PayrollCalculationTrace> traces = new java.util.ArrayList<>();
+        for (PayrollLine line : entities) {
+            PayrollPreviewDto.PayrollPreviewLineDto previewLine = summary.linesByEmployee.get(line.getEmployeeId());
+            if (previewLine == null) {
+                continue;
+            }
+            int sequence = 1;
+            if (previewLine.getItems() != null) {
+                for (PayrollPreviewDto.PayrollPreviewItemDto item : previewLine.getItems()) {
+                    com.yiyundao.compensation.modules.payroll.entity.PayrollCalculationTrace trace = new com.yiyundao.compensation.modules.payroll.entity.PayrollCalculationTrace();
+                    trace.setPayrollBatchId(ctx.batch.getId());
+                    trace.setPayrollLineId(line.getId());
+                    trace.setEmployeeId(line.getEmployeeId());
+                    trace.setSequence(sequence++);
+                    trace.setStepCode("SALARY_ITEM");
+                    trace.setItemCode(item.getCode());
+                    trace.setOutputValue(item.getAmount());
+                    trace.setFormula("item[" + item.getCode() + "]");
+                    trace.setRuleVersion(ctx.calculationEngineVersion);
+                    trace.setSourceRef(ctx.inputSnapshotHash);
+                    trace.setRoundingMode(ctx.rule.roundingMode.name());
+                    traces.add(trace);
+                }
+            }
+            if (previewLine.getTaxBreakdown() != null) {
+                PayrollPreviewDto.TaxBreakdownDto tax = previewLine.getTaxBreakdown();
+                com.yiyundao.compensation.modules.payroll.entity.PayrollCalculationTrace trace = new com.yiyundao.compensation.modules.payroll.entity.PayrollCalculationTrace();
+                trace.setPayrollBatchId(ctx.batch.getId());
+                trace.setPayrollLineId(line.getId());
+                trace.setEmployeeId(line.getEmployeeId());
+                trace.setSequence(sequence++);
+                trace.setStepCode("CUMULATIVE_WITHHOLDING_TAX");
+                trace.setOutputValue(tax.getCurrentWithholdingTax());
+                trace.setFormula(tax.getFormula());
+                trace.setRuleVersion(tax.getPolicyCode());
+                trace.setSourceRef(ctx.ruleSnapshotHash);
+                trace.setRoundingMode(ctx.rule.roundingMode.name());
+                try {
+                    trace.setInputJson(objectMapper.writeValueAsString(tax));
+                } catch (Exception ignored) {
+                    trace.setInputJson("{}");
+                }
+                traces.add(trace);
+            }
+            com.yiyundao.compensation.modules.payroll.entity.PayrollCalculationTrace finalTrace = new com.yiyundao.compensation.modules.payroll.entity.PayrollCalculationTrace();
+            finalTrace.setPayrollBatchId(ctx.batch.getId());
+            finalTrace.setPayrollLineId(line.getId());
+            finalTrace.setEmployeeId(line.getEmployeeId());
+            finalTrace.setSequence(sequence);
+            finalTrace.setStepCode("NET_SETTLEMENT");
+            finalTrace.setOutputValue(line.getNetAmount());
+            finalTrace.setFormula("gross - deductions - tax - social");
+            finalTrace.setRuleVersion(ctx.calculationEngineVersion);
+            finalTrace.setSourceRef(ctx.inputSnapshotHash);
+            finalTrace.setRoundingMode(ctx.rule.roundingMode.name());
+            traces.add(finalTrace);
+        }
+        if (!traces.isEmpty()) {
+            payrollCalculationTraceService.saveBatch(traces);
+        }
+    }
+
     private LinesSummary computeLines(PreviewContext ctx) {
     LinesSummary summary = new LinesSummary();
     if (ctx == null || ctx.itemsByEmployee == null || ctx.itemsByEmployee.isEmpty()) {
@@ -756,6 +1004,9 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
     ctx.ruleSnapshotJson = PayrollCalculationSnapshotSupport.ruleSnapshotJson(objectMapper, ctx.template);
     ctx.ruleSnapshotHash = PayrollCalculationSnapshotSupport.ruleHash(objectMapper, ctx.template);
     ctx.rule = parseBasicRule(ctx.template);
+    if (ctx.rule.cumulativeWithholding) {
+        ctx.calculationEngineVersion = "cumulative-withholding-v1";
+    }
     ctx.expectedItemRules = parseItemRules(ctx.template);
     if (ctx.rule.parseError != null) {
         ctx.globalIssues.add(validationIssueSupport.blocking(
@@ -821,7 +1072,9 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         if (ctx == null || ctx.batch == null) {
             return;
         }
-        ctx.calculationEngineVersion = PayrollCalculationSnapshotSupport.LEGACY_BASIC_ENGINE_VERSION;
+        ctx.calculationEngineVersion = ctx.rule != null && ctx.rule.cumulativeWithholding
+                ? "cumulative-withholding-v1"
+                : PayrollCalculationSnapshotSupport.LEGACY_BASIC_ENGINE_VERSION;
         ctx.batch.setInputSnapshotHash(ctx.inputSnapshotHash);
         ctx.batch.setInputSnapshotJson(ctx.inputSnapshotJson);
         ctx.batch.setRuleSnapshotHash(ctx.ruleSnapshotHash);
@@ -846,6 +1099,28 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
                     "PAYROLL_RULE_SNAPSHOT_CHANGED",
                     "薪资规则已变化，请创建新的批次版本后再计算"
             ));
+        }
+    }
+
+    private void pinTaxPolicyVersion(PreviewContext ctx) {
+        if (ctx == null || ctx.batch == null || ctx.taxComputations == null) {
+            return;
+        }
+        java.util.Set<Long> policyIds = ctx.taxComputations.values().stream()
+                .map(PayrollCumulativeTaxService.TaxComputation::policyId)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+        boolean explicitPolicyMissing = ctx.batch.getPolicyPackageId() != null
+                && ctx.taxComputations.values().stream().anyMatch(item -> item.policyId() == null);
+        if (explicitPolicyMissing || policyIds.size() > 1) {
+            ctx.globalIssues.add(validationIssueSupport.blocking(
+                    "PAYROLL_TAX_POLICY_AMBIGUOUS",
+                    "批次未能唯一确定已发布的个税政策版本，请检查政策包和批次绑定"
+            ));
+            return;
+        }
+        if (ctx.batch.getPolicyPackageId() == null && policyIds.size() == 1) {
+            ctx.batch.setPolicyPackageId(policyIds.iterator().next());
         }
     }
 
@@ -880,6 +1155,12 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
     entity.setTaxAmount(lineDto.getTaxAmount());
     entity.setSocialAmount(lineDto.getSocialAmount());
     entity.setNetAmount(lineDto.getNetAmount());
+    try {
+        entity.setTaxBreakdownJson(objectMapper.writeValueAsString(lineDto.getTaxBreakdown()));
+    } catch (Exception e) {
+        log.warn("serialize tax breakdown snapshot failed: {}", e.getMessage());
+        entity.setTaxBreakdownJson(null);
+    }
     if (existing != null && existing.getStatus() != null) {
         entity.setStatus(existing.getStatus());
     } else {
@@ -1195,13 +1476,24 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
 
     private BasicCalcRule parseBasicRule(SalaryTemplate tpl) {
         BasicCalcRule rule = new BasicCalcRule();
-        if (tpl == null || tpl.getTaxRuleJson() == null || tpl.getTaxRuleJson().isBlank()) return rule;
+        if (tpl == null || tpl.getTaxRuleJson() == null || tpl.getTaxRuleJson().isBlank()) {
+            rule.parseError = "薪资模板缺少累计预扣税务规则，旧版固定税率已下线";
+            return rule;
+        }
         try {
             var root = readJsonTree(tpl.getTaxRuleJson());
             // tax
             var tax = root.path("tax");
             if (!tax.isMissingNode()) {
-                if (tax.has("rate")) rule.taxRate = new BigDecimal(tax.get("rate").asText("0"));
+                if (tax.has("rate")) {
+                    rule.taxRate = new BigDecimal(tax.get("rate").asText("0"));
+                    if (!tax.has("mode") || !isCumulativeTaxMode(tax.get("mode").asText())) {
+                        rule.parseError = "薪资模板仍使用旧版固定税率，必须迁移到 cumulative-withholding 模式";
+                    }
+                }
+                if (tax.has("mode") && !isCumulativeTaxMode(tax.get("mode").asText())) {
+                    rule.parseError = "不支持旧版个税计算模式：" + tax.get("mode").asText();
+                }
                 if (tax.has("applyOn")) rule.taxApplyOn = BasicCalcRule.ApplyOn.from(tax.get("applyOn").asText());
             }
             // social
@@ -1228,6 +1520,11 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
             log.warn("parseBasicRule failed, calculation is blocked: {}", e.getMessage());
         }
         return rule;
+    }
+
+    private boolean isCumulativeTaxMode(String mode) {
+        return "cumulative_withholding".equalsIgnoreCase(mode)
+                || "cumulative-withholding".equalsIgnoreCase(mode);
     }
 
     private java.util.Map<String, ItemRule> parseItemRules(SalaryTemplate tpl) {
@@ -1345,6 +1642,8 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         java.util.Map<Long, java.util.List<PayrollImportItem>> itemsByEmployee;
         java.util.Map<Long, Employee> employeeMap;
         java.util.Map<Long, Employee> managerMap;
+        java.util.Map<Long, PayrollCumulativeTaxService.TaxComputation> taxComputations = new java.util.HashMap<>();
+        java.util.Map<Long, PayrollContributionCalculationService.Result> contributionComputations = new java.util.HashMap<>();
         java.util.List<PayrollLine> persistedLines = java.util.Collections.emptyList();
         java.util.List<PayrollValidationIssueDto> globalIssues = new java.util.ArrayList<>();
         String inputSnapshotHash;
@@ -1384,6 +1683,7 @@ public PayrollManagerReviewDto managerReview(Long batchId, String department, Lo
         }
         BigDecimal taxRate = BigDecimal.ZERO;
         BigDecimal socialRate = BigDecimal.ZERO;
+        boolean cumulativeWithholding = true;
         ApplyOn taxApplyOn = ApplyOn.TAXABLE_EARNINGS;
         ApplyOn socialApplyOn = ApplyOn.GROSS;
         int scale = 2;

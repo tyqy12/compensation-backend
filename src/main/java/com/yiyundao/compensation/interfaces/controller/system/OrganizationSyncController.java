@@ -32,7 +32,6 @@ public class OrganizationSyncController {
     private final OrganizationSyncService organizationSyncService;
     private final AuditLogService auditLogService;
     private final OrgSyncTaskService orgSyncTaskService;
-    private final com.yiyundao.compensation.modules.employee.service.EmployeeDepartmentService employeeDepartmentService;
     private final com.yiyundao.compensation.modules.employee.service.EmployeeService employeeService;
     private final LegacyPlatformFieldPolicy legacyPlatformFieldPolicy;
 
@@ -227,6 +226,7 @@ public class OrganizationSyncController {
                 java.util.List<String> departmentNames = normalizeDepartmentNames(it.getDepartments());
                 if (it.getDepartments() != null) {
                     e.setDepartment(String.join(",", departmentNames));
+                    e.setDepartments(departmentNames);
                 }
                 e.setPosition(it.getPosition());
                 e.setEmploymentType(it.getEmploymentType());
@@ -245,10 +245,6 @@ public class OrganizationSyncController {
                             firstNonBlank(it.getName(), "未命名"),
                             firstNonBlank(subjectId, "无平台ID")));
                     continue;
-                }
-                // 维护多部门关联
-                if (it.getDepartments() != null) {
-                    employeeDepartmentService.replaceDepartments(saved.getId(), itemPlatform, departmentNames);
                 }
                 ok++;
                 if (existing != null) {

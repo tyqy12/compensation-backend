@@ -7,6 +7,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -22,6 +23,14 @@ public class Employee extends BaseEntity {
     private String encryptedIdCard;
 
     private String department;
+
+    /**
+     * 多部门展示与导入字段，实际关系存储在 employee_department。
+     */
+    @EqualsAndHashCode.Exclude
+    @TableField(exist = false)
+    private List<String> departments;
+
     private String position;
     @TableField("employment_type")
     private String employmentType; // full_time / part_time

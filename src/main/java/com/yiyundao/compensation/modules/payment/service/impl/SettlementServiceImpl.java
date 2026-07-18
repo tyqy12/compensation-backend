@@ -33,6 +33,7 @@ import com.yiyundao.compensation.modules.payroll.entity.PayrollDistribution;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollDistributionItem;
 import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentFailureService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollDistributionService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollSettlementIntegrityService;
 import com.yiyundao.compensation.enums.PayrollDistributionItemStatus;
 import com.yiyundao.compensation.service.EncryptionService;
 import com.yiyundao.compensation.service.NotificationService;
@@ -81,8 +82,15 @@ public class SettlementServiceImpl implements SettlementService {
     private final ObjectProvider<PayrollDistributionService> payrollDistributionServiceProvider;
     private final ObjectProvider<PayrollPaymentFailureService> payrollPaymentFailureServiceProvider;
     private final ObjectProvider<PlatformTransactionManager> transactionManagerProvider;
+    private PayrollSettlementIntegrityService payrollSettlementIntegrityService;
 
     private Map<String, SettlementProvider> providerMap;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setPayrollSettlementIntegrityService(
+            PayrollSettlementIntegrityService payrollSettlementIntegrityService) {
+        this.payrollSettlementIntegrityService = payrollSettlementIntegrityService;
+    }
 
     @PostConstruct
     public void initProviderMap() {
@@ -1531,8 +1539,18 @@ public class SettlementServiceImpl implements SettlementService {
                 .in("status", PayrollBatchStatus.PAY_PROCESSING.getCode(), PayrollBatchStatus.PAY_FAILED.getCode())
                 .set("payment_status", mapPaymentBatchProcessStatus(status, partialSuccess).getCode())
                 .set("status", status == BatchStatus.COMPLETED && !partialSuccess ? "paid" : "pay_failed");
-        payrollBatchMapper.update(null, wrapper);
-        PayrollPaymentFailureService failureService = payrollPaymentFailureServiceProvider.getIfAvailable();
+            PayrollBatchStatus targetStatus = partialSuccess
+                    ? PayrollBatchStatus.PAY_FAILED
+                    : PayrollBatchStatus.PAID;
+            if (targetStatus == PayrollBatchStatus.PAID && payrollSettlementIntegrityService != null) {
+                payrollSettlementIntegrityService.finalizeByPaymentBatchNo(
+                        paymentBatch.getBatchNo(),
+                        targetStatus,
+                        PaymentBatchProcessStatus.SUCCESS.getCode());
+            } else {
+                payrollBatchMapper.update(null, wrapper);
+            }
+            PayrollPaymentFailureService failureService = payrollPaymentFailureServiceProvider.getIfAvailable();
         if (failureService != null) {
             if (status == BatchStatus.COMPLETED && !partialSuccess) {
                 failureService.markResolvedByPaymentBatchNo(paymentBatch.getBatchNo());

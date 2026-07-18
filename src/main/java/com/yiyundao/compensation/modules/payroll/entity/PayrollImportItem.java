@@ -7,6 +7,8 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -27,5 +29,14 @@ public class PayrollImportItem extends BaseEntity {
     private String status; // valid/invalid
     @TableField("error_msg")
     private String errorMsg;
+    @TableField("source_external_key")
+    private String sourceExternalKey;
+    @TableField("business_date")
+    private LocalDate businessDate;
+    @TableField("source_version")
+    private String sourceVersion;
+    @TableField("approval_status")
+    private String approvalStatus;
+    @TableField("imported_at")
+    private LocalDateTime importedAt;
 }
-

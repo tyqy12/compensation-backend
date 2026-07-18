@@ -11,7 +11,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class EmployeeControllerSecurityTest {
 
     @Test
-    void employeeDirectoryReadEndpointsShouldRequireFinanceHrOrAdmin() throws NoSuchMethodException {
+    void employeeDirectoryReadEndpointsShouldAllowManagersForScopedLists() throws NoSuchMethodException {
         assertThat(method("detail", String.class)
                 .isAnnotationPresent(SecurityAnnotations.IsFinanceOrHrOrAdmin.class)).isTrue();
         assertThat(method("approvals", Long.class, int.class, int.class)
@@ -20,9 +20,9 @@ class EmployeeControllerSecurityTest {
                 String.class, Long.class, String.class, String.class, HttpServletRequest.class)
                 .isAnnotationPresent(SecurityAnnotations.IsFinanceOrHrOrAdmin.class)).isTrue();
         assertThat(method("offlineList", Long.class)
-                .isAnnotationPresent(SecurityAnnotations.IsFinanceOrHrOrAdmin.class)).isTrue();
+                .isAnnotationPresent(SecurityAnnotations.IsFinanceOrHrOrManagerOrAdmin.class)).isTrue();
         assertThat(method("resignedList", Long.class)
-                .isAnnotationPresent(SecurityAnnotations.IsFinanceOrHrOrAdmin.class)).isTrue();
+                .isAnnotationPresent(SecurityAnnotations.IsFinanceOrHrOrManagerOrAdmin.class)).isTrue();
     }
 
     @Test

@@ -68,6 +68,7 @@ class EmployeeServiceImplOfflineManagerTest {
         employee.setId(10L);
         Employee manager = new Employee();
         manager.setId(20L);
+        manager.setStatus("active");
         service.employees.put(10L, employee);
         service.employees.put(20L, manager);
 
@@ -125,6 +126,24 @@ class EmployeeServiceImplOfflineManagerTest {
 
         assertThat(employee.getDepartment()).isNull();
         assertThat(service.lastUpdatedEmployee).isSameAs(employee);
+    }
+
+    @Test
+    void updateEmployeeShouldReportOptimisticLockConflict() {
+        TestableEmployeeServiceImpl service = new TestableEmployeeServiceImpl();
+        Employee employee = new Employee();
+        employee.setId(10L);
+        employee.setName("张三");
+        service.employees.put(10L, employee);
+        service.updateSuccessful = false;
+
+        Employee update = new Employee();
+        update.setName("李四");
+
+        assertThatThrownBy(() -> service.updateEmployee(10L, update))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(ex -> assertThat(((BusinessException) ex).getErrorCode())
+                        .isEqualTo(ErrorCode.REQUEST_CONFLICT));
     }
 
     @Test
@@ -356,6 +375,7 @@ class EmployeeServiceImplOfflineManagerTest {
         private final EncryptionService encryptionService;
         private Employee lastUpdatedEmployee;
         private Page<Employee> lastPage;
+        private boolean updateSuccessful = true;
 
         private TestableEmployeeServiceImpl() {
             this(mock(EncryptionService.class));
@@ -379,7 +399,8 @@ class EmployeeServiceImplOfflineManagerTest {
                     mock(PayCycleService.class),
                     mock(PaymentRecordService.class),
                     mock(VOConverter.class),
-                    new ObjectMapper()
+                    new ObjectMapper(),
+                    mock(EmployeeDepartmentService.class)
             );
             this.encryptionService = encryptionService;
         }
@@ -394,6 +415,9 @@ class EmployeeServiceImplOfflineManagerTest {
 
         @Override
         public boolean updateById(Employee entity) {
+            if (!updateSuccessful) {
+                return false;
+            }
             lastUpdatedEmployee = entity;
             employees.put(entity.getId(), entity);
             return true;

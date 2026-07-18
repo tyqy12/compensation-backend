@@ -124,7 +124,8 @@ class EmployeeServiceImplPayslipRecordTest {
                 payCycleService,
                 mock(PaymentRecordService.class),
                 mock(VOConverter.class),
-                new ObjectMapper()
+                new ObjectMapper(),
+                mock(EmployeeDepartmentService.class)
         );
     }
 

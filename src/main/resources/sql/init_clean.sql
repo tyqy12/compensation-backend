@@ -1,6 +1,10 @@
 -- ============================================
 -- Compensation Assistant System - Clean Initialization SQL
 -- Drops existing objects and recreates all tables with only the ADMIN user seeded.
+-- DEPRECATED for production: this destructive compatibility script predates the
+-- policy-versioned payroll schema. Production and shared environments must use
+-- schema.sql for an empty database or the idempotent migrations/runner for an
+-- existing database. Do not execute this file against an existing data set.
 -- Usage:
 --   mysql -h<host> -u<user> -p<pass> <db> < src/main/resources/sql/init_clean.sql
 -- ============================================
@@ -47,7 +51,7 @@ CREATE TABLE `employee` (
   `phone` varchar(20) DEFAULT NULL COMMENT '手机号码',
   `email` varchar(100) DEFAULT NULL COMMENT '邮箱地址',
   `encrypted_id_card` text COMMENT '加密后的身份证号',
-  `department` varchar(100) DEFAULT NULL COMMENT '部门(主展示，逗号拼接)',
+  `department` varchar(500) DEFAULT NULL COMMENT '部门(兼容展示字段，多部门关系见employee_department)',
   `position` varchar(100) DEFAULT NULL COMMENT '职位',
   `employment_type` varchar(20) DEFAULT 'full_time' COMMENT '用工类型(full_time/part_time)',
   `is_offline` tinyint(1) DEFAULT '0' COMMENT '是否架构外员工',
@@ -55,7 +59,7 @@ CREATE TABLE `employee` (
   `hire_date` date DEFAULT NULL COMMENT '入职日期',
   `status` varchar(20) DEFAULT 'active' COMMENT '员工状态',
   `settlement_account_type` varchar(20) DEFAULT NULL COMMENT '收款账户类型(bank_card/alipay/wechat/other)',
-  `settlement_account` varchar(128) DEFAULT NULL COMMENT '收款账户(加密存储)',
+  `settlement_account` text COMMENT '收款账户(加密存储)',
   `settlement_account_name` varchar(100) DEFAULT NULL COMMENT '收款账户实名/户名',
   `settlement_provider_code` varchar(32) DEFAULT NULL COMMENT '结算渠道编码（优先级最高）',
   `bank_account` varchar(100) DEFAULT NULL COMMENT '银行卡号(加密存储)',
@@ -493,7 +497,7 @@ CREATE TABLE `settlement_reconciliation` (
 CREATE TABLE `approval_workflow` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `workflow_name` varchar(100) NOT NULL COMMENT '流程名称',
-  `workflow_type` varchar(50) NOT NULL COMMENT '流程类型',
+  `workflow_type` varchar(50) NOT NULL COMMENT '流程类型(BATCH/ADHOC/OFFLINE/EMPLOYEE_PROFILE_CHANGE/PLATFORM_BIND)',
   `business_type` varchar(50) DEFAULT NULL COMMENT '业务类型',
   `business_key` varchar(100) DEFAULT NULL COMMENT '业务标识',
   `current_step` int DEFAULT 0 COMMENT '当前步骤',

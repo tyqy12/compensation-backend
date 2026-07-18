@@ -21,6 +21,7 @@ import com.yiyundao.compensation.enums.BatchStatus;
 import com.yiyundao.compensation.enums.PaymentBatchProcessStatus;
 import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
+import com.yiyundao.compensation.modules.payroll.service.PayrollSettlementIntegrityService;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.modules.payment.support.PaymentCallbackLogSanitizer;
 import com.yiyundao.compensation.modules.payment.support.PaymentRecordStatusTransitions;
@@ -53,6 +54,13 @@ public class AlipayService {
     private final NotificationService notificationService;
     private final com.yiyundao.compensation.modules.system.service.IntegrationConfigService integrationConfigService;
     private final PayrollBatchMapper payrollBatchMapper;
+    private PayrollSettlementIntegrityService payrollSettlementIntegrityService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setPayrollSettlementIntegrityService(
+            PayrollSettlementIntegrityService payrollSettlementIntegrityService) {
+        this.payrollSettlementIntegrityService = payrollSettlementIntegrityService;
+    }
 
     private static final String DEDUP_KEY_PREFIX = "alipay:dedup:";
     private static final int BATCH_SIZE = 1000; // 批量转账最大1000笔
@@ -428,7 +436,17 @@ public class AlipayService {
             } else {
                 return;
             }
-            payrollBatchMapper.update(null, wrapper);
+            PayrollBatchStatus targetStatus = partialSuccess
+                    ? PayrollBatchStatus.PAY_FAILED
+                    : PayrollBatchStatus.PAID;
+            if (targetStatus == PayrollBatchStatus.PAID && payrollSettlementIntegrityService != null) {
+                payrollSettlementIntegrityService.finalizeByPaymentBatchNo(
+                        paymentBatch.getBatchNo(),
+                        targetStatus,
+                        PaymentBatchProcessStatus.SUCCESS.getCode());
+            } else {
+                payrollBatchMapper.update(null, wrapper);
+            }
             log.info("同步薪资批次状态成功: paymentBatchNo={}, status={}",
                     paymentBatch.getBatchNo(), paymentBatch.getStatus());
         } catch (Exception e) {

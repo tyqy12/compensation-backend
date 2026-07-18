@@ -7,7 +7,7 @@ import { redirectToLogin } from '@services/navigation';
 const ENV = (import.meta as any)?.env || {};
 // 开发环境一律走 Vite 代理 '/api'，避免被本地环境变量覆盖导致跨域
 // 注意：Vite `mode` 可能是自定义值（如 dev/staging），不要用 MODE === 'development' 做判断
-const BASE_URL = ENV.DEV ? '/api' : (ENV.VITE_API_BASE_URL ?? 'http://localhost:8080/api');
+const BASE_URL = ENV.DEV ? '/api' : (ENV.VITE_API_BASE_URL || '/api');
 
 // Create axios instance (match test expectation exactly)
 export const api: AxiosInstance = axios.create({

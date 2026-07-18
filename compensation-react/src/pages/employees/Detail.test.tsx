@@ -52,6 +52,10 @@ vi.mock('@services/queries/employee', () => ({
     mockUseEmployeePaymentsQuery(id, params, options),
 }));
 
+vi.mock('@services/queries/rbac', () => ({
+  useHasAction: () => true,
+}));
+
 const TestWrapper = ({
   children,
   initialEntries = ['/employees/1'],

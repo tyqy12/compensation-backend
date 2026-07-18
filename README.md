@@ -79,14 +79,22 @@ curl -s -X POST http://localhost:8080/api/auth/dev-token \
 
 ### Docker/WSL 运行（推荐）
 ```bash
-# 一键启动（MySQL + Redis + 后端）
+# 生产容器启动（前端 Nginx + 后端 + Redis；MySQL 使用外部实例）
+cp deploy/production.env.example .env
+# 编辑 .env，替换所有数据库、令牌和加密密钥
 docker compose up -d --build
 
-# 查看应用日志
+# 查看后端日志
 docker compose logs -f app
 
-# 访问
-curl http://localhost:8080/api/system/health
+# 访问前端
+http://<server-host>/
+
+# 检查前端到后端的完整链路
+curl http://localhost/healthz
+
+# 仅本机调试后端
+curl http://127.0.0.1:8080/api/system/health
 ```
 详见：docs/docker-wsl.md
 

@@ -80,7 +80,7 @@ public class UserBindingServiceImpl implements UserBindingService {
                 if (e0 != null) data.put("snapshotEmployee", toJsonSafe(e0));
             }
             Long wfId = approvalEngineProvider.getObject().startWorkflow(
-                    com.yiyundao.compensation.enums.WorkflowType.OFFLINE,
+                    com.yiyundao.compensation.enums.WorkflowType.PLATFORM_BIND,
                     buildUserApprovalBusinessKey(userId),
                     "PLATFORM_LINK",
                     initiator,
@@ -116,7 +116,7 @@ public class UserBindingServiceImpl implements UserBindingService {
                 data.put("snapshotUser", toJsonSafe(user));
                 data.put("snapshotEmployee", toJsonSafe(emp));
                 Long wfId = approvalEngineProvider.getObject().startWorkflow(
-                        com.yiyundao.compensation.enums.WorkflowType.OFFLINE,
+                        com.yiyundao.compensation.enums.WorkflowType.PLATFORM_BIND,
                         buildUserApprovalBusinessKey(userId),
                         "PLATFORM_LINK",
                         initiator,
@@ -128,7 +128,9 @@ public class UserBindingServiceImpl implements UserBindingService {
         }
 
         // 3) 更新用户绑定关系并同步 external_identity
-        sysUserService.updateById(user);
+        if (!sysUserService.updateById(user)) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "用户员工关联已被其他操作修改，请刷新后重试");
+        }
         syncIdentity(user, normalizedProvider, normalizedSubjectId, "manual");
         return UserPlatformBindingResult.success();
     }
@@ -183,9 +185,12 @@ public class UserBindingServiceImpl implements UserBindingService {
             assertEmployeeBindingStillMatches(workflowId, userId, employee.getId());
             unlinkOtherUsersFromEmployee(userId, employee.getId());
             user.setEmployeeId(employee.getId());
-            sysUserService.update(new UpdateWrapper<SysUser>()
+            boolean updated = sysUserService.update(new UpdateWrapper<SysUser>()
                     .eq("id", userId)
                     .set("employee_id", employee.getId()));
+            if (!updated) {
+                throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "用户员工关联已被其他操作修改，请刷新后重试");
+            }
         }
 
         syncIdentity(user, normalizedProvider, normalizedSubjectId, "approval:" + workflowId);
@@ -208,7 +213,9 @@ public class UserBindingServiceImpl implements UserBindingService {
         if (bound != null) throw new IllegalStateException("该员工已绑定其他用户");
 
         user.setEmployeeId(employeeId);
-        sysUserService.updateById(user);
+        if (!sysUserService.updateById(user)) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "用户员工关联已被其他操作修改，请刷新后重试");
+        }
 
         ExternalIdentity identity = externalIdentityService.findPrimaryByUserId(userId);
         if (identity == null) {
@@ -342,7 +349,21 @@ public class UserBindingServiceImpl implements UserBindingService {
                 user.setEmployeeId(employee.getId());
                 changed = true;
             }
-            if (changed) sysUserService.updateById(user);
+            if (!java.util.Objects.equals(user.getRealName(), employee.getName())) {
+                user.setRealName(employee.getName());
+                changed = true;
+            }
+            if (!java.util.Objects.equals(user.getPhone(), employee.getPhone())) {
+                user.setPhone(employee.getPhone());
+                changed = true;
+            }
+            if (!java.util.Objects.equals(user.getEmail(), employee.getEmail())) {
+                user.setEmail(employee.getEmail());
+                changed = true;
+            }
+            if (changed && !sysUserService.updateById(user)) {
+                throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "系统用户资料已被其他操作修改，请刷新后重试");
+            }
         }
 
         if (employeeIdentity != null && StringUtils.hasText(employeeIdentity.getSubjectId())) {

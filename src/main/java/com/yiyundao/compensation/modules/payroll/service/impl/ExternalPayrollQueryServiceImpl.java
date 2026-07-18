@@ -14,6 +14,7 @@ import com.yiyundao.compensation.interfaces.dto.openapi.OpenApiPayrollLineDto;
 import com.yiyundao.compensation.interfaces.dto.openapi.OpenApiPayslipDto;
 import com.yiyundao.compensation.interfaces.dto.payroll.PayrollPreviewDto;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.employee.service.EmployeeDepartmentService;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollBatch;
 import com.yiyundao.compensation.modules.payroll.entity.PayrollLine;
@@ -70,6 +71,7 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
     private final ObjectMapper objectMapper;
     private final EncryptionService encryptionService;
     private final ExternalIdentityService externalIdentityService;
+    private final EmployeeDepartmentService employeeDepartmentService;
 
     @Override
     public Page<OpenApiPayrollBatchDto> pagePtBatches(String period, String status, long page, long size) {
@@ -588,21 +590,23 @@ public class ExternalPayrollQueryServiceImpl implements ExternalPayrollQueryServ
     }
 
     private List<String> resolveDepartments(Employee employee) {
-        if (employee == null || !StringUtils.hasText(employee.getDepartment())) {
+        if (employee == null) {
             return Collections.emptyList();
         }
-        String dept = employee.getDepartment().trim();
-        if (dept.contains("/")) {
-            String[] parts = dept.split("/");
-            List<String> list = new ArrayList<>();
-            for (String part : parts) {
-                if (StringUtils.hasText(part)) {
-                    list.add(part.trim());
-                }
+        if (employee.getId() != null) {
+            List<String> related = employeeDepartmentService.findDepartmentNames(employee.getId());
+            if (related != null && !related.isEmpty()) {
+                return related;
             }
-            return list;
         }
-        return List.of(dept);
+        if (!StringUtils.hasText(employee.getDepartment())) {
+            return Collections.emptyList();
+        }
+        return java.util.Arrays.stream(employee.getDepartment().split("[,，、/]"))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
     }
 
     private String maskName(String name) {

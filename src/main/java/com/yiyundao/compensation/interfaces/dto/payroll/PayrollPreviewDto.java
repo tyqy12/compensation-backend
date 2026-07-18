@@ -38,6 +38,7 @@ public class PayrollPreviewDto {
         private BigDecimal taxAmount;
         private BigDecimal socialAmount;
         private BigDecimal netAmount;
+        private TaxBreakdownDto taxBreakdown;
         // warnings and diffs
         private List<String> warnings; // 缺失项/阈值/异常提示
         private List<PayrollValidationIssueDto> issues;
@@ -67,5 +68,20 @@ public class PayrollPreviewDto {
         private BigDecimal lastNetAmount;
         private BigDecimal netDeltaAmount;
         private BigDecimal netDeltaPercent; // -1.00 ~ +1.00
+    }
+
+    @Data
+    public static class TaxBreakdownDto {
+        private String mode;
+        private Integer taxYear;
+        private Integer taxMonth;
+        private BigDecimal cumulativeTaxableIncome;
+        private BigDecimal rate;
+        private BigDecimal quickDeduction;
+        private BigDecimal cumulativeTax;
+        private BigDecimal currentWithholdingTax;
+        private Integer bracketLevel;
+        private String formula;
+        private String policyCode;
     }
 }

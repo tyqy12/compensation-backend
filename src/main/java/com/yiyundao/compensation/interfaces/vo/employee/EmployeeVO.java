@@ -7,6 +7,8 @@ import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
 
 @Data
 public class EmployeeVO {
@@ -16,6 +18,7 @@ public class EmployeeVO {
     private String phoneMasked;
     private String email;
     private String department;
+    private List<String> departments;
     private String position;
     private String provider;
     private String subjectId;
@@ -43,6 +46,7 @@ public class EmployeeVO {
         vo.setPhoneMasked(enc.maskPhone(e.getPhone()));
         vo.setEmail(e.getEmail());
         vo.setDepartment(e.getDepartment());
+        vo.setDepartments(splitDepartments(e.getDepartment()));
         vo.setPosition(e.getPosition());
         vo.setProvider(e.getProvider());
         vo.setSubjectId(e.getSubjectId());
@@ -74,5 +78,16 @@ public class EmployeeVO {
             case "other" -> "其他";
             default -> code;
         };
+    }
+
+    private static List<String> splitDepartments(String department) {
+        if (!StringUtils.hasText(department)) {
+            return List.of();
+        }
+        return Arrays.stream(department.split("[,/，、]"))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
     }
 }

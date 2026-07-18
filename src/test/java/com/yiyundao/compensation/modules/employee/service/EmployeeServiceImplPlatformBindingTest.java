@@ -164,7 +164,7 @@ class EmployeeServiceImplPlatformBindingTest {
         )).thenReturn(currentIdentity);
         when(approvalEngineProvider.getObject()).thenReturn(approvalEngine);
         when(approvalEngine.startWorkflow(
-                eq(WorkflowType.OFFLINE),
+                eq(WorkflowType.PLATFORM_BIND),
                 anyString(),
                 eq("PLATFORM_BIND"),
                 eq(1L),
@@ -183,7 +183,7 @@ class EmployeeServiceImplPlatformBindingTest {
         assertThat(result.getWorkflowId()).isEqualTo(7104L);
         assertThat(result.getWorkflowType()).isEqualTo("PLATFORM_BIND");
         verify(approvalEngine).startWorkflow(
-                eq(WorkflowType.OFFLINE),
+                eq(WorkflowType.PLATFORM_BIND),
                 anyString(),
                 eq("PLATFORM_BIND"),
                 eq(1L),
@@ -271,7 +271,7 @@ class EmployeeServiceImplPlatformBindingTest {
         )).thenReturn(occupiedIdentity);
         when(approvalEngineProvider.getObject()).thenReturn(approvalEngine);
         when(approvalEngine.startWorkflow(
-                eq(WorkflowType.OFFLINE),
+                eq(WorkflowType.PLATFORM_BIND),
                 anyString(),
                 eq("PLATFORM_BIND"),
                 eq(1L),
@@ -289,7 +289,7 @@ class EmployeeServiceImplPlatformBindingTest {
         assertThat(result.getResult()).isEqualTo(BindResult.PENDING_APPROVAL);
         assertThat(result.getConflictInfo().getOccupiedUserId()).isEqualTo(9006L);
         verify(approvalEngine).startWorkflow(
-                eq(WorkflowType.OFFLINE),
+                eq(WorkflowType.PLATFORM_BIND),
                 anyString(),
                 eq("PLATFORM_BIND"),
                 eq(1L),
@@ -435,7 +435,8 @@ class EmployeeServiceImplPlatformBindingTest {
                     mock(PayCycleService.class),
                     mock(PaymentRecordService.class),
                     mock(VOConverter.class),
-                    new ObjectMapper()
+                    new ObjectMapper(),
+                    mock(EmployeeDepartmentService.class)
             );
         }
 

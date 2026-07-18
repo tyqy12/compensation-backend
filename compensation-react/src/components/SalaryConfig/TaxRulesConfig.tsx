@@ -23,6 +23,7 @@ interface TaxRuleItem {
   threshold?: number;
   applyOn?: string;
   mode?: string;
+  calculationMode?: string;
   scale?: number;
 }
 
@@ -46,14 +47,19 @@ const roundingModeOptions = [
   { label: '截断', value: 'TRUNCATE' },
 ];
 
+const isIncomeTaxRule = (rule?: Pick<TaxRuleItem, 'ruleCode' | 'ruleName'> | null) => {
+  if (!rule) return false;
+  return ['income_tax', 'tax'].includes(rule.ruleCode || '') || Boolean(rule.ruleName?.includes('税'));
+};
+
 // 预设税务规则
 const PRESET_TAX_RULES: Partial<TaxRuleItem>[] = [
   {
     ruleCode: 'income_tax',
     ruleName: '个人所得税',
-    rate: 0.03,
     applyOn: 'TAXABLE_EARNINGS',
     mode: 'HALF_UP',
+    calculationMode: 'cumulative_withholding',
     scale: 2,
   },
   {
@@ -105,11 +111,12 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
       const newItem: TaxRuleItem = {
         ruleCode: preset.ruleCode || generateCode(preset.ruleName || 'rule'),
         ruleName: preset.ruleName || '新规则',
-        rate: preset.rate ?? 0,
+        rate: preset.calculationMode === 'cumulative_withholding' ? undefined : preset.rate ?? 0,
         threshold: preset.threshold,
-        applyOn: preset.applyOn || 'TAXABLE_EARNINGS',
-        mode: preset.mode || 'HALF_UP',
-        scale: preset.scale ?? 2,
+      applyOn: preset.applyOn || 'TAXABLE_EARNINGS',
+      mode: preset.mode || 'HALF_UP',
+      calculationMode: preset.calculationMode,
+      scale: preset.scale ?? 2,
       };
       const newValue = [...rules, newItem];
       onChange?.(newValue);
@@ -127,11 +134,12 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
     const newItem: TaxRuleItem = {
       ruleCode: customForm.ruleCode,
       ruleName: customForm.ruleName,
-      rate: customForm.rate ?? 0,
+      rate: isIncomeTaxRule(customForm) ? undefined : customForm.rate ?? 0,
       threshold: customForm.threshold,
       applyOn: customForm.applyOn || 'TAXABLE_EARNINGS',
       mode: customForm.mode || 'HALF_UP',
       scale: customForm.scale ?? 2,
+      ...(isIncomeTaxRule(customForm) ? { calculationMode: 'cumulative_withholding' } : {}),
     };
     const newValue = [...rules, newItem];
     onChange?.(newValue);
@@ -169,7 +177,9 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
   const handleEditSave = useCallback(() => {
     if (editingIndex === null || !editForm) return;
     const newValue = [...rules];
-    newValue[editingIndex] = editForm;
+    newValue[editingIndex] = isIncomeTaxRule(editForm)
+      ? { ...editForm, rate: undefined, calculationMode: 'cumulative_withholding' }
+      : editForm;
     onChange?.(newValue);
     setEditingIndex(null);
     setEditForm(null);
@@ -296,7 +306,7 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
         <Space wrap>
           {PRESET_TAX_RULES.map((preset, index) => (
             <Button key={index} onClick={() => handleAddPreset(preset)}>
-              + {preset.ruleName} ({(preset.rate! * 100).toFixed(0)}%)
+              + {preset.ruleName} {preset.calculationMode === 'cumulative_withholding' ? '(累计预扣)' : `(${((preset.rate || 0) * 100).toFixed(0)}%)`}
             </Button>
           ))}
         </Space>
@@ -325,7 +335,9 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
               />
             </div>
             <div>
-              <div style={{ marginBottom: 4, color: '#666' }}>税率/比例</div>
+              <div style={{ marginBottom: 4, color: '#666' }}>
+                {isIncomeTaxRule(customForm) ? '个税模式' : '税率/比例'}
+              </div>
               <InputNumber
                 value={customForm.rate}
                 onChange={(rate) => setCustomForm((prev) => ({ ...prev, rate: rate ?? 0 }))}
@@ -335,7 +347,9 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
                 style={{ width: 120 }}
                 addonAfter="%"
                 precision={3}
+                disabled={isIncomeTaxRule(customForm)}
               />
+              {isIncomeTaxRule(customForm) && <div style={{ color: '#999', fontSize: 12 }}>累计预扣</div>}
             </div>
             <div>
               <div style={{ marginBottom: 4, color: '#666' }}>起征点（可选）</div>
@@ -411,7 +425,9 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
               />
             </div>
             <div>
-              <div style={{ marginBottom: 4, color: '#666' }}>税率/比例 *</div>
+              <div style={{ marginBottom: 4, color: '#666' }}>
+                {isIncomeTaxRule(editForm) ? '个税模式' : '税率/比例 *'}
+              </div>
               <InputNumber
                 value={editForm?.rate}
                 onChange={(rate) =>
@@ -423,7 +439,9 @@ const TaxRulesConfig: React.FC<TaxRulesConfigProps> = ({ value, onChange }) => {
                 style={{ width: 120 }}
                 addonAfter="%"
                 precision={3}
+                disabled={isIncomeTaxRule(editForm)}
               />
+              {isIncomeTaxRule(editForm) && <div style={{ color: '#999', fontSize: 12 }}>累计预扣</div>}
             </div>
           </Space>
 

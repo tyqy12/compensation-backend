@@ -1,19 +1,16 @@
 spring:
-  # 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    # 生产环境保持与开发一致（按需求指定同一数据库）
-    url: jdbc:mysql://47.93.215.12:3306/s06?useUnicode=true&characterEncoding=UTF-8&serverTimezone=GMT%2B8&useSSL=false&allowPublicKeyRetrieval=true
-    username: s06
-    password: 123456
+    url: ${SPRING_DATASOURCE_URL}
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
-      maximum-pool-size: 100
-      minimum-idle: 20
+      maximum-pool-size: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:20}
+      minimum-idle: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:5}
       idle-timeout: 300000
       max-lifetime: 600000
       connection-timeout: 30000
 
-  # Redis配置
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:redis}
@@ -28,44 +25,82 @@ spring:
           max-idle: 8
           min-idle: 0
 
-  # RabbitMQ配置
   rabbitmq:
-    host: localhost
-    port: 5672
-    username: guest
-    password: guest
-    virtual-host: /
+    host: ${SPRING_RABBITMQ_HOST:localhost}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:}
+    password: ${SPRING_RABBITMQ_PASSWORD:}
+    virtual-host: ${SPRING_RABBITMQ_VIRTUAL_HOST:/}
+    listener:
+      simple:
+        auto-startup: ${SPRING_RABBITMQ_LISTENER_SIMPLE_AUTO_STARTUP:false}
 
-# JWT配置
+server:
+  port: 8080
+  forward-headers-strategy: framework
+  tomcat:
+    threads:
+      max: ${SERVER_TOMCAT_THREADS_MAX:200}
+      min-spare: ${SERVER_TOMCAT_THREADS_MIN_SPARE:10}
+
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.slf4j.Slf4jImpl
+
 jwt:
   secret: ${JWT_SECRET}
-  expiration: 86400000
-  refresh-expiration: 604800000
+  expiration: ${JWT_EXPIRATION:86400000}
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000}
 
-# 加密配置
 encryption:
   sm4:
-    key: your_sm4_key_32_chars_long_here
+    key: ${ENCRYPTION_SM4_KEY}
   aes:
-    key: your_aes_key_32_chars_long_here
+    key: ${ENCRYPTION_AES_KEY}
 
-# 日志配置
 logging:
   level:
-    root: WARN
+    root: INFO
     com.yiyundao.compensation: INFO
+    com.baomidou.mybatisplus: WARN
+    org.springframework.security: WARN
   file:
     name: /var/log/compensation/compensation-prod.log
     max-size: 100MB
     max-history: 90
 
-# 服务器配置
-server:
-  port: 8080
-  tomcat:
-    threads:
-      max: 200
-      min-spare: 10
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:health,info}
+  endpoint:
+    health:
+      show-details: never
+
+tracing:
+  sampling:
+    probability: ${TRACING_SAMPLING_PROBABILITY:0.1}
+  zipkin:
+    enabled: ${TRACING_ZIPKIN_ENABLED:false}
+    base-url: ${TRACING_ZIPKIN_BASE_URL:http://zipkin:9411}
+
+oauth:
+  trusted-redirect-hosts: ${OAUTH_TRUSTED_REDIRECT_HOSTS}
+
+file-storage:
+  active: ${FILE_STORAGE_ACTIVE:local}
+  local:
+    base-path: ${FILE_STORAGE_LOCAL_BASE_PATH:/var/lib/compensation/files}
+
+migration:
+  runner:
+    enabled: ${MIGRATION_RUNNER_ENABLED:true}
+
+legacy:
+  platform-field:
+    mode: reject
+    workflow-data-mode: reject
 
 external-api:
   jwt:

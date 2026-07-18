@@ -7,20 +7,20 @@ failed to solve: failed to fetch anonymous token: Get "https://auth.docker.io/to
 
 This is usually a Docker Hub connectivity issue (IPv6/ISP/proxy). Try the following options in order:
 
-## Option A: Use the MCR-based Dockerfile (no Docker Hub)
-Build using Microsoft Container Registry images instead of Docker Hub:
+## Option A: Use a reachable base-image registry
+The backend and frontend now build independently. Override the image names in `.env`
+when Docker Hub is unavailable:
 ```bash
 # In repo root
-docker build -t compensation-backend:mcr -f Dockerfile.mcr .
-# Run with compose services (MySQL/Redis), pointing to host network services or compose
+REDIS_IMAGE=docker.m.daocloud.io/library/redis:7.2-alpine \
+NODE_IMAGE=docker.m.daocloud.io/library/node:22-alpine \
+MAVEN_IMAGE=docker.m.daocloud.io/library/maven:3.9-eclipse-temurin-17 \
+JRE_IMAGE=docker.m.daocloud.io/library/eclipse-temurin:17-jre-jammy \
+NGINX_IMAGE=docker.m.daocloud.io/library/nginx:1.27-alpine \
+docker compose build app web
 ```
-
-Or with compose override:
-```bash
-# Use the alternate file explicitly for app service only
-DOCKER_BUILDKIT=1 docker build -t compensation-backend:mcr -f Dockerfile.mcr .
-```
-Then edit docker-compose.yml `app.image: compensation-backend:mcr` (or run `docker run ...`).
+The image names are passed directly to Compose through the environment and do not require
+editing the Compose file.
 
 ## Option B: Configure Docker Hub registry mirrors
 Docker Desktop → Settings → Docker Engine, add mirrors to the JSON and restart Docker:
@@ -36,7 +36,7 @@ Docker Desktop → Settings → Docker Engine, add mirrors to the JSON and resta
 ```
 Re-run:
 ```bash
-docker compose build --no-cache app && docker compose up -d app
+docker compose build --no-cache app web && docker compose up -d app web
 ```
 
 ## Option C: Force IPv4 / disable IPv6 for Docker Desktop
@@ -54,4 +54,3 @@ If pulls still fail, use Option A or B.
 - Check Docker Desktop Dashboard → Build logs for details
 - `docker info` to confirm WSL2 backend
 - `docker login` may help with Hub rate limits (less likely for token issues)
-

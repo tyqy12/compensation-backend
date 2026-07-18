@@ -93,15 +93,15 @@ class OrganizationSyncServiceTest {
         target.setId(21L);
 
         when(employeeService.getByProviderAndSubjectId("feishu", "fs_user_2001")).thenReturn(null);
-        when(employeeService.createEmployee(incoming)).thenReturn(createdVo);
+        when(employeeService.createEmployeeWithUser(incoming, null)).thenReturn(createdVo);
         when(employeeService.getById(21L)).thenReturn(target);
 
         Employee result = organizationSyncService.importOne(incoming, null);
 
         assertSame(target, result);
         verify(employeeService).getByProviderAndSubjectId("feishu", "fs_user_2001");
-        verify(employeeService).createEmployee(incoming);
-        verify(userBindingService).ensureUserForEmployee(target, null);
+        verify(employeeService).createEmployeeWithUser(incoming, null);
+        verify(userBindingService, never()).ensureUserForEmployee(any(), any());
     }
 
     @Test

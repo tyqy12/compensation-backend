@@ -1,6 +1,6 @@
 services:
   redis:
-    image: redis:7.2
+    image: ${REDIS_IMAGE:-redis:7.2-alpine}
     container_name: comp-redis
     restart: unless-stopped
     environment:
@@ -9,11 +9,7 @@ services:
       - /bin/sh
       - -c
       - |
-        if [ -n "$$REDIS_PASSWORD" ]; then
-          exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
-        else
-          exec redis-server --appendonly yes
-        fi
+        exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
     ports:
       - "127.0.0.1:6379:6379"
     volumes:
@@ -21,19 +17,21 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - >-
-          if [ -n "$$REDIS_PASSWORD" ]; then
-            redis-cli -a "$$REDIS_PASSWORD" ping;
-          else
-            redis-cli ping;
-          fi | grep -q PONG
+        - REDISCLI_AUTH="$${REDIS_PASSWORD}" redis-cli ping | grep -q PONG
       interval: 5s
       timeout: 3s
       retries: 10
       start_period: 5s
 
   app:
-    build: .
+    image: ${APP_IMAGE:-compensation-backend:production}
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: app-runtime
+      args:
+        MAVEN_IMAGE: ${MAVEN_IMAGE:-maven:3.9-eclipse-temurin-17}
+        JRE_IMAGE: ${JRE_IMAGE:-eclipse-temurin:17-jre-jammy}
     container_name: comp-app
     restart: unless-stopped
     init: true
@@ -45,6 +43,11 @@ services:
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      SPRING_RABBITMQ_HOST: ${SPRING_RABBITMQ_HOST:-localhost}
+      SPRING_RABBITMQ_PORT: ${SPRING_RABBITMQ_PORT:-5672}
+      SPRING_RABBITMQ_USERNAME: ${SPRING_RABBITMQ_USERNAME:-}
+      SPRING_RABBITMQ_PASSWORD: ${SPRING_RABBITMQ_PASSWORD:-}
+      SPRING_RABBITMQ_LISTENER_SIMPLE_AUTO_STARTUP: ${SPRING_RABBITMQ_LISTENER_SIMPLE_AUTO_STARTUP:-false}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       EXTERNAL_API_JWT_SECRET: ${EXTERNAL_API_JWT_SECRET:?EXTERNAL_API_JWT_SECRET is required}
       ENCRYPTION_SM4_KEY: ${ENCRYPTION_SM4_KEY:?ENCRYPTION_SM4_KEY is required}
@@ -53,7 +56,11 @@ services:
       FILE_STORAGE_LOCAL_BASE_PATH: ${FILE_STORAGE_LOCAL_BASE_PATH:-/var/lib/compensation/files}
       SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:-20}
       SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE: ${SPRING_DATASOURCE_HIKARI_MINIMUM_IDLE:-5}
-      SPRING_RABBITMQ_LISTENER_SIMPLE_AUTO_STARTUP: ${SPRING_RABBITMQ_LISTENER_SIMPLE_AUTO_STARTUP:-false}
+      MIGRATION_RUNNER_ENABLED: ${MIGRATION_RUNNER_ENABLED:-true}
+      TRACING_SAMPLING_PROBABILITY: ${TRACING_SAMPLING_PROBABILITY:-0.1}
+      TRACING_ZIPKIN_ENABLED: ${TRACING_ZIPKIN_ENABLED:-false}
+      TRACING_ZIPKIN_BASE_URL: ${TRACING_ZIPKIN_BASE_URL:-http://zipkin:9411}
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:-health,info}
       OAUTH_TRUSTED_REDIRECT_HOSTS: ${OAUTH_TRUSTED_REDIRECT_HOSTS:?OAUTH_TRUSTED_REDIRECT_HOSTS is required}
     ports:
       - "127.0.0.1:8080:8080"
@@ -68,8 +75,45 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - curl --fail --silent http://127.0.0.1:8080/api/system/health > /dev/null
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
     depends_on:
       redis:
+        condition: service_healthy
+
+  web:
+    image: ${WEB_IMAGE:-compensation-web:production}
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+      target: frontend-runtime
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:22-alpine}
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginx:1.27-alpine}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-/api}
+        VITE_APP_NAME: ${VITE_APP_NAME:-Compensation%20Admin}
+        VITE_OAUTH_REDIRECT_URI_WECHAT: ${VITE_OAUTH_REDIRECT_URI_WECHAT:-}
+    container_name: comp-web
+    restart: unless-stopped
+    init: true
+    ports:
+      - "${WEB_BIND_ADDRESS:-0.0.0.0}:${WEB_PORT:-80}:80"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - wget -q -O /dev/null http://127.0.0.1/healthz
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    depends_on:
+      app:
         condition: service_healthy
 
 volumes:

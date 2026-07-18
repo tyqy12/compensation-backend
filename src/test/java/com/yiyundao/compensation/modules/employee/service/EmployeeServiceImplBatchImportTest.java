@@ -7,6 +7,7 @@ import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.common.utils.VOConverter;
 import com.yiyundao.compensation.infrastructure.dao.ApprovalWorkflowMapper;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.employee.dto.EmployeeBatchImportResult;
 import com.yiyundao.compensation.modules.employee.service.impl.EmployeeServiceImpl;
 import com.yiyundao.compensation.modules.payment.service.PaymentRecordService;
 import com.yiyundao.compensation.modules.payroll.service.PayCycleService;
@@ -27,6 +28,7 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class EmployeeServiceImplBatchImportTest {
@@ -176,6 +178,61 @@ class EmployeeServiceImplBatchImportTest {
         assertThat(service.savedEmployees).isEmpty();
     }
 
+    @Test
+    void batchImportShouldKeepPlatformBindingAfterEmployeeNormalization() {
+        ExternalIdentityService externalIdentityService = mock(ExternalIdentityService.class);
+        EmployeeDepartmentService employeeDepartmentService = mock(EmployeeDepartmentService.class);
+        TestableEmployeeServiceImpl service = new TestableEmployeeServiceImpl(
+                mock(EncryptionService.class),
+                Set.of(),
+                externalIdentityService,
+                employeeDepartmentService
+        );
+        Employee employee = employee("EMP010", "张三", null);
+        employee.setProvider("wechat");
+        employee.setSubjectId("wx-010");
+        employee.setDepartment("技术部,平台研发部");
+
+        EmployeeBatchImportResult result = service.batchImport(List.of(employee));
+
+        assertThat(result.getImported()).isEqualTo(1);
+        assertThat(result.getBound()).isEqualTo(1);
+        verify(externalIdentityService).upsertPlatformIdentity(
+                "wechat",
+                ExternalIdentityService.DEFAULT_TENANT_KEY,
+                ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
+                "wx-010",
+                1L,
+                null,
+                "sync",
+                true
+        );
+        verify(employeeDepartmentService).replaceDepartments(
+                1L,
+                "wechat",
+                List.of("技术部", "平台研发部")
+        );
+    }
+
+    @Test
+    void batchImportShouldPersistManualDepartmentsWithoutPlatformBinding() {
+        EmployeeDepartmentService employeeDepartmentService = mock(EmployeeDepartmentService.class);
+        TestableEmployeeServiceImpl service = new TestableEmployeeServiceImpl(
+                mock(EncryptionService.class), Set.of(), mock(ExternalIdentityService.class), employeeDepartmentService);
+        Employee employee = employee("EMP011", "李四", null);
+        employee.setDepartments(List.of("财务部", "共享服务部"));
+
+        EmployeeBatchImportResult result = service.batchImport(List.of(employee));
+
+        assertThat(result.getImported()).isEqualTo(1);
+        assertThat(result.getBound()).isZero();
+        verify(employeeDepartmentService).replaceDepartments(
+                1L,
+                EmployeeDepartmentService.MANUAL_PLATFORM,
+                List.of("财务部", "共享服务部")
+        );
+    }
+
     private static Employee employee(String employeeId, String name, String idCard) {
         Employee employee = new Employee();
         employee.setEmployeeId(employeeId);
@@ -190,19 +247,29 @@ class EmployeeServiceImplBatchImportTest {
         private int saveBatchCalls;
 
         private TestableEmployeeServiceImpl(EncryptionService encryptionService, Set<String> existingEmployeeIds) {
+            this(encryptionService, existingEmployeeIds,
+                    mock(ExternalIdentityService.class),
+                    mock(EmployeeDepartmentService.class));
+        }
+
+        private TestableEmployeeServiceImpl(EncryptionService encryptionService,
+                                            Set<String> existingEmployeeIds,
+                                            ExternalIdentityService externalIdentityService,
+                                            EmployeeDepartmentService employeeDepartmentService) {
             super(
                     encryptionService,
                     mock(ObjectProvider.class),
                     mock(ObjectProvider.class),
                     mock(SysUserService.class),
-                    mock(ExternalIdentityService.class),
+                    externalIdentityService,
                     mock(ApprovalWorkflowMapper.class),
                     mock(PayrollLineService.class),
                     mock(PayrollBatchService.class),
                     mock(PayCycleService.class),
                     mock(PaymentRecordService.class),
                     mock(VOConverter.class),
-                    new ObjectMapper()
+                    new ObjectMapper(),
+                    employeeDepartmentService
             );
             this.existingEmployeeIds = new HashSet<>(existingEmployeeIds);
         }
@@ -215,7 +282,11 @@ class EmployeeServiceImplBatchImportTest {
         @Override
         public boolean saveBatch(Collection<Employee> entityList) {
             saveBatchCalls++;
-            savedEmployees.addAll(entityList);
+            long nextId = 1L;
+            for (Employee employee : entityList) {
+                employee.setId(nextId++);
+                savedEmployees.add(employee);
+            }
             return true;
         }
 

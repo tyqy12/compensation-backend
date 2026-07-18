@@ -3,6 +3,7 @@ package com.yiyundao.compensation.interfaces.dto.employee;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 public class EmployeeUpdateRequest {
@@ -11,6 +12,7 @@ public class EmployeeUpdateRequest {
     private String email;
     private String idCard; // 明文，后端加密
     private String department;
+    private List<String> departments;
     private String position;
     private String employmentType;
     private Long managerId;

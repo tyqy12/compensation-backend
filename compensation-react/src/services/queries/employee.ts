@@ -9,6 +9,7 @@ import type {
   BatchImportRequest,
   PaymentRecordItemVO,
   PagedResponse,
+  EmployeeBatchImportResult,
 } from '@/types/openapi';
 
 // 采用 OpenAPI 定义的 EmployeeVO 作为实体类型
@@ -99,6 +100,19 @@ export type EmployeeFormData = EmployeeCreateRequest & Partial<EmployeeUpdateReq
 export interface PlatformBindData extends BindPlatformRequest {
   provider?: string;
   subjectId?: string;
+}
+
+export interface EmployeeBindPlatformResult {
+  result?: 'SUCCESS' | 'ALREADY_BOUND' | 'PENDING_APPROVAL' | string;
+  message?: string;
+  employeeId?: number;
+  employeeNo?: string;
+  employeeName?: string;
+  provider?: string;
+  subjectId?: string;
+  userId?: number;
+  workflowId?: number;
+  workflowType?: string;
 }
 
 // 状态更新数据
@@ -307,7 +321,7 @@ export function useBindPlatformMutation() {
   return useMutation({
     mutationFn: async ({ id, ...bindData }: PlatformBindData & { id: number }) => {
       const { data } = await api.post(`/employee/${id}/bind-platform`, bindData);
-      return unwrap<{ success: boolean; message?: string }>(data);
+      return unwrap<EmployeeBindPlatformResult>(data);
     },
     onSuccess: (_, variables) => {
       // 刷新员工列表和详情
@@ -360,7 +374,7 @@ export function useBatchImportEmployeesMutation() {
   return useMutation({
     mutationFn: async (batchData: BatchImportData) => {
       const { data } = await api.post('/employee/batch-import', batchData);
-      return unwrap<{ success: boolean; message?: string }>(data);
+      return unwrap<EmployeeBatchImportResult>(data);
     },
     onSuccess: () => {
       // 刷新员工列表

@@ -98,6 +98,9 @@ public class ApprovalFlowConfigManager {
                         .build()
         ));
 
+        defaultFlowConfigs.put(WorkflowType.EMPLOYEE_PROFILE_CHANGE, defaultFlowConfigs.get(WorkflowType.OFFLINE));
+        defaultFlowConfigs.put(WorkflowType.PLATFORM_BIND, defaultFlowConfigs.get(WorkflowType.OFFLINE));
+
         // 权限授权审批流程 - 仅管理员审批
         defaultFlowConfigs.put(WorkflowType.PERMISSION, List.of(
                 ApprovalStepConfig.builder()

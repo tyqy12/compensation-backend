@@ -67,6 +67,7 @@ export interface RuleTaxItem {
   threshold?: number;
   applyOn?: string;
   mode?: string;
+  calculationMode?: string;
   scale?: number;
 }
 
@@ -136,9 +137,9 @@ const DEFAULT_TAX_RULES: RuleTaxItem[] = [
   {
     ruleCode: 'income_tax',
     ruleName: '个人所得税',
-    rate: 0.03,
     applyOn: 'TAXABLE_EARNINGS',
     mode: 'HALF_UP',
+    calculationMode: 'cumulative_withholding',
     scale: 2,
   },
   {
@@ -200,6 +201,10 @@ export const parseTaxRules = (value?: string): RuleTaxItem[] => {
             ? '金额舍入'
             : ruleCode,
     ...(typeof config === 'object' && config ? config : {}),
+    ...(ruleCode === 'tax' && typeof config === 'object' && config &&
+    ['cumulative_withholding', 'cumulative-withholding'].includes(String((config as Record<string, unknown>).mode))
+      ? { calculationMode: String((config as Record<string, unknown>).mode), mode: 'HALF_UP' }
+      : {}),
   })) as RuleTaxItem[];
 };
 
@@ -281,6 +286,10 @@ const RulesPage: React.FC = () => {
   );
   const selected = detailQuery.data || selectedSummary;
   const selectedMetrics = useMemo(() => getRuleMetrics(selected), [selected]);
+  const requiresTaxMigration = selectedMetrics.rules.some(
+    (rule) => (rule.ruleCode === 'tax' || rule.ruleCode === 'income_tax' || rule.ruleName?.includes('税')) &&
+      rule.calculationMode !== 'cumulative_withholding' && rule.calculationMode !== 'cumulative-withholding',
+  );
 
   useEffect(() => {
     if (!selectedId && records[0]?.id) {
@@ -355,7 +364,10 @@ const RulesPage: React.FC = () => {
     rules.forEach((rule) => {
       const code = rule.ruleCode || '';
       if (code === 'income_tax' || code === 'tax' || rule.ruleName?.includes('税')) {
-        result.tax = { rate: rule.rate ?? 0.03, applyOn: rule.applyOn || 'TAXABLE_EARNINGS' };
+        result.tax = {
+          mode: 'cumulative_withholding',
+          applyOn: rule.applyOn || 'TAXABLE_EARNINGS',
+        };
       } else if (code === 'social_security' || code === 'social' || rule.ruleName?.includes('社保')) {
         result.social = { rate: rule.rate ?? 0.1, applyOn: rule.applyOn || 'TAXABLE_EARNINGS' };
       }
@@ -455,7 +467,10 @@ const RulesPage: React.FC = () => {
         title: '规则中心',
         subTitle: '管理可被发薪日历引用的薪酬规则包与当前版本',
         extra: [
-          <Button key="calendar" icon={<CalendarOutlined />} onClick={() => navigate('/payroll/cycles')}>
+          <Button key="compliance" icon={<AuditOutlined />} onClick={() => navigate('/payroll/compliance')}>
+            合规核算
+          </Button>,
+          <Button key="calendar" icon={<CalendarOutlined />} onClick={() => navigate('/payroll/calendar')}>
             查看发薪日历
           </Button>,
           <Button key="create" type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
@@ -587,7 +602,7 @@ const RulesPage: React.FC = () => {
                   >
                     {selected.status === 'enabled' ? '停用当前规则' : '发布并启用'}
                   </Button>
-                  <Button icon={<CalendarOutlined />} onClick={() => navigate(`/payroll/cycles?type=${selected.type || ''}`)}>
+                  <Button icon={<CalendarOutlined />} onClick={() => navigate(`/payroll/calendar?type=${selected.type || ''}`)}>
                     查看适用日历
                   </Button>
                   <Button icon={<CopyOutlined />} onClick={() => loadEditor(selected, 'create')}>
@@ -659,8 +674,17 @@ const RulesPage: React.FC = () => {
                     type="warning"
                     showIcon
                     title="当前版本说明"
-                    description="现有后端以数据版本号标记当前规则内容；真正的不可变版本历史与发布审批仍需后续接入版本化规则引擎。发薪批次计算时会记录实际使用的规则快照。"
+                    description="规则版本、政策包发布、批次输入快照和计算证据链均已纳入受控流程；已锁定或已支付批次不会被覆盖，差异通过调整批次处理。"
                   />
+                  {requiresTaxMigration && (
+                    <Alert
+                      type="error"
+                      showIcon
+                      title="该规则包使用已下线的固定税率"
+                      description="请进入编辑并保存为累计预扣模式；迁移完成前不能发布，也不能用于薪酬核算。"
+                      style={{ marginTop: 12 }}
+                    />
+                  )}
                 </>
               ) : (
                 <div className="rules-editor">

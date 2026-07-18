@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @Data
 public class EmployeeCreateRequest {
@@ -20,6 +21,7 @@ public class EmployeeCreateRequest {
     private String idCard;
 
     private String department;
+    private List<String> departments;
     private String position;
     // 用工类型: full_time / part_time
     private String employmentType;

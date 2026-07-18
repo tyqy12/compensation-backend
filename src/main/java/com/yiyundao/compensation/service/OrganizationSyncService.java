@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.Map;
@@ -141,6 +142,7 @@ public class OrganizationSyncService {
     /**
      * 手动导入单个员工（带用户名偏好）
      */
+    @Transactional
     public com.yiyundao.compensation.modules.employee.entity.Employee importOne(com.yiyundao.compensation.modules.employee.entity.Employee employee, String preferredUsername) {
         com.yiyundao.compensation.modules.employee.entity.Employee target = null;
         com.yiyundao.compensation.modules.employee.entity.Employee exist = null;
@@ -157,8 +159,9 @@ public class OrganizationSyncService {
             target = employeeService.getById(updatedVo.getId());
         }
         if (target == null) {
-            EmployeeVO createdVo = employeeService.createEmployee(employee);
+            EmployeeVO createdVo = employeeService.createEmployeeWithUser(employee, preferredUsername);
             target = employeeService.getById(createdVo.getId());
+            return target;
         }
         userBindingService.ensureUserForEmployee(target, preferredUsername);
         return target;
@@ -179,6 +182,7 @@ public class OrganizationSyncService {
         update.setPhone(employee.getPhone());
         update.setEmail(employee.getEmail());
         update.setDepartment(employee.getDepartment());
+        update.setDepartments(employee.getDepartments());
         update.setPosition(employee.getPosition());
         update.setEmploymentType(employee.getEmploymentType());
         update.setStatus(employee.getStatus());

@@ -95,9 +95,9 @@ class PayrollEndToEndIntegrationTest {
         assertThat(preview.getTotalEmployees()).isEqualTo(1);
         assertThat(preview.getGrossTotal()).isEqualByComparingTo(BASE_AMOUNT.add(BONUS_AMOUNT));
         assertThat(preview.getDeductionsTotal()).isEqualByComparingTo(DEDUCT_AMOUNT);
-        assertThat(preview.getTaxTotal()).isEqualByComparingTo("1150.00");
+        assertThat(preview.getTaxTotal()).isEqualByComparingTo("177.75");
         assertThat(preview.getSocialTotal()).isEqualByComparingTo("575.00");
-        assertThat(preview.getNetTotal()).isEqualByComparingTo("8975.00");
+        assertThat(preview.getNetTotal()).isEqualByComparingTo("9947.25");
 
         boolean persisted = payrollCalculationService.computeAndSave(batch.getId());
         assertThat(persisted).isTrue();
@@ -107,21 +107,21 @@ class PayrollEndToEndIntegrationTest {
         assertThat(stored).hasSize(1);
         PayrollLine line = stored.get(0);
         assertThat(line.getGrossAmount()).isEqualByComparingTo("11500.00");
-        assertThat(line.getNetAmount()).isEqualByComparingTo("8975.00");
+        assertThat(line.getNetAmount()).isEqualByComparingTo("9947.25");
 
         var report = payrollReportService.basicReport(batch.getId(), null, null);
         assertThat(report.getEmployeeCount()).isEqualTo(1);
         assertThat(report.getGrossTotal()).isEqualByComparingTo("11500.00");
-        assertThat(report.getNetTotal()).isEqualByComparingTo("8975.00");
+        assertThat(report.getNetTotal()).isEqualByComparingTo("9947.25");
 
         EmployeePayslipDto.PayslipDetail detail = payslipService.getPayslipDetail(employeeUser, line.getId());
         assertThat(detail.getItems()).hasSize(3);
-        assertThat(detail.getNetAmount()).isEqualByComparingTo("8975.00");
+        assertThat(detail.getNetAmount()).isEqualByComparingTo("9947.25");
         assertThat(detail.getBankAccountMasked()).contains("****");
 
         var summaries = payslipService.pagePayslips(employeeUser, null, 1, 10);
         assertThat(summaries.getRecords()).hasSize(1);
-        assertThat(summaries.getRecords().get(0).getNetAmount()).isEqualByComparingTo("8975.00");
+        assertThat(summaries.getRecords().get(0).getNetAmount()).isEqualByComparingTo("9947.25");
     }
 
     @Test
@@ -173,7 +173,7 @@ class PayrollEndToEndIntegrationTest {
                 """.formatted(SCENARIO_ID, SCENARIO_ID));
         template.setTaxRuleJson("""
                 {
-                  "tax": {"rate": 0.9, "applyOn": "gross"},
+                  "tax": {"mode": "cumulative_withholding", "applyOn": "gross"},
                   "social": {"rate": 0.4, "applyOn": "gross"},
                   "rounding": {"scale": 2, "mode": "HALF_UP"}
                 }
@@ -195,9 +195,9 @@ class PayrollEndToEndIntegrationTest {
         assertThat(ledger.getInputSnapshotHash()).isEqualTo(persistedBatch.getInputSnapshotHash());
         assertThat(ledger.getRuleSnapshotHash()).isEqualTo(persistedBatch.getRuleSnapshotHash());
         assertThat(ledger.getCalculationEngineVersion()).isEqualTo(persistedBatch.getCalculationEngineVersion());
-        assertThat(ledger.getTaxTotal()).isEqualByComparingTo("1150.00");
+        assertThat(ledger.getTaxTotal()).isEqualByComparingTo("177.75");
         assertThat(ledger.getSocialTotal()).isEqualByComparingTo("575.00");
-        assertThat(ledger.getNetTotal()).isEqualByComparingTo("8975.00");
+        assertThat(ledger.getNetTotal()).isEqualByComparingTo("9947.25");
         assertThat(ledger.getHasBlockingIssues()).isFalse();
         assertThat(ledger.getLines()).singleElement().satisfies(line -> {
             assertThat(line.getItems())
@@ -252,7 +252,7 @@ class PayrollEndToEndIntegrationTest {
                 .stream()
                 .findFirst()
                 .orElseThrow();
-        assertThat(approvedLine.getNetAmount()).isEqualByComparingTo("8975.00");
+        assertThat(approvedLine.getNetAmount()).isEqualByComparingTo("9947.25");
 
         batch.setStatus(PayrollBatchStatus.APPROVED);
         payrollBatchService.updateById(batch);
@@ -273,7 +273,7 @@ class PayrollEndToEndIntegrationTest {
         PayrollLine refreshedLine = payrollLineService.getById(approvedLine.getId());
         assertThat(recomputed).isFalse();
         assertThat(refreshedBatch.getStatus()).isEqualTo(PayrollBatchStatus.APPROVED);
-        assertThat(refreshedLine.getNetAmount()).isEqualByComparingTo("8975.00");
+        assertThat(refreshedLine.getNetAmount()).isEqualByComparingTo("9947.25");
     }
 
     @Test
@@ -305,7 +305,7 @@ class PayrollEndToEndIntegrationTest {
         PayrollLine refreshedLine = payrollLineService.getById(confirmedLine.getId());
         assertThat(recomputed).isFalse();
         assertThat(refreshedBatch.getStatus()).isEqualTo(PayrollBatchStatus.CONFIRMED);
-        assertThat(refreshedLine.getNetAmount()).isEqualByComparingTo("8975.00");
+        assertThat(refreshedLine.getNetAmount()).isEqualByComparingTo("9947.25");
         assertThat(refreshedLine.getConfirmationStatus()).isEqualTo(PayrollConfirmationStatus.CONFIRMED.getCode());
     }
 
@@ -504,7 +504,7 @@ class PayrollEndToEndIntegrationTest {
                 """.formatted(SCENARIO_ID, SCENARIO_ID, SCENARIO_ID));
         template.setTaxRuleJson("""
                 {
-                  "tax": {"rate": 0.1, "applyOn": "taxableEarnings"},
+                  "tax": {"mode": "cumulative_withholding", "applyOn": "taxableEarnings"},
                   "social": {"rate": 0.05, "applyOn": "gross"},
                   "rounding": {"scale": 2, "mode": "HALF_UP"}
                 }

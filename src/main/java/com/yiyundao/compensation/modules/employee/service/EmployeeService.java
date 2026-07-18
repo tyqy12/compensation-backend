@@ -11,6 +11,7 @@ import com.yiyundao.compensation.interfaces.vo.payment.PaymentRecordItemVO;
 import com.yiyundao.compensation.modules.employee.dto.EmployeeProfileChangePayload;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformRequest;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult;
+import com.yiyundao.compensation.modules.employee.dto.EmployeeBatchImportResult;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
 
 import java.util.List;
@@ -59,7 +60,7 @@ public interface EmployeeService extends IService<Employee> {
     void unbindPlatform(Long employeeId, String reason);
 
     void updateStatus(Long employeeId, EmployeeStatus status);
-    void batchImport(List<Employee> employees);
+    EmployeeBatchImportResult batchImport(List<Employee> employees);
     String getDecryptedIdCard(Long employeeId);
     String getDecryptedBankAccount(Long employeeId);
     String getDecryptedSettlementAccount(Long employeeId);

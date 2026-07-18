@@ -174,6 +174,8 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "ALTER TABLE employee ADD COLUMN `settlement_account_name` varchar(100) DEFAULT NULL COMMENT '收款账户实名/户名' AFTER `settlement_account`");
         addColumnIfMissing("employee", "bank_branch_name",
                 "ALTER TABLE employee ADD COLUMN `bank_branch_name` varchar(120) DEFAULT NULL COMMENT '开户支行' AFTER `bank_name`");
+        executeSqlSafely("ALTER TABLE employee MODIFY COLUMN `department` varchar(500) DEFAULT NULL COMMENT '部门(兼容展示字段，多部门关系见employee_department)'");
+        executeSqlSafely("ALTER TABLE employee MODIFY COLUMN `settlement_account` text COMMENT '收款账户(加密存储)'");
         executeSqlSafely("UPDATE employee SET settlement_account = bank_account " +
                 "WHERE (settlement_account IS NULL OR settlement_account = '') " +
                 "AND bank_account IS NOT NULL AND bank_account <> ''");
@@ -209,6 +211,10 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                 "  KEY `idx_platform_dept` (`platform_type`,`platform_dept_id`),\n" +
                 "  CONSTRAINT `fk_emp_dept_employee` FOREIGN KEY (`employee_id`) REFERENCES `employee` (`id`)\n" +
                 ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工-部门多对多关联';");
+        addIndexIfMissing("employee_department", "idx_employee_department_platform",
+                "CREATE INDEX `idx_employee_department_platform` ON `employee_department` (`employee_id`, `platform_type`, `deleted`)");
+        executeSqlSafely("UPDATE employee_department SET platform_type = 'manual' "
+                + "WHERE platform_type IS NULL OR platform_type = ''");
 
         // ========================= Payroll Core Tables (M1) =========================
         // 1) salary_item
@@ -417,6 +423,9 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         migratePayrollConfirmationColumns();
         migratePayrollV21AggregateColumns();
         migratePayrollRuleVersionColumns();
+        migratePayrollComplianceFoundation();
+        migratePayrollComplianceResources();
+        retireLegacyPayrollContent();
         // Approval workflow incremental columns
         migrateApprovalWorkflowColumns();
         log.info("DB migrations finished.");
@@ -1162,10 +1171,184 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
     }
 
     private void migrateApprovalWorkflowColumns() {
+        executeSqlSafely("ALTER TABLE approval_workflow MODIFY COLUMN `workflow_type` varchar(50) NOT NULL "
+                + "COMMENT '流程类型(BATCH/ADHOC/OFFLINE/EMPLOYEE_PROFILE_CHANGE/PLATFORM_BIND)'");
         addColumnIfMissing("approval_workflow", "employee_id",
                 "ALTER TABLE approval_workflow ADD COLUMN `employee_id` bigint DEFAULT NULL COMMENT '关联员工ID' AFTER `initiator_id`");
         addIndexIfMissing("approval_workflow", "idx_employee",
                 "CREATE INDEX `idx_employee` ON `approval_workflow` (`employee_id`)");
+    }
+
+    /**
+     * 薪酬合规基础表。生产环境默认只在显式开启 migration.runner 时执行，所有 DDL 均幂等。
+     */
+    private void migratePayrollComplianceFoundation() {
+        createTableIfMissing("payroll_policy_package",
+                "CREATE TABLE `payroll_policy_package` (" +
+                        "`id` bigint NOT NULL AUTO_INCREMENT, `code` varchar(100) NOT NULL, `name` varchar(200) NOT NULL, " +
+                        "`policy_type` varchar(32) NOT NULL, `region_code` varchar(32) DEFAULT NULL, " +
+                        "`collection_entity_code` varchar(100) DEFAULT NULL, `person_category` varchar(64) DEFAULT NULL, " +
+                        "`industry_risk_level` varchar(32) DEFAULT NULL, `effective_from` date NOT NULL, `effective_to` date DEFAULT NULL, " +
+                        "`source_document` varchar(200) DEFAULT NULL, `source_url` varchar(500) DEFAULT NULL, `payload_json` json DEFAULT NULL, " +
+                        "`status` varchar(20) NOT NULL DEFAULT 'draft', `version_no` bigint NOT NULL DEFAULT 1, `checksum` varchar(64) DEFAULT NULL, " +
+                        "`reviewed_by` bigint DEFAULT NULL, `reviewed_at` datetime DEFAULT NULL, `published_by` bigint DEFAULT NULL, `published_at` datetime DEFAULT NULL, " +
+                        "`create_time` datetime DEFAULT CURRENT_TIMESTAMP, `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, " +
+                        "`create_by` varchar(50) DEFAULT NULL, `update_by` varchar(50) DEFAULT NULL, `deleted` tinyint(1) NOT NULL DEFAULT 0, `version` int NOT NULL DEFAULT 0, " +
+                        "PRIMARY KEY (`id`), UNIQUE KEY `uk_payroll_policy_code_version` (`code`,`version_no`,`deleted`), " +
+                        "KEY `idx_payroll_policy_resolve` (`policy_type`,`region_code`,`status`,`effective_from`,`effective_to`)) " +
+                        "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪酬法规政策版本'");
+        createTableIfMissing("payroll_tax_bracket",
+                "CREATE TABLE `payroll_tax_bracket` (" +
+                        "`id` bigint NOT NULL AUTO_INCREMENT, `policy_id` bigint NOT NULL, `tax_year` int NOT NULL, `bracket_level` int NOT NULL, " +
+                        "`upper_limit` decimal(18,2) DEFAULT NULL, `rate` decimal(12,8) NOT NULL, `quick_deduction` decimal(18,2) NOT NULL DEFAULT 0, " +
+                        "`create_time` datetime DEFAULT CURRENT_TIMESTAMP, `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, " +
+                        "`create_by` varchar(50) DEFAULT NULL, `update_by` varchar(50) DEFAULT NULL, `deleted` tinyint(1) NOT NULL DEFAULT 0, `version` int NOT NULL DEFAULT 0, " +
+                        "PRIMARY KEY (`id`), UNIQUE KEY `uk_payroll_tax_bracket` (`policy_id`,`tax_year`,`bracket_level`,`deleted`), " +
+                        "KEY `idx_payroll_tax_bracket_policy` (`policy_id`,`tax_year`,`bracket_level`)) " +
+                        "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='居民工资薪金累计预扣税率表'");
+        createTableIfMissing("payroll_tax_deduction_declaration",
+                "CREATE TABLE `payroll_tax_deduction_declaration` (" +
+                        "`id` bigint NOT NULL AUTO_INCREMENT, `employee_id` bigint NOT NULL, `tax_year` int NOT NULL, `deduction_type` varchar(40) NOT NULL, " +
+                        "`subject_key` varchar(128) DEFAULT NULL, `allocation_ratio` decimal(8,6) NOT NULL DEFAULT 1, `monthly_amount` decimal(18,2) DEFAULT NULL, " +
+                        "`annual_amount` decimal(18,2) DEFAULT NULL, `effective_from` date DEFAULT NULL, `effective_to` date DEFAULT NULL, " +
+                        "`credential_ref` varchar(255) DEFAULT NULL, `evidence_json` json DEFAULT NULL, `status` varchar(20) NOT NULL DEFAULT 'pending', " +
+                        "`source_type` varchar(32) DEFAULT NULL, `create_time` datetime DEFAULT CURRENT_TIMESTAMP, `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, " +
+                        "`create_by` varchar(50) DEFAULT NULL, `update_by` varchar(50) DEFAULT NULL, `deleted` tinyint(1) NOT NULL DEFAULT 0, `version` int NOT NULL DEFAULT 0, " +
+                        "PRIMARY KEY (`id`), KEY `idx_tax_deduction_employee_year` (`employee_id`,`tax_year`,`deduction_type`,`status`)) " +
+                        "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='个税专项附加扣除和其他扣除申报'");
+        createTableIfMissing("payroll_tax_ledger",
+                "CREATE TABLE `payroll_tax_ledger` (" +
+                        "`id` bigint NOT NULL AUTO_INCREMENT, `employee_id` bigint NOT NULL, `withholding_entity_id` bigint DEFAULT NULL, " +
+                        "`tax_year` int NOT NULL, `tax_month` int NOT NULL, `payroll_batch_id` bigint DEFAULT NULL, `payroll_line_id` bigint DEFAULT NULL, " +
+                        "`cumulative_income` decimal(18,2) NOT NULL DEFAULT 0, `cumulative_tax_exempt_income` decimal(18,2) NOT NULL DEFAULT 0, " +
+                        "`cumulative_basic_deduction` decimal(18,2) NOT NULL DEFAULT 0, `cumulative_special_deduction` decimal(18,2) NOT NULL DEFAULT 0, " +
+                        "`cumulative_special_additional` decimal(18,2) NOT NULL DEFAULT 0, `cumulative_other_deduction` decimal(18,2) NOT NULL DEFAULT 0, " +
+                        "`cumulative_taxable_income` decimal(18,2) NOT NULL DEFAULT 0, `tax_rate` decimal(12,8) NOT NULL DEFAULT 0, `quick_deduction` decimal(18,2) NOT NULL DEFAULT 0, " +
+                        "`cumulative_tax` decimal(18,2) NOT NULL DEFAULT 0, `cumulative_tax_reduction` decimal(18,2) NOT NULL DEFAULT 0, `cumulative_withheld_tax` decimal(18,2) NOT NULL DEFAULT 0, " +
+                        "`current_withholding_tax` decimal(18,2) NOT NULL DEFAULT 0, `policy_id` bigint DEFAULT NULL, `calculation_hash` varchar(64) DEFAULT NULL, `status` varchar(20) NOT NULL DEFAULT 'draft', " +
+                        "`create_time` datetime DEFAULT CURRENT_TIMESTAMP, `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, `create_by` varchar(50) DEFAULT NULL, `update_by` varchar(50) DEFAULT NULL, `deleted` tinyint(1) NOT NULL DEFAULT 0, `version` int NOT NULL DEFAULT 0, " +
+                        "PRIMARY KEY (`id`), UNIQUE KEY `uk_tax_ledger_employee_period_batch` (`employee_id`,`tax_year`,`tax_month`,`payroll_batch_id`,`deleted`), " +
+                        "KEY `idx_tax_ledger_previous` (`employee_id`,`withholding_entity_id`,`tax_year`,`tax_month`,`status`)) " +
+                        "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工年度累计个税台账'");
+        createTableIfMissing("payroll_contribution_policy",
+                "CREATE TABLE `payroll_contribution_policy` (" +
+                        "`id` bigint NOT NULL AUTO_INCREMENT, `code` varchar(100) NOT NULL, `region_code` varchar(32) NOT NULL, `collection_entity_code` varchar(100) DEFAULT NULL, " +
+                        "`contribution_type` varchar(40) NOT NULL, `person_category` varchar(64) DEFAULT NULL, `household_type` varchar(32) DEFAULT NULL, `industry_risk_level` varchar(32) DEFAULT NULL, " +
+                        "`effective_from` date NOT NULL, `effective_to` date DEFAULT NULL, `base_min` decimal(18,2) DEFAULT NULL, `base_max` decimal(18,2) DEFAULT NULL, " +
+                        "`employer_rate` decimal(12,8) NOT NULL DEFAULT 0, `employee_rate` decimal(12,8) NOT NULL DEFAULT 0, `employer_fixed_amount` decimal(18,2) NOT NULL DEFAULT 0, `employee_fixed_amount` decimal(18,2) NOT NULL DEFAULT 0, " +
+                        "`rounding_mode` varchar(20) DEFAULT 'HALF_UP', `minimum_amount` decimal(18,2) DEFAULT NULL, `source_document` varchar(200) DEFAULT NULL, `source_url` varchar(500) DEFAULT NULL, `status` varchar(20) NOT NULL DEFAULT 'draft', `version_no` bigint NOT NULL DEFAULT 1, `reviewed_by` bigint DEFAULT NULL, `reviewed_at` datetime DEFAULT NULL, `published_by` bigint DEFAULT NULL, `published_at` datetime DEFAULT NULL, " +
+                        "`create_time` datetime DEFAULT CURRENT_TIMESTAMP, `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, `create_by` varchar(50) DEFAULT NULL, `update_by` varchar(50) DEFAULT NULL, `deleted` tinyint(1) NOT NULL DEFAULT 0, `version` int NOT NULL DEFAULT 0, " +
+                        "PRIMARY KEY (`id`), UNIQUE KEY `uk_contribution_policy_version` (`code`,`version_no`,`deleted`), KEY `idx_contribution_policy_resolve` (`region_code`,`contribution_type`,`effective_from`,`effective_to`,`status`)) " +
+                        "ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='地区五险一金政策参数'");
+        createTableIfMissing("payroll_enrollment",
+                "CREATE TABLE `payroll_enrollment` (" +
+                        "`id` bigint NOT NULL AUTO_INCREMENT, `employee_id` bigint NOT NULL, `contribution_type` varchar(40) NOT NULL, `region_code` varchar(32) NOT NULL, `collection_entity_code` varchar(100) DEFAULT NULL, `account_no_encrypted` text, `effective_from` date NOT NULL, `effective_to` date DEFAULT NULL, `status` varchar(20) NOT NULL DEFAULT 'active', `is_primary` tinyint(1) NOT NULL DEFAULT 1, `event_type` varchar(32) DEFAULT NULL, `policy_id` bigint DEFAULT NULL, `create_time` datetime DEFAULT CURRENT_TIMESTAMP, `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, `create_by` varchar(50) DEFAULT NULL, `update_by` varchar(50) DEFAULT NULL, `deleted` tinyint(1) NOT NULL DEFAULT 0, `version` int NOT NULL DEFAULT 0, PRIMARY KEY (`id`), KEY `idx_enrollment_employee_type` (`employee_id`,`contribution_type`,`status`), KEY `idx_enrollment_period` (`effective_from`,`effective_to`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工多地参保/公积金关系'");
+        createTableIfMissing("payroll_contribution_record",
+                "CREATE TABLE `payroll_contribution_record` (`id` bigint NOT NULL AUTO_INCREMENT, `payroll_batch_id` bigint DEFAULT NULL, `payroll_line_id` bigint DEFAULT NULL, `employee_id` bigint NOT NULL, `contribution_type` varchar(40) NOT NULL, `region_code` varchar(32) NOT NULL, `policy_id` bigint DEFAULT NULL, `declared_wage` decimal(18,2) DEFAULT NULL, `contribution_base` decimal(18,2) DEFAULT NULL, `employer_rate` decimal(12,8) DEFAULT NULL, `employee_rate` decimal(12,8) DEFAULT NULL, `employer_amount` decimal(18,2) NOT NULL DEFAULT 0, `employee_amount` decimal(18,2) NOT NULL DEFAULT 0, `adjustment_of_id` bigint DEFAULT NULL, `status` varchar(20) NOT NULL DEFAULT 'calculated', `calculation_hash` varchar(64) DEFAULT NULL, `create_time` datetime DEFAULT CURRENT_TIMESTAMP, `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, `create_by` varchar(50) DEFAULT NULL, `update_by` varchar(50) DEFAULT NULL, `deleted` tinyint(1) NOT NULL DEFAULT 0, `version` int NOT NULL DEFAULT 0, PRIMARY KEY (`id`), KEY `idx_contribution_record_batch` (`payroll_batch_id`,`payroll_line_id`), KEY `idx_contribution_record_employee` (`employee_id`,`contribution_type`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='五险一金缴费计算结果'");
+        createTableIfMissing("payroll_calculation_trace",
+                "CREATE TABLE `payroll_calculation_trace` (`id` bigint NOT NULL AUTO_INCREMENT, `payroll_batch_id` bigint DEFAULT NULL, `payroll_line_id` bigint DEFAULT NULL, `employee_id` bigint DEFAULT NULL, `sequence` int NOT NULL, `step_code` varchar(64) NOT NULL, `item_code` varchar(64) DEFAULT NULL, `input_json` json DEFAULT NULL, `output_value` decimal(18,6) DEFAULT NULL, `formula` text, `rule_version` varchar(128) DEFAULT NULL, `source_ref` varchar(255) DEFAULT NULL, `rounding_mode` varchar(20) DEFAULT NULL, `checksum` varchar(64) DEFAULT NULL, `create_time` datetime DEFAULT CURRENT_TIMESTAMP, `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, `create_by` varchar(50) DEFAULT NULL, `update_by` varchar(50) DEFAULT NULL, `deleted` tinyint(1) NOT NULL DEFAULT 0, `version` int NOT NULL DEFAULT 0, PRIMARY KEY (`id`), UNIQUE KEY `uk_calculation_trace_line_sequence` (`payroll_line_id`,`sequence`,`deleted`), KEY `idx_calculation_trace_batch_line` (`payroll_batch_id`,`payroll_line_id`,`sequence`)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪酬计算逐步证据链'");
+
+        addColumnIfMissing("payroll_batch", "pay_date", "ALTER TABLE payroll_batch ADD COLUMN `pay_date` date DEFAULT NULL COMMENT '实际发放日期' AFTER `currency`");
+        addColumnIfMissing("payroll_batch", "tax_year", "ALTER TABLE payroll_batch ADD COLUMN `tax_year` int DEFAULT NULL COMMENT '税务年度' AFTER `pay_date`");
+        addColumnIfMissing("payroll_batch", "tax_month", "ALTER TABLE payroll_batch ADD COLUMN `tax_month` int DEFAULT NULL COMMENT '税款所属月' AFTER `tax_year`");
+        addColumnIfMissing("payroll_batch", "tax_withholding_entity_id", "ALTER TABLE payroll_batch ADD COLUMN `tax_withholding_entity_id` bigint DEFAULT NULL COMMENT '扣缴义务人' AFTER `tax_month`");
+        addColumnIfMissing("payroll_batch", "tax_basic_deduction_months", "ALTER TABLE payroll_batch ADD COLUMN `tax_basic_deduction_months` int DEFAULT NULL COMMENT '本单位任职受雇月份数' AFTER `tax_withholding_entity_id`");
+        addColumnIfMissing("payroll_batch", "policy_package_id", "ALTER TABLE payroll_batch ADD COLUMN `policy_package_id` bigint DEFAULT NULL COMMENT '政策包版本' AFTER `tax_basic_deduction_months`");
+        addColumnIfMissing("payroll_batch", "result_hash", "ALTER TABLE payroll_batch ADD COLUMN `result_hash` varchar(64) DEFAULT NULL COMMENT '结算结果摘要' AFTER `remark`");
+        addColumnIfMissing("payroll_batch", "input_frozen_at", "ALTER TABLE payroll_batch ADD COLUMN `input_frozen_at` datetime DEFAULT NULL COMMENT '输入冻结时间' AFTER `result_hash`");
+        addColumnIfMissing("payroll_batch", "locked_at", "ALTER TABLE payroll_batch ADD COLUMN `locked_at` datetime DEFAULT NULL COMMENT '结果锁定时间' AFTER `input_frozen_at`");
+        addColumnIfMissing("payroll_batch", "closed_at", "ALTER TABLE payroll_batch ADD COLUMN `closed_at` datetime DEFAULT NULL COMMENT '关账时间' AFTER `locked_at`");
+        addColumnIfMissing("payroll_batch", "immutable_flag", "ALTER TABLE payroll_batch ADD COLUMN `immutable_flag` tinyint(1) NOT NULL DEFAULT 0 COMMENT '结果是否不可变' AFTER `closed_at`");
+        addColumnIfMissing("payroll_batch", "adjustment_of_batch_id", "ALTER TABLE payroll_batch ADD COLUMN `adjustment_of_batch_id` bigint DEFAULT NULL COMMENT '调整所基于的原批次' AFTER `immutable_flag`");
+        addColumnIfMissing("payroll_line", "tax_breakdown_json", "ALTER TABLE payroll_line ADD COLUMN `tax_breakdown_json` json DEFAULT NULL COMMENT '个税累计计算解释快照' AFTER `net_amount`");
+        addColumnIfMissing("salary_item", "tax_category", "ALTER TABLE salary_item ADD COLUMN `tax_category` varchar(40) DEFAULT NULL COMMENT '税务分类' AFTER `taxable`");
+        addColumnIfMissing("salary_item", "tax_exempt", "ALTER TABLE salary_item ADD COLUMN `tax_exempt` tinyint(1) DEFAULT 0 COMMENT '是否免税' AFTER `tax_category`");
+        addColumnIfMissing("salary_item", "pension_base", "ALTER TABLE salary_item ADD COLUMN `pension_base` tinyint(1) DEFAULT 0 COMMENT '是否计入养老基数' AFTER `tax_exempt`");
+        addColumnIfMissing("salary_item", "medical_base", "ALTER TABLE salary_item ADD COLUMN `medical_base` tinyint(1) DEFAULT 0 COMMENT '是否计入医疗基数' AFTER `pension_base`");
+        addColumnIfMissing("salary_item", "unemployment_base", "ALTER TABLE salary_item ADD COLUMN `unemployment_base` tinyint(1) DEFAULT 0 COMMENT '是否计入失业基数' AFTER `medical_base`");
+        addColumnIfMissing("salary_item", "work_injury_base", "ALTER TABLE salary_item ADD COLUMN `work_injury_base` tinyint(1) DEFAULT 0 COMMENT '是否计入工伤基数' AFTER `unemployment_base`");
+        addColumnIfMissing("salary_item", "maternity_base", "ALTER TABLE salary_item ADD COLUMN `maternity_base` tinyint(1) DEFAULT 0 COMMENT '是否计入生育基数' AFTER `work_injury_base`");
+        addColumnIfMissing("salary_item", "housing_fund_base", "ALTER TABLE salary_item ADD COLUMN `housing_fund_base` tinyint(1) DEFAULT 0 COMMENT '是否计入公积金基数' AFTER `maternity_base`");
+        addColumnIfMissing("salary_item", "formula_json", "ALTER TABLE salary_item ADD COLUMN `formula_json` json DEFAULT NULL COMMENT '受限公式AST/DSL' AFTER `housing_fund_base`");
+        addColumnIfMissing("salary_item", "precision_scale", "ALTER TABLE salary_item ADD COLUMN `precision_scale` int DEFAULT 2 COMMENT '计算精度' AFTER `formula_json`");
+        addColumnIfMissing("salary_item", "rounding_mode", "ALTER TABLE salary_item ADD COLUMN `rounding_mode` varchar(20) DEFAULT 'HALF_UP' COMMENT '舍入方式' AFTER `precision_scale`");
+        addColumnIfMissing("salary_item", "effective_from", "ALTER TABLE salary_item ADD COLUMN `effective_from` date DEFAULT NULL COMMENT '生效日期' AFTER `rounding_mode`");
+        addColumnIfMissing("salary_item", "effective_to", "ALTER TABLE salary_item ADD COLUMN `effective_to` date DEFAULT NULL COMMENT '失效日期' AFTER `effective_from`");
+        addColumnIfMissing("payroll_import_item", "source_external_key", "ALTER TABLE payroll_import_item ADD COLUMN `source_external_key` varchar(191) DEFAULT NULL COMMENT '来源系统业务幂等键' AFTER `error_msg`");
+        addColumnIfMissing("payroll_import_item", "business_date", "ALTER TABLE payroll_import_item ADD COLUMN `business_date` date DEFAULT NULL COMMENT '业务日期' AFTER `source_external_key`");
+        addColumnIfMissing("payroll_import_item", "source_version", "ALTER TABLE payroll_import_item ADD COLUMN `source_version` varchar(64) DEFAULT NULL COMMENT '来源版本' AFTER `business_date`");
+        addColumnIfMissing("payroll_import_item", "approval_status", "ALTER TABLE payroll_import_item ADD COLUMN `approval_status` varchar(20) DEFAULT 'approved' COMMENT '事实审批状态' AFTER `source_version`");
+        addColumnIfMissing("payroll_import_item", "imported_at", "ALTER TABLE payroll_import_item ADD COLUMN `imported_at` datetime DEFAULT NULL COMMENT '导入时间' AFTER `approval_status`");
+        addColumnIfMissing("payroll_contribution_policy", "reviewed_by", "ALTER TABLE payroll_contribution_policy ADD COLUMN `reviewed_by` bigint DEFAULT NULL AFTER `version_no`");
+        addColumnIfMissing("payroll_contribution_policy", "reviewed_at", "ALTER TABLE payroll_contribution_policy ADD COLUMN `reviewed_at` datetime DEFAULT NULL AFTER `reviewed_by`");
+        addColumnIfMissing("payroll_contribution_policy", "published_by", "ALTER TABLE payroll_contribution_policy ADD COLUMN `published_by` bigint DEFAULT NULL AFTER `reviewed_at`");
+        addColumnIfMissing("payroll_contribution_policy", "published_at", "ALTER TABLE payroll_contribution_policy ADD COLUMN `published_at` datetime DEFAULT NULL AFTER `published_by`");
+
+        executeSqlSafely("INSERT INTO payroll_policy_package (code,name,policy_type,region_code,effective_from,source_document,source_url,payload_json,status,version_no,checksum) " +
+                "SELECT 'CN.RESIDENT_WAGE_WITHHOLDING','居民个人工资薪金累计预扣预缴','tax','CN','2019-01-01','国家税务总局公告2018年第61号','https://fgk.chinatax.gov.cn/zcfgk/c100015/c5200946/content.html'," +
+                "JSON_OBJECT('basicDeductionPerMonth',5000,'annualBonusPolicyUntil','2027-12-31'),'published',1,SHA2('CN.RESIDENT_WAGE_WITHHOLDING@1',256) " +
+                "WHERE NOT EXISTS (SELECT 1 FROM payroll_policy_package WHERE code='CN.RESIDENT_WAGE_WITHHOLDING' AND version_no=1 AND deleted=0)");
+        executeSqlSafely("INSERT IGNORE INTO payroll_tax_bracket (policy_id,tax_year,bracket_level,upper_limit,rate,quick_deduction) " +
+                "SELECT p.id,2026,1,36000,0.03,0 FROM payroll_policy_package p WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0 " +
+                "UNION ALL SELECT p.id,2026,2,144000,0.10,2520 FROM payroll_policy_package p WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0 " +
+                "UNION ALL SELECT p.id,2026,3,300000,0.20,16920 FROM payroll_policy_package p WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0 " +
+                "UNION ALL SELECT p.id,2026,4,420000,0.25,31920 FROM payroll_policy_package p WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0 " +
+                "UNION ALL SELECT p.id,2026,5,660000,0.30,52920 FROM payroll_policy_package p WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0 " +
+                "UNION ALL SELECT p.id,2026,6,960000,0.35,85920 FROM payroll_policy_package p WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0 " +
+                "UNION ALL SELECT p.id,2026,7,NULL,0.45,181920 FROM payroll_policy_package p WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0");
+        executeSqlSafely("UPDATE salary_template SET status='disabled' WHERE deleted=0 AND status='enabled' AND (tax_rule_json IS NULL OR JSON_UNQUOTE(JSON_EXTRACT(tax_rule_json,'$.tax.mode')) <> 'cumulative_withholding')");
+    }
+
+    private void migratePayrollComplianceResources() {
+        executeSqlSafely("""
+                INSERT INTO sys_resource
+                    (type, code, name, path, component, icon, parent_id, order_num, props_json, status, create_time, update_time)
+                SELECT 'VIEW', 'view.payroll.compliance', '合规核算', '/payroll/compliance', 'payroll/Compliance',
+                       'SafetyCertificate', (SELECT id FROM sys_resource WHERE code = 'menu.system.payroll' LIMIT 1),
+                       3, '{"roles":["ADMIN","FINANCE"]}', 'enabled', NOW(), NOW()
+                WHERE NOT EXISTS (SELECT 1 FROM sys_resource WHERE code = 'view.payroll.compliance')
+                """);
+        executeSqlSafely("""
+                INSERT INTO sys_resource
+                    (type, code, name, path, parent_id, order_num, props_json, status, create_time, update_time)
+                SELECT 'API', 'api.payroll.compliance.tax', '薪酬合规计算', '/api/payroll/compliance/*',
+                       (SELECT id FROM sys_resource WHERE code = 'menu.system.payroll' LIMIT 1),
+                       320, '{"roles":["ADMIN","FINANCE"]}', 'enabled', NOW(), NOW()
+                WHERE NOT EXISTS (SELECT 1 FROM sys_resource WHERE code = 'api.payroll.compliance.tax')
+                """);
+        executeSqlSafely("""
+                INSERT INTO sys_role_resource (role_id, resource_id, actions_json, create_time, create_by)
+                SELECT role.id, resource.id, '["*"]', NOW(), 'payroll_compliance_migration'
+                FROM sys_role role
+                JOIN sys_resource resource
+                  ON resource.code IN ('view.payroll.compliance', 'api.payroll.compliance.tax')
+                WHERE role.code IN ('ADMIN', 'FINANCE')
+                  AND NOT EXISTS (
+                      SELECT 1 FROM sys_role_resource existing
+                      WHERE existing.role_id = role.id AND existing.resource_id = resource.id AND existing.deleted = 0
+                  )
+                """);
+    }
+
+    /**
+     * 旧薪酬页面已经从前端移除，数据库菜单也必须指向当前运营工作台，避免动态菜单再次加载旧组件。
+     */
+    private void retireLegacyPayrollContent() {
+        int changed = 0;
+        changed += executeSqlSafely("UPDATE sys_resource SET name='薪酬运营', component='payroll/Operations', update_by='legacy_payroll_retirement', update_time=NOW() " +
+                "WHERE code='menu.payroll.batches' AND deleted=0 AND (component IS NULL OR component <> 'payroll/Operations')");
+        changed += executeSqlSafely("UPDATE sys_resource SET status='disabled', update_by='legacy_payroll_retirement', update_time=NOW() " +
+                "WHERE deleted=0 AND status <> 'disabled' AND code IN ('view.payroll.batches','menu.payroll.import','menu.payroll.reports')");
+        changed += executeSqlSafely("UPDATE sys_role_resource rr JOIN sys_resource r ON r.id=rr.resource_id " +
+                "SET rr.deleted=1, rr.update_by='legacy_payroll_retirement', rr.update_time=NOW() " +
+                "WHERE rr.deleted=0 AND r.code IN ('view.payroll.batches','menu.payroll.import','menu.payroll.reports')");
+        changed += executeSqlSafely("UPDATE sys_user_resource ur JOIN sys_resource r ON r.id=ur.resource_id " +
+                "SET ur.deleted=1, ur.update_by='legacy_payroll_retirement', ur.update_time=NOW() " +
+                "WHERE ur.deleted=0 AND r.code IN ('view.payroll.batches','menu.payroll.import','menu.payroll.reports')");
+        if (changed > 0) {
+            executeSqlSafely("UPDATE sys_user SET permission_version=COALESCE(permission_version,0)+1, update_by='legacy_payroll_retirement', update_time=NOW() " +
+                    "WHERE status='active'");
+        }
     }
 
     private void addColumnIfMissing(String table, String column, String ddl) {
@@ -1217,12 +1400,14 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         }));
     }
 
-    private void executeSqlSafely(String sql) {
+    private int executeSqlSafely(String sql) {
         try {
             int affectedRows = jdbcTemplate.update(sql);
             log.info("Executed data migration SQL, affectedRows={}", affectedRows);
+            return affectedRows;
         } catch (Exception e) {
             log.warn("Failed executing data migration SQL [{}]: {}", sql, e.getMessage());
+            return 0;
         }
     }
 

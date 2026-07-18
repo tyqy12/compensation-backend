@@ -16,6 +16,7 @@ import com.yiyundao.compensation.infrastructure.dao.PayrollBatchMapper;
 import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
 import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.modules.payroll.service.PayrollDistributionService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollSettlementIntegrityService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -36,6 +37,13 @@ public class PaymentBatchServiceImpl extends ServiceImpl<PaymentBatchMapper, Pay
 
     private final PayrollBatchMapper payrollBatchMapper;
     private final ObjectProvider<PayrollDistributionService> payrollDistributionServiceProvider;
+    private PayrollSettlementIntegrityService payrollSettlementIntegrityService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setPayrollSettlementIntegrityService(
+            PayrollSettlementIntegrityService payrollSettlementIntegrityService) {
+        this.payrollSettlementIntegrityService = payrollSettlementIntegrityService;
+    }
 
     @Override
     public PaymentBatch getByBatchNo(String batchNo) {
@@ -89,11 +97,17 @@ public class PaymentBatchServiceImpl extends ServiceImpl<PaymentBatchMapper, Pay
         if (batch == null || !StringUtils.hasText(batch.getBatchNo())) {
             return;
         }
-        payrollBatchMapper.update(null, new UpdateWrapper<com.yiyundao.compensation.modules.payroll.entity.PayrollBatch>()
+        PayrollBatchStatus targetStatus = resolvePayrollBatchStatus(batch);
+        if (targetStatus == PayrollBatchStatus.PAID && payrollSettlementIntegrityService != null) {
+            payrollSettlementIntegrityService.finalizeByPaymentBatchNo(
+                    batch.getBatchNo(), targetStatus, resolvePaymentStatus(batch).getCode());
+        } else {
+            payrollBatchMapper.update(null, new UpdateWrapper<com.yiyundao.compensation.modules.payroll.entity.PayrollBatch>()
                 .eq("payment_batch_no", batch.getBatchNo())
                 .in("status", PayrollBatchStatus.PAY_PROCESSING.getCode(), PayrollBatchStatus.PAY_FAILED.getCode())
-                .set("status", resolvePayrollBatchStatus(batch).getCode())
+                .set("status", targetStatus.getCode())
                 .set("payment_status", resolvePaymentStatus(batch).getCode()));
+        }
         syncDistributionStatus(batch);
     }
 
@@ -108,11 +122,17 @@ public class PaymentBatchServiceImpl extends ServiceImpl<PaymentBatchMapper, Pay
         boolean partialSuccess = batch.getPaymentStatus() == PaymentBatchProcessStatus.PARTIAL_SUCCESS
                 || (batch.getSuccessCount() != null && batch.getSuccessCount() > 0
                 && batch.getFailedCount() != null && batch.getFailedCount() > 0);
-        payrollBatchMapper.update(null, new UpdateWrapper<com.yiyundao.compensation.modules.payroll.entity.PayrollBatch>()
+        PayrollBatchStatus targetStatus = resolvePayrollBatchStatus(status, partialSuccess);
+        if (targetStatus == PayrollBatchStatus.PAID && payrollSettlementIntegrityService != null) {
+            payrollSettlementIntegrityService.finalizeByPaymentBatchNo(
+                    batch.getBatchNo(), targetStatus, mapPaymentStatus(status, partialSuccess).getCode());
+        } else {
+            payrollBatchMapper.update(null, new UpdateWrapper<com.yiyundao.compensation.modules.payroll.entity.PayrollBatch>()
                 .eq("payment_batch_no", batch.getBatchNo())
                 .in("status", PayrollBatchStatus.PAY_PROCESSING.getCode(), PayrollBatchStatus.PAY_FAILED.getCode())
-                .set("status", resolvePayrollBatchStatus(status, partialSuccess).getCode())
+                .set("status", targetStatus.getCode())
                 .set("payment_status", mapPaymentStatus(status, partialSuccess).getCode()));
+        }
     }
 
     private PayrollBatchStatus resolvePayrollBatchStatus(PaymentBatch batch) {

@@ -105,7 +105,7 @@ public class SalaryTemplateController {
     private List<String> validateTaxRuleJson(String taxRuleJson) {
         List<String> errors = new ArrayList<>();
         if (taxRuleJson == null || taxRuleJson.isBlank()) {
-            // taxRuleJson可以为空，使用默认值
+            errors.add("taxRuleJson必须声明tax.mode=cumulative_withholding，旧版固定税率已下线");
             return errors;
         }
 
@@ -119,10 +119,13 @@ public class SalaryTemplateController {
             // 验证tax部分
             if (root.has("tax")) {
                 JsonNode tax = root.get("tax");
+                if (!tax.has("mode") || !"cumulative_withholding".equalsIgnoreCase(tax.path("mode").asText())) {
+                    errors.add("taxRuleJson.tax.mode必须为cumulative_withholding，旧版固定税率已下线");
+                }
                 if (tax.has("rate") && !tax.get("rate").isNumber()) {
                     errors.add("taxRuleJson.tax.rate必须是数字类型");
                 } else if (tax.has("rate")) {
-                    validateRate(tax.get("rate"), "taxRuleJson.tax.rate", errors);
+                    errors.add("taxRuleJson.tax.rate已下线，请使用政策版本和累计预扣税率表");
                 }
                 if (tax.has("applyOn")) {
                     String applyOn = tax.get("applyOn").asText();
@@ -131,6 +134,9 @@ public class SalaryTemplateController {
                         errors.add("taxRuleJson.tax.applyOn必须是: TAXABLE_EARNINGS, GROSS, EARNINGS_MINUS_DEDUCTIONS, TAXABLE_EARNINGS_MINUS_DEDUCTIONS");
                     }
                 }
+            }
+            if (!root.has("tax")) {
+                errors.add("taxRuleJson必须声明tax.mode=cumulative_withholding");
             }
 
             // 验证social部分
@@ -233,6 +239,12 @@ public class SalaryTemplateController {
         String normalizedType = req.getType() != null ? normalizeTemplateType(req.getType()) : null;
         String normalizedStatus = req.getStatus() != null ? normalizeTemplateStatus(req.getStatus(), null) : null;
         String effectiveType = normalizedType != null ? normalizedType : t.getType();
+        if (STATUS_ENABLED.equals(normalizedStatus) && req.getTaxRuleJson() == null) {
+            List<String> taxErrors = validateTaxRuleJson(t.getTaxRuleJson());
+            if (!taxErrors.isEmpty()) {
+                return ApiResponse.error(ErrorCode.PARAM_INVALID, "taxRuleJson验证失败: " + String.join("; ", taxErrors));
+            }
+        }
         if (STATUS_ENABLED.equals(normalizedStatus) && hasAnotherEnabledTemplate(effectiveType, id)) {
             return ApiResponse.error(ErrorCode.REQUEST_CONFLICT,
                     "同一用工类型只能有一个启用中的规则包，请先停用现有规则包");

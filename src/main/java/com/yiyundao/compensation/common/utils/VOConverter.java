@@ -2,6 +2,7 @@ package com.yiyundao.compensation.common.utils;
 
 import com.yiyundao.compensation.enums.SettlementAccountType;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.employee.service.EmployeeDepartmentService;
 import com.yiyundao.compensation.modules.user.entity.ExternalIdentity;
 import com.yiyundao.compensation.modules.user.service.ExternalIdentityService;
 import com.yiyundao.compensation.service.EncryptionService;
@@ -10,16 +11,22 @@ import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
+import java.util.Arrays;
+import java.util.List;
+
 @Component
 public class VOConverter {
 
     private final EncryptionService encryptionService;
     private final ExternalIdentityService externalIdentityService;
+    private final EmployeeDepartmentService employeeDepartmentService;
 
     public VOConverter(EncryptionService encryptionService,
-                       ExternalIdentityService externalIdentityService) {
+                       ExternalIdentityService externalIdentityService,
+                       EmployeeDepartmentService employeeDepartmentService) {
         this.encryptionService = encryptionService;
         this.externalIdentityService = externalIdentityService;
+        this.employeeDepartmentService = employeeDepartmentService;
     }
 
     public EmployeeVO toEmployeeVO(Employee employee) {
@@ -31,6 +38,7 @@ public class VOConverter {
         vo.setPhoneMasked(encryptionService.maskPhone(employee.getPhone()));
         vo.setEmail(employee.getEmail());
         vo.setDepartment(employee.getDepartment());
+        vo.setDepartments(resolveDepartments(employee));
         vo.setPosition(employee.getPosition());
         ExternalIdentity identity = externalIdentityService.findPrimaryByEmployeeId(employee.getId());
         vo.setSubjectId(identity != null ? identity.getSubjectId() : null);
@@ -62,8 +70,38 @@ public class VOConverter {
     }
 
     public EmployeeListItemVO toEmployeeListItemVO(Employee employee) {
+        return toEmployeeListItemVO(employee, null);
+    }
+
+    public EmployeeListItemVO toEmployeeListItemVO(Employee employee, List<String> relatedDepartments) {
         if (employee == null) return null;
-        return EmployeeListItemVO.from(employee);
+        EmployeeListItemVO vo = EmployeeListItemVO.from(employee);
+        vo.setDepartments(resolveDepartments(employee, relatedDepartments));
+        return vo;
+    }
+
+    private List<String> resolveDepartments(Employee employee) {
+        return resolveDepartments(employee, null);
+    }
+
+    private List<String> resolveDepartments(Employee employee, List<String> relatedDepartments) {
+        if (employee == null) {
+            return List.of();
+        }
+        List<String> related = relatedDepartments != null ? relatedDepartments : employee.getId() == null
+                ? List.of()
+                : employeeDepartmentService.findDepartmentNames(employee.getId());
+        if (related != null && !related.isEmpty()) {
+            return related;
+        }
+        if (!StringUtils.hasText(employee.getDepartment())) {
+            return List.of();
+        }
+        return Arrays.stream(employee.getDepartment().split("[,/，、]"))
+                .map(String::trim)
+                .filter(StringUtils::hasText)
+                .distinct()
+                .toList();
     }
 
     private String maskEncryptedBankAccount(String encryptedBankAccount) {

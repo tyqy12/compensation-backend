@@ -10,6 +10,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
@@ -26,6 +27,20 @@ public class PayrollBatch extends BaseEntity {
     @TableField("scope_json")
     private String scopeJson;
     private String currency;
+
+    /** 实际发放日；个税税款所属期按实际发放日确定时使用。 */
+    @TableField("pay_date")
+    private LocalDate payDate;
+    @TableField("tax_year")
+    private Integer taxYear;
+    @TableField("tax_month")
+    private Integer taxMonth;
+    @TableField("tax_withholding_entity_id")
+    private Long taxWithholdingEntityId;
+    @TableField("tax_basic_deduction_months")
+    private Integer taxBasicDeductionMonths;
+    @TableField("policy_package_id")
+    private Long policyPackageId;
 
     @TableField("calculation_status")
     private PayrollCalculationStatus calculationStatus;
@@ -72,4 +87,18 @@ public class PayrollBatch extends BaseEntity {
     @TableField("confirmation_completed_time")
     private LocalDateTime confirmationCompletedTime;
     private String remark;
+
+    /** 结算完成后的结果摘要；仅用于验证历史证据，不用于重新计算。 */
+    @TableField("result_hash")
+    private String resultHash;
+    @TableField("input_frozen_at")
+    private LocalDateTime inputFrozenAt;
+    @TableField("locked_at")
+    private LocalDateTime lockedAt;
+    @TableField("closed_at")
+    private LocalDateTime closedAt;
+    @TableField("immutable_flag")
+    private Boolean immutableFlag;
+    @TableField("adjustment_of_batch_id")
+    private Long adjustmentOfBatchId;
 }

@@ -159,6 +159,13 @@ const EmployeesList: React.FC = () => {
       formValues.phone = normalizeTextValue(formValues.phone);
       formValues.email = normalizeTextValue(formValues.email);
       formValues.department = normalizeTextValue(formValues.department);
+      if (Array.isArray(formValues.departments)) {
+        const departments = formValues.departments
+          .map((value) => normalizeTextValue(value))
+          .filter((value): value is string => Boolean(value));
+        formValues.departments = departments;
+        formValues.department = departments[0];
+      }
       formValues.position = normalizeTextValue(formValues.position);
       formValues.username = normalizeTextValue(formValues.username);
       formValues.settlementAccountName = normalizeTextValue(formValues.settlementAccountName);
@@ -214,8 +221,16 @@ const EmployeesList: React.FC = () => {
         message.error('导入数据必须是非空 JSON 数组');
         return;
       }
-      await batchImportMutation.mutateAsync({ employees: parsed });
-      message.success(`批量导入成功，共处理 ${parsed.length} 条`);
+      if (parsed.length > 500) {
+        message.error('单次最多导入500名员工');
+        return;
+      }
+      const result = await batchImportMutation.mutateAsync({ employees: parsed });
+      if (result) {
+        message.success(`批量导入完成：新增${result.imported}条，跳过${result.skipped}条，绑定${result.bound}条`);
+      } else {
+        message.success(`批量导入完成，共处理 ${parsed.length} 条`);
+      }
       setImportModalVisible(false);
       setImportPayload('');
       actionRef.current?.reload();
@@ -253,11 +268,20 @@ const EmployeesList: React.FC = () => {
     if (!bindingEmployee) return;
 
     try {
-      await bindPlatformMutation.mutateAsync({
+      const result = await bindPlatformMutation.mutateAsync({
         id: bindingEmployee.id,
         ...values,
       });
-      message.success('平台绑定成功');
+      if (result?.result === 'PENDING_APPROVAL') {
+        message.info(result.message || '平台账号冲突，已提交审批');
+      } else if (result?.result === 'ALREADY_BOUND') {
+        message.info(result.message || '该平台账号已经绑定');
+      } else if (result?.result && result.result !== 'SUCCESS') {
+        message.error(result.message || '平台绑定失败');
+        return;
+      } else {
+        message.success(result?.message || '平台绑定成功');
+      }
       setBindModalVisible(false);
       setBindingEmployee(null);
       bindForm.resetFields();
@@ -323,16 +347,9 @@ const EmployeesList: React.FC = () => {
     {
       title: '部门',
       dataIndex: 'department',
-      valueType: 'select',
-      valueEnum: {
-        '技术部': { text: '技术部' },
-        '产品部': { text: '产品部' },
-        '运营部': { text: '运营部' },
-        '财务部': { text: '财务部' },
-        '人事部': { text: '人事部' },
-        '市场部': { text: '市场部' },
-      },
-      render: (department) => department || <Text type="secondary">-</Text>,
+      valueType: 'text',
+      fieldProps: { placeholder: '搜索部门名称' },
+      render: (_, record) => record.departments?.join(' / ') || record.department || <Text type="secondary">-</Text>,
     },
     {
       title: '职位',
@@ -741,15 +758,8 @@ const EmployeesList: React.FC = () => {
             <Input placeholder="如 zhangfei 或 wbzhangfei" />
           </Form.Item>
 
-          <Form.Item name="department" label="部门">
-            <Select placeholder="请选择部门">
-              <Option value="技术部">技术部</Option>
-              <Option value="产品部">产品部</Option>
-              <Option value="运营部">运营部</Option>
-              <Option value="财务部">财务部</Option>
-              <Option value="人事部">人事部</Option>
-              <Option value="市场部">市场部</Option>
-            </Select>
+          <Form.Item name="departments" label="部门">
+            <Select mode="tags" placeholder="输入部门名称后回车" tokenSeparators={[',', '，', '/', '、']} />
           </Form.Item>
 
           <Form.Item name="position" label="职位">

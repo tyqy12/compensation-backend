@@ -19,22 +19,24 @@ Tip: avoid editing files under \\wsl$ from Windows editors without proper LF set
 
 ## 3) One-command startup with Compose
 ```bash
-# Build and start MySQL, Redis, and the backend app
-docker compose -f docker-compose.redis.yml up -d
+# Build and start the frontend, backend, and Redis.
+# MySQL is expected to be reachable through SPRING_DATASOURCE_URL.
+cp deploy/production.env.example .env
+# Edit .env before starting the stack.
+docker compose up -d --build
 
 # View logs
 docker compose logs -f app
 ```
-This starts only Redis (6379). Run the prebuilt JAR on the server directly:
-```bash
-java -jar target/compensation-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
-```
-Access the API at http://localhost:8080/api/system/health. Ports: 8080 (app), 6379 (Redis).
+The browser entry point is `http://localhost/`; the backend is available at
+`http://127.0.0.1:8080/api/system/health` for local diagnostics. Redis is bound to
+`127.0.0.1:6379` and is not exposed publicly.
 
-The compose file mounts `src/main/resources/sql/schema.sql` to initialize the DB on first startup.
-Important: `schema.sql` is a destructive bootstrap script (`DROP TABLE IF EXISTS` + recreate).
-Only use it with a brand-new DB/volume. For any existing database, run incremental scripts under
-`src/main/resources/sql/migrations/` instead of reapplying `schema.sql`.
+The Compose stack uses an external MySQL instance from `SPRING_DATASOURCE_URL`; it does not
+bootstrap or recreate database tables automatically. `schema.sql` is a destructive bootstrap
+script (`DROP TABLE IF EXISTS` + recreate), so only use it with a brand-new database. For an
+existing production database, run the incremental scripts under
+`src/main/resources/sql/migrations/` and review the startup migration setting before deployment.
 
 ## 4) Environment and Secrets
 The app service uses environment variables in `docker-compose.yml` to configure:
@@ -53,6 +55,9 @@ REDIS_PASSWORD='your-redis-password' docker compose up -d --build
 ```bash
 # Rebuild app only
 docker compose build app
+
+# Rebuild frontend only
+docker compose build web
 
 # Restart app after config change
 docker compose up -d app
@@ -88,6 +93,13 @@ docker compose down -v
 ```bash
 # Build image
 docker build -t compensation-backend:latest .
+
+# After local verification, use the prebuilt rollout path to avoid downloading
+# the Maven dependency graph again during the Docker build.
+./mvnw -q -DskipTests package
+docker build -f Dockerfile.prebuilt \
+  --build-arg JRE_IMAGE=docker.m.daocloud.io/library/eclipse-temurin:17-jre-jammy \
+  -t compensation-backend:production .
 
 # Run with envs
 docker run --name comp-app \

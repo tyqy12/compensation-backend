@@ -16,6 +16,14 @@ DROP TABLE IF EXISTS `sys_user_resource`;
 DROP TABLE IF EXISTS `sys_role_resource`;
 DROP TABLE IF EXISTS `sys_user_role`;
 DROP TABLE IF EXISTS `resource_snapshot`;
+DROP TABLE IF EXISTS `payroll_calculation_trace`;
+DROP TABLE IF EXISTS `payroll_contribution_record`;
+DROP TABLE IF EXISTS `payroll_enrollment`;
+DROP TABLE IF EXISTS `payroll_contribution_policy`;
+DROP TABLE IF EXISTS `payroll_tax_ledger`;
+DROP TABLE IF EXISTS `payroll_tax_deduction_declaration`;
+DROP TABLE IF EXISTS `payroll_tax_bracket`;
+DROP TABLE IF EXISTS `payroll_policy_package`;
 DROP TABLE IF EXISTS `sys_role`;
 DROP TABLE IF EXISTS `sys_resource`;
 
@@ -30,7 +38,7 @@ CREATE TABLE `employee` (
   `phone` varchar(20) DEFAULT NULL COMMENT '手机号码',
   `email` varchar(100) DEFAULT NULL COMMENT '邮箱地址',
   `encrypted_id_card` text COMMENT '加密后的身份证号(SM4+AES双重加密)',
-  `department` varchar(100) DEFAULT NULL COMMENT '部门',
+  `department` varchar(500) DEFAULT NULL COMMENT '部门(兼容展示字段，多部门关系见employee_department)',
   `position` varchar(100) DEFAULT NULL COMMENT '职位',
   `employment_type` varchar(20) DEFAULT 'full_time' COMMENT '用工类型(full_time/part_time)',
   `is_offline` tinyint(1) DEFAULT '0' COMMENT '是否架构外员工(0:否,1:是)',
@@ -38,7 +46,7 @@ CREATE TABLE `employee` (
   `hire_date` date DEFAULT NULL COMMENT '入职日期',
   `status` varchar(20) DEFAULT 'active' COMMENT '员工状态(active:在职,inactive:离职,suspended:停职)',
   `settlement_account_type` varchar(20) DEFAULT NULL COMMENT '收款账户类型(bank_card/alipay/wechat/other)',
-  `settlement_account` varchar(128) DEFAULT NULL COMMENT '收款账户(加密存储)',
+  `settlement_account` text COMMENT '收款账户(加密存储)',
   `settlement_account_name` varchar(100) DEFAULT NULL COMMENT '收款账户实名/户名',
   `settlement_provider_code` varchar(32) DEFAULT NULL COMMENT '结算渠道编码（优先级最高）',
   `bank_account` varchar(100) DEFAULT NULL COMMENT '银行卡号(加密存储)',
@@ -93,6 +101,19 @@ CREATE TABLE `salary_item` (
   `name` varchar(100) NOT NULL COMMENT '项名称',
   `type` varchar(20) NOT NULL COMMENT 'earning/deduction',
   `taxable` tinyint(1) DEFAULT '1' COMMENT '是否计税',
+  `tax_category` varchar(40) DEFAULT NULL COMMENT '税务分类',
+  `tax_exempt` tinyint(1) DEFAULT '0' COMMENT '是否免税',
+  `pension_base` tinyint(1) DEFAULT '0' COMMENT '是否计入养老基数',
+  `medical_base` tinyint(1) DEFAULT '0' COMMENT '是否计入医疗基数',
+  `unemployment_base` tinyint(1) DEFAULT '0' COMMENT '是否计入失业基数',
+  `work_injury_base` tinyint(1) DEFAULT '0' COMMENT '是否计入工伤基数',
+  `maternity_base` tinyint(1) DEFAULT '0' COMMENT '是否计入生育基数',
+  `housing_fund_base` tinyint(1) DEFAULT '0' COMMENT '是否计入公积金基数',
+  `formula_json` json DEFAULT NULL COMMENT '受限公式AST/DSL',
+  `precision_scale` int DEFAULT '2' COMMENT '计算精度',
+  `rounding_mode` varchar(20) DEFAULT 'HALF_UP' COMMENT '舍入方式',
+  `effective_from` date DEFAULT NULL COMMENT '生效日期',
+  `effective_to` date DEFAULT NULL COMMENT '失效日期',
   `show_on_payslip` tinyint(1) DEFAULT '1' COMMENT '工资条显示',
   `order_num` int DEFAULT '0' COMMENT '排序',
   `status` varchar(20) DEFAULT 'enabled' COMMENT '状态',
@@ -194,6 +215,12 @@ CREATE TABLE `payroll_batch` (
   `type` varchar(20) NOT NULL COMMENT 'full_time/part_time',
   `scope_json` json DEFAULT NULL COMMENT '范围JSON',
   `currency` varchar(10) DEFAULT 'CNY',
+  `pay_date` date DEFAULT NULL COMMENT '实际发放日期',
+  `tax_year` int DEFAULT NULL COMMENT '税务年度',
+  `tax_month` int DEFAULT NULL COMMENT '税款所属月',
+  `tax_withholding_entity_id` bigint DEFAULT NULL COMMENT '扣缴义务人',
+  `tax_basic_deduction_months` int DEFAULT NULL COMMENT '本单位任职受雇月份数',
+  `policy_package_id` bigint DEFAULT NULL COMMENT '政策包版本',
   `calculation_status` varchar(32) DEFAULT 'draft' COMMENT '核算状态',
   `batch_revision` int DEFAULT '1' COMMENT '业务批次版本号',
   `input_snapshot_hash` varchar(64) DEFAULT NULL COMMENT '薪资输入事实快照摘要',
@@ -210,6 +237,12 @@ CREATE TABLE `payroll_batch` (
   `confirmation_mode` varchar(20) DEFAULT 'individual' COMMENT '确认模式(individual/group)',
   `confirmation_completed_time` datetime DEFAULT NULL COMMENT '确认完成时间',
   `remark` varchar(500) DEFAULT NULL,
+  `result_hash` varchar(64) DEFAULT NULL COMMENT '结算结果摘要',
+  `input_frozen_at` datetime DEFAULT NULL COMMENT '输入冻结时间',
+  `locked_at` datetime DEFAULT NULL COMMENT '结果锁定时间',
+  `closed_at` datetime DEFAULT NULL COMMENT '关账时间',
+  `immutable_flag` tinyint(1) NOT NULL DEFAULT '0' COMMENT '结果是否不可变',
+  `adjustment_of_batch_id` bigint DEFAULT NULL COMMENT '调整所基于的原批次',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `create_by` varchar(50) DEFAULT NULL,
@@ -242,6 +275,7 @@ CREATE TABLE `payroll_line` (
   `tax_amount` decimal(12,2) DEFAULT '0.00',
   `social_amount` decimal(12,2) DEFAULT '0.00',
   `net_amount` decimal(12,2) DEFAULT '0.00',
+  `tax_breakdown_json` json DEFAULT NULL COMMENT '个税累计计算解释快照',
   `currency` varchar(10) DEFAULT 'CNY',
   `status` varchar(20) DEFAULT 'draft',
   `note` varchar(500) DEFAULT NULL,
@@ -472,6 +506,11 @@ CREATE TABLE `payroll_import_item` (
   `row_no` int DEFAULT NULL COMMENT '行号',
   `status` varchar(20) DEFAULT 'valid' COMMENT 'valid/invalid',
   `error_msg` varchar(500) DEFAULT NULL COMMENT '错误信息',
+  `source_external_key` varchar(191) DEFAULT NULL COMMENT '来源系统业务幂等键',
+  `business_date` date DEFAULT NULL COMMENT '业务日期',
+  `source_version` varchar(64) DEFAULT NULL COMMENT '来源版本',
+  `approval_status` varchar(20) DEFAULT 'approved' COMMENT '事实审批状态',
+  `imported_at` datetime DEFAULT NULL COMMENT '导入时间',
   `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
   `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   `create_by` varchar(50) DEFAULT NULL,
@@ -481,6 +520,267 @@ CREATE TABLE `payroll_import_item` (
   PRIMARY KEY (`id`),
   KEY `idx_batch_emp` (`batch_id`,`employee_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪酬导入暂存';
+
+-- ============================================
+-- 1.3 薪酬合规核算基础
+-- ============================================
+CREATE TABLE `payroll_policy_package` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(100) NOT NULL,
+  `name` varchar(200) NOT NULL,
+  `policy_type` varchar(32) NOT NULL,
+  `region_code` varchar(32) DEFAULT NULL,
+  `collection_entity_code` varchar(100) DEFAULT NULL,
+  `person_category` varchar(64) DEFAULT NULL,
+  `industry_risk_level` varchar(32) DEFAULT NULL,
+  `effective_from` date NOT NULL,
+  `effective_to` date DEFAULT NULL,
+  `source_document` varchar(200) DEFAULT NULL,
+  `source_url` varchar(500) DEFAULT NULL,
+  `payload_json` json DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'draft',
+  `version_no` bigint NOT NULL DEFAULT '1',
+  `checksum` varchar(64) DEFAULT NULL,
+  `reviewed_by` bigint DEFAULT NULL,
+  `reviewed_at` datetime DEFAULT NULL,
+  `published_by` bigint DEFAULT NULL,
+  `published_at` datetime DEFAULT NULL,
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_payroll_policy_code_version` (`code`,`version_no`,`deleted`),
+  KEY `idx_payroll_policy_resolve` (`policy_type`,`region_code`,`status`,`effective_from`,`effective_to`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪酬法规政策版本';
+
+CREATE TABLE `payroll_tax_bracket` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `policy_id` bigint NOT NULL,
+  `tax_year` int NOT NULL,
+  `bracket_level` int NOT NULL,
+  `upper_limit` decimal(18,2) DEFAULT NULL,
+  `rate` decimal(12,8) NOT NULL,
+  `quick_deduction` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_payroll_tax_bracket` (`policy_id`,`tax_year`,`bracket_level`,`deleted`),
+  KEY `idx_payroll_tax_bracket_policy` (`policy_id`,`tax_year`,`bracket_level`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='居民工资薪金累计预扣税率表';
+
+CREATE TABLE `payroll_tax_deduction_declaration` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `employee_id` bigint NOT NULL,
+  `tax_year` int NOT NULL,
+  `deduction_type` varchar(40) NOT NULL,
+  `subject_key` varchar(128) DEFAULT NULL,
+  `allocation_ratio` decimal(8,6) NOT NULL DEFAULT '1.000000',
+  `monthly_amount` decimal(18,2) DEFAULT NULL,
+  `annual_amount` decimal(18,2) DEFAULT NULL,
+  `effective_from` date DEFAULT NULL,
+  `effective_to` date DEFAULT NULL,
+  `credential_ref` varchar(255) DEFAULT NULL,
+  `evidence_json` json DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'pending',
+  `source_type` varchar(32) DEFAULT NULL,
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_tax_deduction_employee_year` (`employee_id`,`tax_year`,`deduction_type`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='个税专项附加扣除和其他扣除申报';
+
+CREATE TABLE `payroll_tax_ledger` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `employee_id` bigint NOT NULL,
+  `withholding_entity_id` bigint DEFAULT NULL,
+  `tax_year` int NOT NULL,
+  `tax_month` int NOT NULL,
+  `payroll_batch_id` bigint DEFAULT NULL,
+  `payroll_line_id` bigint DEFAULT NULL,
+  `cumulative_income` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `cumulative_tax_exempt_income` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `cumulative_basic_deduction` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `cumulative_special_deduction` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `cumulative_special_additional` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `cumulative_other_deduction` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `cumulative_taxable_income` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `tax_rate` decimal(12,8) NOT NULL DEFAULT '0.00000000',
+  `quick_deduction` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `cumulative_tax` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `cumulative_tax_reduction` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `cumulative_withheld_tax` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `current_withholding_tax` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `policy_id` bigint DEFAULT NULL,
+  `calculation_hash` varchar(64) DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'draft',
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_tax_ledger_employee_period_batch` (`employee_id`,`tax_year`,`tax_month`,`payroll_batch_id`,`deleted`),
+  KEY `idx_tax_ledger_previous` (`employee_id`,`withholding_entity_id`,`tax_year`,`tax_month`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工年度累计个税台账';
+
+CREATE TABLE `payroll_contribution_policy` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `code` varchar(100) NOT NULL,
+  `region_code` varchar(32) NOT NULL,
+  `collection_entity_code` varchar(100) DEFAULT NULL,
+  `contribution_type` varchar(40) NOT NULL,
+  `person_category` varchar(64) DEFAULT NULL,
+  `household_type` varchar(32) DEFAULT NULL,
+  `industry_risk_level` varchar(32) DEFAULT NULL,
+  `effective_from` date NOT NULL,
+  `effective_to` date DEFAULT NULL,
+  `base_min` decimal(18,2) DEFAULT NULL,
+  `base_max` decimal(18,2) DEFAULT NULL,
+  `employer_rate` decimal(12,8) NOT NULL DEFAULT '0.00000000',
+  `employee_rate` decimal(12,8) NOT NULL DEFAULT '0.00000000',
+  `employer_fixed_amount` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `employee_fixed_amount` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `rounding_mode` varchar(20) DEFAULT 'HALF_UP',
+  `minimum_amount` decimal(18,2) DEFAULT NULL,
+  `source_document` varchar(200) DEFAULT NULL,
+  `source_url` varchar(500) DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'draft',
+  `version_no` bigint NOT NULL DEFAULT '1',
+  `reviewed_by` bigint DEFAULT NULL,
+  `reviewed_at` datetime DEFAULT NULL,
+  `published_by` bigint DEFAULT NULL,
+  `published_at` datetime DEFAULT NULL,
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_contribution_policy_version` (`code`,`version_no`,`deleted`),
+  KEY `idx_contribution_policy_resolve` (`region_code`,`contribution_type`,`effective_from`,`effective_to`,`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='地区五险一金政策参数';
+
+CREATE TABLE `payroll_enrollment` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `employee_id` bigint NOT NULL,
+  `contribution_type` varchar(40) NOT NULL,
+  `region_code` varchar(32) NOT NULL,
+  `collection_entity_code` varchar(100) DEFAULT NULL,
+  `account_no_encrypted` text,
+  `effective_from` date NOT NULL,
+  `effective_to` date DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'active',
+  `is_primary` tinyint(1) NOT NULL DEFAULT '1',
+  `event_type` varchar(32) DEFAULT NULL,
+  `policy_id` bigint DEFAULT NULL,
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_enrollment_employee_type` (`employee_id`,`contribution_type`,`status`),
+  KEY `idx_enrollment_period` (`effective_from`,`effective_to`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='员工多地参保/公积金关系';
+
+CREATE TABLE `payroll_contribution_record` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `payroll_batch_id` bigint DEFAULT NULL,
+  `payroll_line_id` bigint DEFAULT NULL,
+  `employee_id` bigint NOT NULL,
+  `contribution_type` varchar(40) NOT NULL,
+  `region_code` varchar(32) NOT NULL,
+  `policy_id` bigint DEFAULT NULL,
+  `declared_wage` decimal(18,2) DEFAULT NULL,
+  `contribution_base` decimal(18,2) DEFAULT NULL,
+  `employer_rate` decimal(12,8) DEFAULT NULL,
+  `employee_rate` decimal(12,8) DEFAULT NULL,
+  `employer_amount` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `employee_amount` decimal(18,2) NOT NULL DEFAULT '0.00',
+  `adjustment_of_id` bigint DEFAULT NULL,
+  `status` varchar(20) NOT NULL DEFAULT 'calculated',
+  `calculation_hash` varchar(64) DEFAULT NULL,
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  KEY `idx_contribution_record_batch` (`payroll_batch_id`,`payroll_line_id`),
+  KEY `idx_contribution_record_employee` (`employee_id`,`contribution_type`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='五险一金缴费计算结果';
+
+CREATE TABLE `payroll_calculation_trace` (
+  `id` bigint NOT NULL AUTO_INCREMENT,
+  `payroll_batch_id` bigint DEFAULT NULL,
+  `payroll_line_id` bigint DEFAULT NULL,
+  `employee_id` bigint DEFAULT NULL,
+  `sequence` int NOT NULL,
+  `step_code` varchar(64) NOT NULL,
+  `item_code` varchar(64) DEFAULT NULL,
+  `input_json` json DEFAULT NULL,
+  `output_value` decimal(18,6) DEFAULT NULL,
+  `formula` text,
+  `rule_version` varchar(128) DEFAULT NULL,
+  `source_ref` varchar(255) DEFAULT NULL,
+  `rounding_mode` varchar(20) DEFAULT NULL,
+  `checksum` varchar(64) DEFAULT NULL,
+  `create_time` datetime DEFAULT CURRENT_TIMESTAMP,
+  `update_time` datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  `create_by` varchar(50) DEFAULT NULL,
+  `update_by` varchar(50) DEFAULT NULL,
+  `deleted` tinyint(1) NOT NULL DEFAULT '0',
+  `version` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_calculation_trace_line_sequence` (`payroll_line_id`,`sequence`,`deleted`),
+  KEY `idx_calculation_trace_batch_line` (`payroll_batch_id`,`payroll_line_id`,`sequence`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='薪酬计算逐步证据链';
+
+-- 首期居民工资薪金累计预扣政策；地方社保公积金政策必须按统筹地区另行导入。
+INSERT INTO `payroll_policy_package`
+  (`code`,`name`,`policy_type`,`region_code`,`effective_from`,`source_document`,`source_url`,`payload_json`,`status`,`version_no`)
+SELECT 'CN.RESIDENT_WAGE_WITHHOLDING', '居民个人工资薪金累计预扣预缴', 'tax', 'CN', '2019-01-01',
+       '国家税务总局公告2018年第61号',
+       'https://fgk.chinatax.gov.cn/zcfgk/c100015/c5200946/content.html',
+       '{"basicDeductionPerMonth":5000,"annualBonusPolicyUntil":"2027-12-31"}', 'published', 1
+WHERE NOT EXISTS (
+  SELECT 1 FROM `payroll_policy_package`
+  WHERE `code`='CN.RESIDENT_WAGE_WITHHOLDING' AND `version_no`=1 AND `deleted`=0
+);
+
+INSERT INTO `payroll_tax_bracket`
+  (`policy_id`,`tax_year`,`bracket_level`,`upper_limit`,`rate`,`quick_deduction`)
+SELECT p.id, 2026, b.bracket_level, b.upper_limit, b.rate, b.quick_deduction
+FROM `payroll_policy_package` p
+CROSS JOIN (
+  SELECT 1 AS bracket_level, 36000.00 AS upper_limit, 0.03 AS rate, 0.00 AS quick_deduction
+  UNION ALL SELECT 2, 144000.00, 0.10, 2520.00
+  UNION ALL SELECT 3, 300000.00, 0.20, 16920.00
+  UNION ALL SELECT 4, 420000.00, 0.25, 31920.00
+  UNION ALL SELECT 5, 660000.00, 0.30, 52920.00
+  UNION ALL SELECT 6, 960000.00, 0.35, 85920.00
+  UNION ALL SELECT 7, NULL, 0.45, 181920.00
+) b
+WHERE p.code='CN.RESIDENT_WAGE_WITHHOLDING' AND p.version_no=1 AND p.deleted=0
+  AND NOT EXISTS (
+    SELECT 1 FROM `payroll_tax_bracket` t
+    WHERE t.policy_id=p.id AND t.tax_year=2026 AND t.bracket_level=b.bracket_level AND t.deleted=0
+  );
 
 -- ============================================
 -- 2. 支付记录表 (payment_record)
@@ -702,7 +1002,7 @@ DROP TABLE IF EXISTS `approval_workflow`;
 CREATE TABLE `approval_workflow` (
   `id` bigint NOT NULL AUTO_INCREMENT COMMENT '主键ID',
   `workflow_name` varchar(100) NOT NULL COMMENT '流程名称',
-  `workflow_type` varchar(20) NOT NULL COMMENT '流程类型(BATCH:批量支付,ADHOC:临时支付,OFFLINE:架构外员工)',
+  `workflow_type` varchar(50) NOT NULL COMMENT '流程类型(BATCH/ADHOC/OFFLINE/EMPLOYEE_PROFILE_CHANGE/PLATFORM_BIND)',
   `business_key` varchar(100) NOT NULL COMMENT '业务关键字(如batch_no)',
   `business_type` varchar(50) NOT NULL COMMENT '业务类型',
   `current_step` int DEFAULT '1' COMMENT '当前步骤',

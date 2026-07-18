@@ -22,6 +22,7 @@ import com.yiyundao.compensation.modules.payroll.service.PayrollDistributionServ
 import com.yiyundao.compensation.modules.payroll.service.PayrollProcessManager;
 import com.yiyundao.compensation.modules.payroll.service.PayrollLineService;
 import com.yiyundao.compensation.modules.payroll.service.PayrollPaymentService;
+import com.yiyundao.compensation.modules.payroll.service.PayrollSettlementIntegrityService;
 import com.yiyundao.compensation.modules.payroll.support.PayrollPaymentEligibilitySupport;
 import com.yiyundao.compensation.modules.payroll.support.PayrollValidationIssueSupport;
 import com.yiyundao.compensation.modules.rbac.service.UserRoleService;
@@ -33,9 +34,12 @@ import com.yiyundao.compensation.enums.PayrollCalculationStatus;
 import com.yiyundao.compensation.security.SecurityConstants;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+
+import java.time.LocalDateTime;
 
 @Slf4j
 @Service
@@ -53,6 +57,20 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
     private final PayrollDistributionService distributionService;
     private final PayrollApprovalProjectionService approvalProjectionService;
     private final PayrollProcessManager payrollProcessManager;
+    private com.yiyundao.compensation.modules.payroll.service.PayrollTaxLedgerService payrollTaxLedgerService;
+    private PayrollSettlementIntegrityService payrollSettlementIntegrityService;
+
+    @Autowired(required = false)
+    public void setPayrollTaxLedgerService(
+            com.yiyundao.compensation.modules.payroll.service.PayrollTaxLedgerService payrollTaxLedgerService) {
+        this.payrollTaxLedgerService = payrollTaxLedgerService;
+    }
+
+    @Autowired(required = false)
+    public void setPayrollSettlementIntegrityService(
+            PayrollSettlementIntegrityService payrollSettlementIntegrityService) {
+        this.payrollSettlementIntegrityService = payrollSettlementIntegrityService;
+    }
 
     @Override
     @Transactional
@@ -67,7 +85,9 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
                 .eq(PayrollBatch::getStatus, b.getStatus())
                 .set(PayrollBatch::getStatus, PayrollBatchStatus.LOCKED)
                 .set(PayrollBatch::getCalculationStatus, PayrollCalculationStatus.LOCKED)
-                .set(PayrollBatch::getBatchRevision, batchRevision);
+                .set(PayrollBatch::getBatchRevision, batchRevision)
+                .set(PayrollBatch::getInputFrozenAt,
+                        b.getInputFrozenAt() == null ? LocalDateTime.now() : b.getInputFrozenAt());
         appendVersionGuard(wrapper, b);
         return update(wrapper);
     }
@@ -102,6 +122,10 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
                     ErrorCode.VALIDATION_FAILED,
                     "存在阻塞问题，暂不可提交审批：" + String.join("；", blockingMessages)
             );
+        }
+
+        if (payrollTaxLedgerService != null) {
+            payrollTaxLedgerService.postBatch(batchId);
         }
 
         PayrollDistribution distribution = distributionService.createOrReuseForBatch(b);
@@ -232,7 +256,16 @@ public class PayrollBatchServiceImpl extends ServiceImpl<PayrollBatchMapper, Pay
             );
         }
         if (current == target) {
+            if ((target == PayrollBatchStatus.PAID || target == PayrollBatchStatus.ARCHIVED)
+                    && payrollSettlementIntegrityService != null) {
+                return payrollSettlementIntegrityService.finalizeBatch(batchId, target);
+            }
             return true;
+        }
+
+        if ((target == PayrollBatchStatus.PAID || target == PayrollBatchStatus.ARCHIVED)
+                && payrollSettlementIntegrityService != null) {
+            return payrollSettlementIntegrityService.finalizeBatch(batchId, target);
         }
 
         LambdaUpdateWrapper<PayrollBatch> wrapper = new LambdaUpdateWrapper<PayrollBatch>()

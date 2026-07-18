@@ -3,6 +3,8 @@ package com.yiyundao.compensation.modules.user.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.yiyundao.compensation.common.exception.BusinessException;
+import com.yiyundao.compensation.common.response.ErrorCode;
 import com.yiyundao.compensation.infrastructure.dao.ExternalIdentityMapper;
 import com.yiyundao.compensation.interfaces.dto.config.DingTalkConfigDto;
 import com.yiyundao.compensation.interfaces.dto.config.FeishuConfigDto;
@@ -193,7 +195,9 @@ public class ExternalIdentityServiceImpl extends ServiceImpl<ExternalIdentityMap
             log.debug("刷新外部身份最近访问时间: provider={}, subjectType={}, subjectId={}",
                     normalizedProvider, normalizedSubjectType, subjectId);
         }
-        updateById(existing);
+        if (!updateById(existing)) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "平台身份已被其他操作修改，请刷新后重试");
+        }
         demoteOtherPrimaryIdentities(existing);
     }
 
@@ -246,11 +250,42 @@ public class ExternalIdentityServiceImpl extends ServiceImpl<ExternalIdentityMap
             return;
         }
         existing.setStatus(STATUS_INACTIVE);
+        existing.setPrimaryFlag(false);
         existing.setUnboundAt(LocalDateTime.now());
         if (StringUtils.hasText(source)) {
             existing.setSource(source);
         }
-        updateById(existing);
+        if (!updateById(existing)) {
+            throw new BusinessException(ErrorCode.REQUEST_CONFLICT, "平台身份解绑冲突，请刷新后重试");
+        }
+    }
+
+    @Override
+    @Transactional
+    public void deactivatePlatformIdentities(Long employeeId, Long userId, String source) {
+        if (employeeId == null && userId == null) {
+            return;
+        }
+        LambdaUpdateWrapper<ExternalIdentity> wrapper = new LambdaUpdateWrapper<ExternalIdentity>()
+                .set(ExternalIdentity::getStatus, STATUS_INACTIVE)
+                .set(ExternalIdentity::getPrimaryFlag, false)
+                .set(ExternalIdentity::getUnboundAt, LocalDateTime.now())
+                .eq(ExternalIdentity::getStatus, STATUS_ACTIVE);
+        if (StringUtils.hasText(source)) {
+            wrapper.set(ExternalIdentity::getSource, source);
+        }
+        if (employeeId != null && userId != null) {
+            wrapper.and(condition -> condition
+                    .eq(ExternalIdentity::getEmployeeId, employeeId)
+                    .or()
+                    .eq(ExternalIdentity::getUserId, userId));
+        } else if (employeeId != null) {
+            wrapper.eq(ExternalIdentity::getEmployeeId, employeeId);
+        } else {
+            wrapper.eq(ExternalIdentity::getUserId, userId);
+        }
+        // 批量解绑是幂等操作：没有活动身份时 update 返回 false 也应视为成功。
+        update(wrapper);
     }
 
     private String normalizeProvider(String provider) {

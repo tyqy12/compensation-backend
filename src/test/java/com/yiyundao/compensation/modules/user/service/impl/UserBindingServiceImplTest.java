@@ -81,6 +81,7 @@ class UserBindingServiceImplTest {
                 ExternalIdentityService.DEFAULT_SUBJECT_TYPE,
                 "wx-conflict"
         )).thenReturn(occupiedIdentity);
+        when(sysUserService.update(any(UpdateWrapper.class))).thenReturn(true);
 
         service.executeApprovedPlatformLink(7003L, 1003L, 2003L, "wechat", "wx-conflict");
 
@@ -142,7 +143,7 @@ class UserBindingServiceImplTest {
         when(sysConfigService.getLong("system.admin_user_id", 1L)).thenReturn(1L);
         when(approvalEngineProvider.getObject()).thenReturn(approvalEngine);
         when(approvalEngine.startWorkflow(
-                eq(WorkflowType.OFFLINE),
+                eq(WorkflowType.PLATFORM_BIND),
                 anyString(),
                 eq("PLATFORM_LINK"),
                 eq(1L),
@@ -156,7 +157,7 @@ class UserBindingServiceImplTest {
         assertThat(result.message()).contains("平台账号冲突");
 
         verify(approvalEngine).startWorkflow(
-                eq(WorkflowType.OFFLINE),
+                eq(WorkflowType.PLATFORM_BIND),
                 anyString(),
                 eq("PLATFORM_LINK"),
                 eq(1L),
@@ -188,7 +189,7 @@ class UserBindingServiceImplTest {
         when(sysConfigService.getLong("system.admin_user_id", 1L)).thenReturn(1L);
         when(approvalEngineProvider.getObject()).thenReturn(approvalEngine);
         when(approvalEngine.startWorkflow(
-                eq(WorkflowType.OFFLINE),
+                eq(WorkflowType.PLATFORM_BIND),
                 anyString(),
                 eq("PLATFORM_LINK"),
                 eq(1L),
@@ -202,7 +203,7 @@ class UserBindingServiceImplTest {
         assertThat(result.message()).contains("员工关联冲突");
 
         verify(approvalEngine).startWorkflow(
-                eq(WorkflowType.OFFLINE),
+                eq(WorkflowType.PLATFORM_BIND),
                 anyString(),
                 eq("PLATFORM_LINK"),
                 eq(1L),
@@ -507,6 +508,34 @@ class UserBindingServiceImplTest {
         verify(externalIdentityService, never()).upsertPlatformIdentity(
                 anyString(), anyString(), anyString(), anyString(), any(), any(), anyString(),
                 org.mockito.ArgumentMatchers.anyBoolean());
+    }
+
+    @Test
+    void ensureUserForEmployeeShouldSynchronizeExistingUserProfile() {
+        UserBindingServiceImpl service = newService();
+        Employee employee = new Employee();
+        employee.setId(2012L);
+        employee.setName("新姓名");
+        employee.setPhone("13800138000");
+        employee.setEmail("new@example.com");
+        SysUser existingUser = new SysUser();
+        existingUser.setId(1012L);
+        existingUser.setEmployeeId(2012L);
+        existingUser.setRealName("旧姓名");
+        existingUser.setPhone("13900139000");
+        existingUser.setEmail("old@example.com");
+
+        when(sysUserService.getOne(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(existingUser)
+                .thenReturn(null);
+        when(sysUserService.updateById(existingUser)).thenReturn(true);
+
+        service.ensureUserForEmployee(employee);
+
+        assertThat(existingUser.getRealName()).isEqualTo("新姓名");
+        assertThat(existingUser.getPhone()).isEqualTo("13800138000");
+        assertThat(existingUser.getEmail()).isEqualTo("new@example.com");
+        verify(sysUserService).updateById(existingUser);
     }
 
     @Test

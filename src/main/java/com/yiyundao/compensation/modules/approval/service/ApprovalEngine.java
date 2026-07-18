@@ -201,6 +201,8 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
             case PAYROLL_DISTRIBUTION -> generatePayrollDistributionSteps(workflow.getInitiatorId(), workflowData);
             case ADHOC -> generateAdhocPaymentSteps(workflow.getInitiatorId());
             case OFFLINE -> generateOfflineEmployeeSteps(workflow.getInitiatorId());
+            case EMPLOYEE_PROFILE_CHANGE -> generateEmployeeProfileChangeSteps(workflow.getInitiatorId());
+            case PLATFORM_BIND -> generatePlatformBindSteps(workflow.getInitiatorId());
             case PERMISSION -> generatePermissionSteps(workflow.getInitiatorId());
             case PAYROLL_DISPUTE -> generatePayrollDisputeSteps(workflow.getInitiatorId());
         };
@@ -246,6 +248,23 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
         List<ApprovalFlowConfigManager.ApprovalStepConfig> config = loadOfflineApprovalConfig();
         if (config.isEmpty()) {
             config = approvalFlowConfigManager.getDefaultSteps(WorkflowType.OFFLINE);
+        }
+        return buildStepsFromConfig(config, initiatorId);
+    }
+
+    private List<ApprovalStep> generateEmployeeProfileChangeSteps(Long initiatorId) {
+        List<ApprovalFlowConfigManager.ApprovalStepConfig> config = loadApprovalConfig(
+                SecurityConstants.CONFIG_EMPLOYEE_PROFILE_CHANGE_APPROVAL_FLOW);
+        if (config.isEmpty()) {
+            config = approvalFlowConfigManager.getDefaultSteps(WorkflowType.EMPLOYEE_PROFILE_CHANGE);
+        }
+        return buildStepsFromConfig(config, initiatorId);
+    }
+
+    private List<ApprovalStep> generatePlatformBindSteps(Long initiatorId) {
+        List<ApprovalFlowConfigManager.ApprovalStepConfig> config = loadApprovalConfig(SecurityConstants.CONFIG_PLATFORM_BIND_APPROVAL_FLOW);
+        if (config.isEmpty()) {
+            config = approvalFlowConfigManager.getDefaultSteps(WorkflowType.PLATFORM_BIND);
         }
         return buildStepsFromConfig(config, initiatorId);
     }
@@ -713,6 +732,8 @@ public class ApprovalEngine extends ServiceImpl<ApprovalWorkflowMapper, Approval
             case PAYROLL_DISTRIBUTION -> "薪资发放审批";
             case ADHOC -> "临时支付审批";
             case OFFLINE -> "架构外员工审批";
+            case EMPLOYEE_PROFILE_CHANGE -> "员工资料变更审批";
+            case PLATFORM_BIND -> "平台账号绑定审批";
             case PERMISSION -> "权限授权审批";
             case PAYROLL_DISPUTE -> "薪酬异议审批";
         };

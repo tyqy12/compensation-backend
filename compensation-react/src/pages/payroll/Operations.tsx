@@ -698,11 +698,11 @@ const PayrollOperations: React.FC = () => {
         subTitle: '围绕一个批次推进录入、核算、确认、审批、发放与对账',
         extra: [
           <Button
-            key="legacy"
+            key="compliance"
             icon={<FileProtectOutlined />}
-            onClick={() => navigate('/payroll/batches/legacy')}
+            onClick={() => navigate('/payroll/compliance')}
           >
-            旧版批次视图
+            合规核算
           </Button>,
           <Button key="refresh" icon={<ReloadOutlined />} onClick={() => batchesQuery.refetch()}>
             刷新

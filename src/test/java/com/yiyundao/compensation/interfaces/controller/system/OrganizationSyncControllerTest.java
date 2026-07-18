@@ -8,7 +8,6 @@ import com.yiyundao.compensation.interfaces.dto.org.OrgImportRequest;
 import com.yiyundao.compensation.modules.audit.entity.AuditLog;
 import com.yiyundao.compensation.modules.audit.service.AuditLogService;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
-import com.yiyundao.compensation.modules.employee.service.EmployeeDepartmentService;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.system.service.OrgSyncTaskService;
 import com.yiyundao.compensation.modules.user.service.LegacyPlatformFieldPolicy;
@@ -31,14 +30,12 @@ class OrganizationSyncControllerTest {
     private final OrganizationSyncService organizationSyncService = mock(OrganizationSyncService.class);
     private final AuditLogService auditLogService = mock(AuditLogService.class);
     private final OrgSyncTaskService orgSyncTaskService = mock(OrgSyncTaskService.class);
-    private final EmployeeDepartmentService employeeDepartmentService = mock(EmployeeDepartmentService.class);
     private final EmployeeService employeeService = mock(EmployeeService.class);
     private final LegacyPlatformFieldPolicy legacyPlatformFieldPolicy = mock(LegacyPlatformFieldPolicy.class);
     private final OrganizationSyncController controller = new OrganizationSyncController(
             organizationSyncService,
             auditLogService,
             orgSyncTaskService,
-            employeeDepartmentService,
             employeeService,
             legacyPlatformFieldPolicy
     );
@@ -182,7 +179,7 @@ class OrganizationSyncControllerTest {
         ArgumentCaptor<Employee> employeeCaptor = ArgumentCaptor.forClass(Employee.class);
         verify(organizationSyncService).importOne(employeeCaptor.capture(), org.mockito.ArgumentMatchers.isNull());
         assertThat(employeeCaptor.getValue().getDepartment()).isEmpty();
-        verify(employeeDepartmentService).replaceDepartments(31L, "wechat", List.of());
+        assertThat(employeeCaptor.getValue().getDepartments()).isEmpty();
     }
 
     @Test

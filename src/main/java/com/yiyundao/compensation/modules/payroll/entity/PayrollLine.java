@@ -40,6 +40,8 @@ public class PayrollLine extends BaseEntity {
     private java.math.BigDecimal socialAmount;
     @TableField("net_amount")
     private java.math.BigDecimal netAmount;
+    @TableField("tax_breakdown_json")
+    private String taxBreakdownJson;
     private String currency;
     private String status;
     private String note;

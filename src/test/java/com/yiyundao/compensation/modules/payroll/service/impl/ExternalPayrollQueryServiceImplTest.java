@@ -10,6 +10,7 @@ import com.yiyundao.compensation.enums.PayrollBatchStatus;
 import com.yiyundao.compensation.interfaces.dto.openapi.OpenApiPayrollBatchDto;
 import com.yiyundao.compensation.interfaces.dto.openapi.OpenApiPayslipDto;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.employee.service.EmployeeDepartmentService;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.modules.payment.entity.PaymentBatch;
 import com.yiyundao.compensation.modules.payment.service.PaymentBatchService;
@@ -61,6 +62,8 @@ class ExternalPayrollQueryServiceImplTest {
 
     @Mock
     private ExternalIdentityService externalIdentityService;
+    @Mock
+    private EmployeeDepartmentService employeeDepartmentService;
 
     private ExternalPayrollQueryServiceImpl service;
 
@@ -75,7 +78,8 @@ class ExternalPayrollQueryServiceImplTest {
                 salaryItemService,
                 new ObjectMapper(),
                 encryptionService,
-                externalIdentityService
+                externalIdentityService,
+                employeeDepartmentService
         );
     }
 

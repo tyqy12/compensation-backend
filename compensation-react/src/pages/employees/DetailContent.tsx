@@ -96,6 +96,15 @@ export type EmployeeDetailContentProps = {
   onPaymentsPageChange: (page: PageState) => void;
   isToggleOfflinePending?: boolean;
   isAssignManagerPending?: boolean;
+  canEdit: boolean;
+  canBind: boolean;
+  canToggleOffline: boolean;
+  canAssignManager: boolean;
+  canViewIdCard: boolean;
+  canViewSettlementAccount: boolean;
+  canViewApprovals: boolean;
+  canViewPayslips: boolean;
+  canViewPayments: boolean;
 };
 
 const InfoSection: React.FC<InfoSectionProps> = ({
@@ -280,6 +289,15 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
   onPaymentsPageChange,
   isToggleOfflinePending,
   isAssignManagerPending,
+  canEdit,
+  canBind,
+  canToggleOffline,
+  canAssignManager,
+  canViewIdCard,
+  canViewSettlementAccount,
+  canViewApprovals,
+  canViewPayslips,
+  canViewPayments,
 }) => {
   const navigate = useNavigate();
   const [activeRecordTab, setActiveRecordTab] = useState('approvals');
@@ -531,7 +549,7 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
     {
       key: 'idCard',
       label: '身份证号',
-      children: (
+      children: canViewIdCard ? (
         <SensitiveValue
           visible={sensitiveDataVisible.idCard}
           data={idCardQuery.data}
@@ -540,7 +558,7 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
           onView={() => onViewSensitiveData('idCard')}
           onHide={() => onHideSensitiveData('idCard')}
         />
-      ),
+      ) : <MissingValue />,
     },
   ];
 
@@ -577,7 +595,7 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
     {
       key: 'settlementAccount',
       label: getSettlementAccountLabel(employeeSettlementType),
-      children: (
+      children: canViewSettlementAccount ? (
         <SensitiveValue
           visible={sensitiveDataVisible.settlementAccount}
           data={settlementAccountQuery.data}
@@ -589,7 +607,7 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
           onView={() => onViewSensitiveData('settlementAccount')}
           onHide={() => onHideSensitiveData('settlementAccount')}
         />
-      ),
+      ) : <MissingValue />,
     },
     {
       key: 'settlementAccountName',
@@ -638,7 +656,7 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
   ];
 
   const recordTabItems = [
-    {
+    canViewApprovals && {
       key: 'approvals',
       label: `审批记录 (${approvalsQuery.data?.total || 0})`,
       children: (
@@ -654,7 +672,7 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
         />
       ),
     },
-    {
+    canViewPayslips && {
       key: 'payslips',
       label: `发薪记录 (${payslipsQuery.data?.total || 0})`,
       children: (
@@ -670,7 +688,7 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
         />
       ),
     },
-    {
+    canViewPayments && {
       key: 'payments',
       label: `支付记录 (${paymentsQuery.data?.total || 0})`,
       children: (
@@ -686,7 +704,10 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
         />
       ),
     },
-  ];
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const effectiveRecordTab = recordTabItems.some((item) => item?.key === activeRecordTab)
+    ? activeRecordTab
+    : recordTabItems[0]?.key;
 
   return (
     <div className="employee-detail-view">
@@ -717,29 +738,35 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
         </div>
 
         <div className="employee-identity-actions">
-          <Button type="primary" icon={<EditOutlined />} onClick={onEdit}>
-            编辑信息
-          </Button>
-          {!employeeProvider && (
+          {canEdit && (
+            <Button type="primary" icon={<EditOutlined />} onClick={onEdit}>
+              编辑信息
+            </Button>
+          )}
+          {canBind && !employeeProvider && (
             <Button icon={<LinkOutlined />} onClick={onBind}>
               绑定平台
             </Button>
           )}
-          <Button
-            icon={<UserSwitchOutlined />}
-            onClick={onAssignManager}
-            loading={isAssignManagerPending}
-          >
-            指定负责人
-          </Button>
-          <Button
-            danger={!employee.offline}
-            icon={<StopOutlined />}
-            onClick={onToggleOffline}
-            loading={isToggleOfflinePending}
-          >
-            {employee.offline ? '取消架构外标记' : '标记为架构外员工'}
-          </Button>
+          {canAssignManager && (
+            <Button
+              icon={<UserSwitchOutlined />}
+              onClick={onAssignManager}
+              loading={isAssignManagerPending}
+            >
+              指定负责人
+            </Button>
+          )}
+          {canToggleOffline && (
+            <Button
+              danger={!employee.offline}
+              icon={<StopOutlined />}
+              onClick={onToggleOffline}
+              loading={isToggleOfflinePending}
+            >
+              {employee.offline ? '取消架构外标记' : '标记为架构外员工'}
+            </Button>
+          )}
         </div>
       </section>
 
@@ -841,13 +868,15 @@ const EmployeeDetailContent: React.FC<EmployeeDetailContentProps> = ({
         </aside>
       </div>
 
-      <InfoSection
-        title="业务记录"
-        description="审批、发薪和支付记录分开查看，分页互不影响"
-        className="employee-records-section"
-      >
-        <Tabs activeKey={activeRecordTab} onChange={setActiveRecordTab} items={recordTabItems} />
-      </InfoSection>
+      {recordTabItems.length > 0 && (
+        <InfoSection
+          title="业务记录"
+          description="审批、发薪和支付记录分开查看，分页互不影响"
+          className="employee-records-section"
+        >
+          <Tabs activeKey={effectiveRecordTab} onChange={setActiveRecordTab} items={recordTabItems} />
+        </InfoSection>
+      )}
     </div>
   );
 };

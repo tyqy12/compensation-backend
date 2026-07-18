@@ -136,6 +136,8 @@ public final class SecurityConstants {
      * 架构外员工审批流程配置键
      */
     public static final String CONFIG_OFFLINE_APPROVAL_FLOW = "offline.approval.flow";
+    public static final String CONFIG_EMPLOYEE_PROFILE_CHANGE_APPROVAL_FLOW = "employee.profile-change.approval.flow";
+    public static final String CONFIG_PLATFORM_BIND_APPROVAL_FLOW = "platform.bind.approval.flow";
 
     /**
      * 权限授权审批流程配置键

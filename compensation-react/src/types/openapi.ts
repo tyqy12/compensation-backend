@@ -98,6 +98,14 @@ export interface BatchImportRequest {
   employees: EmployeeCreateRequest[];
 }
 
+export interface EmployeeBatchImportResult {
+  total: number;
+  imported: number;
+  skipped: number;
+  bound: number;
+  errors?: string[];
+}
+
 // Payment
 export interface PaymentBatchVO {
   id?: number;

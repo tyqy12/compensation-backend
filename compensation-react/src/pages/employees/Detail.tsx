@@ -42,6 +42,7 @@ import {
   normalizeTextValue,
   type SettlementAccountType,
 } from './detailUtils';
+import { useHasAction } from '@services/queries/rbac';
 import './Detail.less';
 
 const { Text } = Typography;
@@ -74,7 +75,9 @@ function buildEditFormValues(target: Employee): EmployeeEditFormValues {
     name: target.name,
     phone: normalizeTextValue(detail.phone) ?? normalizeTextValue(target.phoneMasked),
     email: normalizeTextValue(target.email),
-    department: normalizeTextValue(target.department),
+    departments: target.departments?.length
+      ? target.departments
+      : normalizeTextValue(target.department)?.split(/[,，、/]+/).map((value) => value.trim()).filter(Boolean),
     position: normalizeTextValue(target.position),
     employmentType: target.employmentType,
     status: target.status,
@@ -118,21 +121,35 @@ const EmployeeDetail: React.FC = () => {
   const editSettlementType = Form.useWatch('settlementAccountType', editForm);
   const { message, modal } = AntdApp.useApp();
 
+  const canEdit = useHasAction('api.employee.update');
+  const canBind = useHasAction('api.employee.bind-platform');
+  const canAssignManager = useHasAction('api.admin.employee.manager');
+  const canToggleOffline = useHasAction('api.admin.employee.offline');
+  const canViewIdCard = useHasAction('api.employee.decrypt-id-card');
+  const canViewSettlementAccount = useHasAction('api.employee.decrypt-settlement');
+  const canViewApprovals = useHasAction('api.employee.approvals');
+  const canViewPayslips = useHasAction('api.employee.payslips');
+  const canViewPayments = useHasAction('api.employee.payments');
+
   const employeeQuery = useEmployeeQuery(id ?? '', { enabled: Boolean(id) });
-  const idCardQuery = useEmployeeIdCardQuery(employeeNumericId, {
-    enabled: sensitiveDataVisible.idCard && hasNumericEmployeeId,
+  const employee = employeeQuery.data;
+  const resolvedEmployeeNumericId = employee?.id ?? (hasNumericEmployeeId ? employeeNumericId : 0);
+  const hasResolvedEmployeeId = resolvedEmployeeNumericId > 0;
+
+  const idCardQuery = useEmployeeIdCardQuery(resolvedEmployeeNumericId, {
+    enabled: sensitiveDataVisible.idCard && hasResolvedEmployeeId && canViewIdCard,
   });
-  const settlementAccountQuery = useEmployeeSettlementAccountQuery(employeeNumericId, {
-    enabled: sensitiveDataVisible.settlementAccount && hasNumericEmployeeId,
+  const settlementAccountQuery = useEmployeeSettlementAccountQuery(resolvedEmployeeNumericId, {
+    enabled: sensitiveDataVisible.settlementAccount && hasResolvedEmployeeId && canViewSettlementAccount,
   });
-  const approvalsQuery = useEmployeeApprovalsQuery(employeeNumericId, approvalsPage, {
-    enabled: hasNumericEmployeeId,
+  const approvalsQuery = useEmployeeApprovalsQuery(resolvedEmployeeNumericId, approvalsPage, {
+    enabled: hasResolvedEmployeeId && canViewApprovals,
   });
-  const payslipsQuery = useEmployeePayslipsQuery(employeeNumericId, payslipsPage, {
-    enabled: hasNumericEmployeeId,
+  const payslipsQuery = useEmployeePayslipsQuery(resolvedEmployeeNumericId, payslipsPage, {
+    enabled: hasResolvedEmployeeId && canViewPayslips,
   });
-  const paymentsQuery = useEmployeePaymentsQuery(employeeNumericId, paymentsPage, {
-    enabled: hasNumericEmployeeId,
+  const paymentsQuery = useEmployeePaymentsQuery(resolvedEmployeeNumericId, paymentsPage, {
+    enabled: hasResolvedEmployeeId && canViewPayments,
   });
 
   const updateEmployeeMutation = useUpdateEmployeeMutation();
@@ -140,7 +157,6 @@ const EmployeeDetail: React.FC = () => {
   const toggleOfflineMutation = useToggleEmployeeOfflineMutation();
   const assignManagerMutation = useAssignEmployeeManagerMutation();
 
-  const employee = employeeQuery.data;
   const employeeProvider = employee?.provider || undefined;
   const employeeSubjectId = employee?.subjectId;
   const resolvedEditSettlementType = normalizeSettlementAccountType(
@@ -190,6 +206,13 @@ const EmployeeDetail: React.FC = () => {
       formValues.name = normalizeTextValue(formValues.name);
       formValues.email = normalizeTextValue(formValues.email);
       formValues.department = normalizeTextValue(formValues.department);
+      if (Array.isArray(formValues.departments)) {
+        const departments = formValues.departments
+          .map((value) => normalizeTextValue(value))
+          .filter((value): value is string => Boolean(value));
+        formValues.departments = departments;
+        formValues.department = departments[0];
+      }
       formValues.position = normalizeTextValue(formValues.position);
       formValues.settlementAccountName = normalizeTextValue(formValues.settlementAccountName);
       formValues.bankName = normalizeTextValue(formValues.bankName);
@@ -262,8 +285,17 @@ const EmployeeDetail: React.FC = () => {
     }
 
     try {
-      await bindPlatformMutation.mutateAsync({ id: employee.id, ...values });
-      message.success('平台绑定成功');
+      const result = await bindPlatformMutation.mutateAsync({ id: employee.id, ...values });
+      if (result?.result === 'PENDING_APPROVAL') {
+        message.info(result.message || '平台账号冲突，已提交审批');
+      } else if (result?.result === 'ALREADY_BOUND') {
+        message.info(result.message || '该平台账号已经绑定');
+      } else if (result?.result && result.result !== 'SUCCESS') {
+        message.error(result.message || '平台绑定失败');
+        return;
+      } else {
+        message.success(result?.message || '平台绑定成功');
+      }
       setBindModalVisible(false);
       bindForm.resetFields();
       await employeeQuery.refetch();
@@ -346,7 +378,7 @@ const EmployeeDetail: React.FC = () => {
 
   const handleRefresh = () => {
     void employeeQuery.refetch();
-    if (hasNumericEmployeeId) {
+    if (hasResolvedEmployeeId) {
       void approvalsQuery.refetch();
       void payslipsQuery.refetch();
       void paymentsQuery.refetch();
@@ -442,6 +474,15 @@ const EmployeeDetail: React.FC = () => {
         onPaymentsPageChange={setPaymentsPage}
         isToggleOfflinePending={toggleOfflineMutation.isPending}
         isAssignManagerPending={assignManagerMutation.isPending}
+        canEdit={canEdit}
+        canBind={canBind}
+        canToggleOffline={canToggleOffline}
+        canAssignManager={canAssignManager}
+        canViewIdCard={canViewIdCard}
+        canViewSettlementAccount={canViewSettlementAccount}
+        canViewApprovals={canViewApprovals}
+        canViewPayslips={canViewPayslips}
+        canViewPayments={canViewPayments}
       />
 
       <Modal
@@ -469,8 +510,8 @@ const EmployeeDetail: React.FC = () => {
             <Input placeholder="请输入邮箱地址" />
           </Form.Item>
 
-          <Form.Item name="department" label="部门">
-            <Input placeholder="请输入部门" />
+          <Form.Item name="departments" label="部门">
+            <Select mode="tags" placeholder="输入部门名称后回车" tokenSeparators={[',', '，', '/', '、']} />
           </Form.Item>
 
           <Form.Item name="position" label="职位">

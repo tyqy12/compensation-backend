@@ -159,7 +159,7 @@ class SalaryTemplateControllerTest {
         SalaryTemplateUpsertRequest request = upsertRequest();
         request.setTaxRuleJson("""
                 {
-                  "tax": {"rate": -0.01, "applyOn": "GROSS"},
+                  "tax": {"mode": "cumulative_withholding", "applyOn": "GROSS"},
                   "social": {"rate": 1.01, "applyOn": "GROSS"}
                 }
                 """);
@@ -167,8 +167,7 @@ class SalaryTemplateControllerTest {
         var response = controller.create(request);
 
         assertThat(response.getCode()).isEqualTo(ErrorCode.PARAM_INVALID.getCode());
-        assertThat(response.getMessage()).contains("taxRuleJson.tax.rate必须在0到1之间",
-                "taxRuleJson.social.rate必须在0到1之间");
+        assertThat(response.getMessage()).contains("taxRuleJson.social.rate必须在0到1之间");
         verify(salaryTemplateService, never()).save(any(SalaryTemplate.class));
     }
 
@@ -241,7 +240,7 @@ class SalaryTemplateControllerTest {
         request.setName("Full-time standard");
         request.setType("full_time");
         request.setItemsJson("[{\"code\":\"base\",\"name\":\"基本工资\",\"type\":\"earning\",\"required\":true}]");
-        request.setTaxRuleJson("{\"tax\":{\"rate\":0.1,\"applyOn\":\"GROSS\"}}");
+        request.setTaxRuleJson("{\"tax\":{\"mode\":\"cumulative_withholding\",\"applyOn\":\"GROSS\"}}");
         request.setStatus("enabled");
         return request;
     }
@@ -251,7 +250,7 @@ class SalaryTemplateControllerTest {
         template.setName("Full-time standard");
         template.setType("full_time");
         template.setItemsJson("[{\"code\":\"base\",\"name\":\"基本工资\",\"type\":\"earning\",\"required\":true}]");
-        template.setTaxRuleJson("{\"tax\":{\"rate\":0.1,\"applyOn\":\"GROSS\"}}");
+        template.setTaxRuleJson("{\"tax\":{\"mode\":\"cumulative_withholding\",\"applyOn\":\"GROSS\"}}");
         template.setStatus("enabled");
         template.setDataVersion(3L);
         enrichPersistenceFields(template);

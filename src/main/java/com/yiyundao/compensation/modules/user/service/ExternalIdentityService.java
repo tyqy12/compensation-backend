@@ -27,4 +27,6 @@ public interface ExternalIdentityService extends IService<ExternalIdentity> {
 
     void deactivatePlatformIdentity(String provider, String tenantKey, String subjectType, String subjectId,
                                     Long employeeId, Long userId, String source);
+
+    void deactivatePlatformIdentities(Long employeeId, Long userId, String source);
 }

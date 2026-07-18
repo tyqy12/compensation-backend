@@ -7,6 +7,7 @@ import lombok.Builder;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.time.LocalDate;
 
 @Data
 @Builder
@@ -21,6 +22,12 @@ public class PayrollBatchResponseDto {
     private String type;
     private String scopeJson;
     private String currency;
+    private LocalDate payDate;
+    private Integer taxYear;
+    private Integer taxMonth;
+    private Long taxWithholdingEntityId;
+    private Integer taxBasicDeductionMonths;
+    private Long policyPackageId;
     private String calculationStatus;
     private Integer batchRevision;
     private String inputSnapshotHash;
@@ -35,6 +42,8 @@ public class PayrollBatchResponseDto {
     private String confirmationMode;
     private LocalDateTime confirmationCompletedTime;
     private String remark;
+    private String resultHash;
+    private Boolean immutableFlag;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 
@@ -56,6 +65,12 @@ public class PayrollBatchResponseDto {
                 .type(batch.getType())
                 .scopeJson(batch.getScopeJson())
                 .currency(batch.getCurrency())
+                .payDate(batch.getPayDate())
+                .taxYear(batch.getTaxYear())
+                .taxMonth(batch.getTaxMonth())
+                .taxWithholdingEntityId(batch.getTaxWithholdingEntityId())
+                .taxBasicDeductionMonths(batch.getTaxBasicDeductionMonths())
+                .policyPackageId(batch.getPolicyPackageId())
                 .calculationStatus(code(batch.getCalculationStatus()))
                 .batchRevision(batch.getBatchRevision())
                 .inputSnapshotHash(batch.getInputSnapshotHash())
@@ -70,6 +85,8 @@ public class PayrollBatchResponseDto {
                 .confirmationMode(batch.getConfirmationMode())
                 .confirmationCompletedTime(batch.getConfirmationCompletedTime())
                 .remark(batch.getRemark())
+                .resultHash(batch.getResultHash())
+                .immutableFlag(batch.getImmutableFlag())
                 .createTime(batch.getCreateTime())
                 .updateTime(batch.getUpdateTime())
                 .build();

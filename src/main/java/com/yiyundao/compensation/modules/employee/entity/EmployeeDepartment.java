@@ -26,9 +26,19 @@ public class EmployeeDepartment extends BaseEntity {
     private String deptName;
 
     @TableField("is_primary")
-    private Boolean primary; // 是否主部门
+    private Boolean primaryFlag; // 是否主部门
 
     @TableField("order_num")
     private Integer orderNum; // 展示顺序
-}
 
+    /**
+     * 业务层保留 primary 语义；持久化属性使用 primaryFlag，避免 MyBatis-Plus 生成保留字 SQL 别名。
+     */
+    public Boolean getPrimary() {
+        return primaryFlag;
+    }
+
+    public void setPrimary(Boolean primary) {
+        this.primaryFlag = primary;
+    }
+}

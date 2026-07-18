@@ -6,6 +6,8 @@ import lombok.Data;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
 
 @Data
 public class EmployeeListItemVO {
@@ -13,6 +15,7 @@ public class EmployeeListItemVO {
     private String employeeId;
     private String name;
     private String department;
+    private List<String> departments;
     private String position;
     private String status;
     private String statusName;
@@ -28,6 +31,7 @@ public class EmployeeListItemVO {
         vo.setEmployeeId(e.getEmployeeId());
         vo.setName(e.getName());
         vo.setDepartment(e.getDepartment());
+        vo.setDepartments(splitDepartments(e.getDepartment()));
         vo.setPosition(e.getPosition());
         vo.setStatus(e.getStatus());
         vo.setStatusName(translateStatus(e.getStatus()));
@@ -56,5 +60,16 @@ public class EmployeeListItemVO {
             case "feishu" -> "飞书";
             default -> code;
         };
+    }
+
+    private static List<String> splitDepartments(String department) {
+        if (department == null || department.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(department.split("[,/，、]"))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .distinct()
+                .toList();
     }
 }

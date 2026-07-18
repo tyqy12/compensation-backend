@@ -9,6 +9,7 @@ import com.yiyundao.compensation.interfaces.dto.employee.*;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformRequest;
 import com.yiyundao.compensation.modules.employee.dto.BindPlatformResult;
 import com.yiyundao.compensation.modules.employee.entity.Employee;
+import com.yiyundao.compensation.modules.employee.dto.EmployeeBatchImportResult;
 import com.yiyundao.compensation.modules.employee.service.EmployeeService;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeVO;
 import com.yiyundao.compensation.interfaces.vo.employee.EmployeeApprovalRecordVO;
@@ -174,14 +175,14 @@ public class EmployeeController {
     }
 
     @GetMapping("/offline")
-    @SecurityAnnotations.IsFinanceOrHrOrAdmin
+    @SecurityAnnotations.IsFinanceOrHrOrManagerOrAdmin
     @Operation(summary = "获取架构外员工列表", description = "获取所有架构外员工或指定管理员的架构外员工")
     public ApiResponse<List<EmployeeVO>> offlineList(@RequestParam(required = false) Long managerId) {
         return ApiResponse.success(employeeService.getOfflineEmployees(managerId));
     }
 
     @GetMapping("/resigned")
-    @SecurityAnnotations.IsFinanceOrHrOrAdmin
+    @SecurityAnnotations.IsFinanceOrHrOrManagerOrAdmin
     @Operation(summary = "获取离职员工列表", description = "获取所有离职员工或指定管理员的离职员工")
     public ApiResponse<List<EmployeeVO>> resignedList(@RequestParam(required = false) Long managerId) {
         return ApiResponse.success(employeeService.getResignedEmployees(managerId));
@@ -230,7 +231,7 @@ public class EmployeeController {
     @SecurityAnnotations.IsHrOrAdmin
     @Idempotent(key = "'employee:batch-import:' + #p0.hashCode()", expireSeconds = 600, message = "员工批量导入正在处理中，请勿重复提交", throwOnLockFail = true, deleteOnError = true)
     @Operation(summary = "批量导入员工", description = "批量导入员工信息，跳过重复工号")
-    public ApiResponse<Void> batchImport(@Valid @RequestBody BatchImportRequest req) {
+    public ApiResponse<EmployeeBatchImportResult> batchImport(@Valid @RequestBody BatchImportRequest req) {
         for (EmployeeCreateRequest item : req.getEmployees()) {
             legacyPlatformFieldPolicy.handleLegacyInput(
                     "employee_controller_batch_import",
@@ -239,8 +240,7 @@ public class EmployeeController {
             );
         }
         List<Employee> list = req.getEmployees().stream().map(this::mapToEntity).toList();
-        employeeService.batchImport(list);
-        return ApiResponse.success(null);
+        return ApiResponse.success(employeeService.batchImport(list));
     }
 
     private Employee mapToEntity(EmployeeCreateRequest req) {
@@ -251,6 +251,7 @@ public class EmployeeController {
         e.setEmail(req.getEmail());
         e.setEncryptedIdCard(req.getIdCard());
         e.setDepartment(req.getDepartment());
+        e.setDepartments(req.getDepartments());
         e.setPosition(req.getPosition());
         e.setEmploymentType(req.getEmploymentType());
         e.setSubjectId(req.getSubjectId());
@@ -275,6 +276,7 @@ public class EmployeeController {
         e.setEmail(req.getEmail());
         e.setEncryptedIdCard(req.getIdCard());
         e.setDepartment(req.getDepartment());
+        e.setDepartments(req.getDepartments());
         e.setPosition(req.getPosition());
         e.setEmploymentType(req.getEmploymentType());
         e.setManagerId(req.getManagerId());

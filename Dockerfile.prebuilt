@@ -1,0 +1,23 @@
+# Fast rollout image: build the verified JAR on the host first with Maven.
+ARG JRE_IMAGE=eclipse-temurin:17-jre-jammy
+
+FROM ${JRE_IMAGE}
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl gosu \
+    && rm -rf /var/lib/apt/lists/* \
+    && groupadd --system --gid 10001 compensation \
+    && useradd --system --uid 10001 --gid compensation --home-dir /nonexistent --shell /usr/sbin/nologin compensation \
+    && mkdir -p /app /var/log/compensation /var/lib/compensation/files \
+    && chown -R compensation:compensation /app /var/log/compensation /var/lib/compensation/files
+
+COPY --chown=compensation:compensation target/compensation-0.0.1-SNAPSHOT.jar /app/app.jar
+COPY docker/app-entrypoint.sh /usr/local/bin/app-entrypoint.sh
+RUN chmod 755 /usr/local/bin/app-entrypoint.sh
+
+ENV SPRING_PROFILES_ACTIVE=prod \
+    JAVA_OPTS="-XX:+UseContainerSupport -XX:MaxRAMPercentage=75 -Duser.timezone=Asia/Shanghai -Djava.security.egd=file:/dev/./urandom"
+
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/app-entrypoint.sh"]
