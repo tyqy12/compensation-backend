@@ -269,6 +269,13 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
             }
         }
 
+        Map<Long, List<String>> sourcePermissions = databasePermissionService.getRoleActionCodes(sourceRoleId)
+                .entrySet().stream()
+                .collect(Collectors.toMap(Map.Entry::getKey, entry -> new ArrayList<>(entry.getValue()),
+                        (left, right) -> right, LinkedHashMap::new));
+        databasePermissionAssignmentService.replaceRolePermissions(
+                copy.getId(), sourcePermissions.keySet(), sourcePermissions, operatorId);
+
         log.info("复制角色成功: sourceId={}, newCode={}, newName={}, operatorId={}",
                 sourceRoleId, newCode, newName, operatorId);
         return copy;
@@ -286,10 +293,11 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
                 .eq(SysUserRole::getRoleId, id));
         vo.setUserCount(userCount.intValue());
 
-        // 统计资源数
-        Long resourceCount = roleResourceMapper.selectCount(new LambdaQueryWrapper<SysRoleResource>()
-                .eq(SysRoleResource::getRoleId, id));
-        vo.setResourceCount(resourceCount.intValue());
+        // 统计运行时真正生效的资源数，避免旧授权表与新权限表显示不一致。
+        int resourceCount = databasePermissionService.countRoleResources(Set.of(id))
+                .getOrDefault(id, 0L)
+                .intValue();
+        vo.setResourceCount(resourceCount);
 
         return vo;
     }
@@ -358,14 +366,8 @@ public class RoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impleme
                         SysUserRole::getRoleId,
                         Collectors.counting()));
 
-        // 批量查询每个角色的资源数
-        Map<Long, Long> resourceCountMap = roleResourceMapper.selectList(
-                        new LambdaQueryWrapper<SysRoleResource>()
-                                .in(SysRoleResource::getRoleId, roleIds))
-                .stream()
-                .collect(Collectors.groupingBy(
-                        SysRoleResource::getRoleId,
-                        Collectors.counting()));
+        // 运行时只认数据库驱动的新权限表，统计也必须使用同一口径。
+        Map<Long, Long> resourceCountMap = databasePermissionService.countRoleResources(roleIds);
 
         // 填充统计信息到角色对象
         for (SysRole role : roles) {

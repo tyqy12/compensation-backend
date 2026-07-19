@@ -229,6 +229,35 @@ public class DatabasePermissionService {
                 roleId);
     }
 
+    /**
+     * 统计角色当前真正生效的资源数。角色管理页面不能再从旧的 sys_role_resource 统计，
+     * 否则展示数量与运行时权限目录不一致。
+     */
+    public Map<Long, Long> countRoleResources(Collection<Long> roleIds) {
+        if (roleIds == null || roleIds.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> ids = roleIds.stream().filter(Objects::nonNull).distinct().toList();
+        if (ids.isEmpty()) {
+            return Map.of();
+        }
+        String placeholders = String.join(",", java.util.Collections.nCopies(ids.size(), "?"));
+        try {
+            return jdbcTemplate.query("SELECT rp.role_id, COUNT(DISTINCT rp.resource_id) AS resource_count " +
+                            "FROM sys_role_permission rp " +
+                            "JOIN sys_resource r ON r.id=rp.resource_id AND r.status='enabled' AND r.deleted=0 " +
+                            "JOIN sys_resource_action ra ON ra.resource_id=rp.resource_id AND ra.action_id=rp.action_id " +
+                            "AND ra.status='enabled' AND ra.deleted=0 " +
+                            "WHERE rp.role_id IN (" + placeholders + ") AND rp.status='enabled' AND rp.deleted=0 " +
+                            "GROUP BY rp.role_id",
+                    (rs, rowNum) -> Map.entry(rs.getLong("role_id"), rs.getLong("resource_count")),
+                    ids.toArray()).stream().collect(java.util.stream.Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        } catch (DataAccessException e) {
+            log.error("角色有效资源统计失败: roleIds={}", ids, e);
+            return Map.of();
+        }
+    }
+
     /** 返回用户直接授权的资源-操作，角色继承由 getUserBundle 统一合并。 */
     public Map<Long, Set<String>> getUserDirectActionCodes(Long userId) {
         if (userId == null) {

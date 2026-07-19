@@ -436,6 +436,8 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         migrateFrontendRouteResources();
         migrateDatabaseDrivenPermissions();
         migrateDatabaseDrivenPermissionsV2();
+        migrateDatabaseDrivenPermissionsV3();
+        retireLegacyRoles();
         // Approval workflow incremental columns
         migrateApprovalWorkflowColumns();
         migrateApprovalFlowConfigs();
@@ -1416,7 +1418,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         executeSqlSafely("""
                 INSERT INTO sys_resource
                     (type, code, name, path, parent_id, order_num, props_json, status, create_time, update_time)
-                SELECT 'API', 'api.payroll.compliance.tax', '薪酬合规计算', '/api/payroll/compliance/*',
+                SELECT 'API', 'api.payroll.compliance.tax', '薪酬合规计算', '/api/payroll/compliance/**',
                        (SELECT id FROM sys_resource WHERE code = 'menu.system.payroll' LIMIT 1),
                        320, '{"roles":["ADMIN","FINANCE"]}', 'enabled', NOW(), NOW()
                 WHERE NOT EXISTS (SELECT 1 FROM sys_resource WHERE code = 'api.payroll.compliance.tax')
@@ -1866,6 +1868,117 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         }
     }
 
+    /**
+     * 修复合规 API 的多级路径，并把历史上仍写入旧授权表的有效关系补入运行时权限表。
+     *
+     * <p>旧资源表仍被历史 SQL 迁移和兼容管理代码使用。运行时已经只读取新表，因此每次启动做一次幂等
+     * 回填，避免后续旧数据迁移导致角色权限再次断链。显式 DENY 不会被旧表的 ALLOW 覆盖。</p>
+     */
+    private void migrateDatabaseDrivenPermissionsV3() {
+        try {
+            executeSqlSafely("UPDATE sys_resource SET path='/api/payroll/compliance/**', " +
+                    "update_by='rbac_migration_v3', update_time=NOW() " +
+                    "WHERE code='api.payroll.compliance.tax' AND path='/api/payroll/compliance/*' AND deleted=0");
+
+            Long complianceResourceId = policyResourceId("api.payroll.compliance.tax");
+            if (complianceResourceId != null) {
+                ensureResourceActions(complianceResourceId, actionIds("read", "write", "delete", "execute"));
+            }
+
+            backfillPermissionTable("sys_role_resource", "sys_role_permission", "role_id");
+            backfillPermissionTable("sys_user_resource", "sys_user_permission", "user_id");
+            markDatabaseMigrationComplete("rbac.database.permission.migrated.v3",
+                    "数据库驱动权限 v3 路径与历史授权回填已完成");
+        } catch (Exception e) {
+            log.error("RBAC v3 migration failed; the next startup will retry", e);
+        }
+    }
+
+    /**
+     * 清理旧版角色别名，避免旧角色重新出现在角色管理和授权下拉框中。
+     *
+     * <p>历史迁移曾创建过 role.* 别名，但当前系统只保留数据库中的正式角色编码。已有用户先迁移到
+     * 对应正式角色，再软删除旧关联和角色记录，保留审计可追溯性；该清理每次启动幂等执行，防止旧版脚本
+     * 在后续环境初始化时再次引入这些角色。</p>
+     */
+    private void retireLegacyRoles() {
+        try {
+            executeSqlSafely("""
+                    INSERT INTO sys_user_role
+                        (user_id, role_id, granted_by, granted_at, expires_at, remarks,
+                         create_time, update_time, create_by, update_by, deleted, version)
+                    SELECT legacy_assignment.user_id, canonical_role.id, legacy_assignment.granted_by,
+                           legacy_assignment.granted_at, legacy_assignment.expires_at,
+                           CONCAT(COALESCE(legacy_assignment.remarks, ''), ' [legacy-role-migrated]'),
+                           NOW(), NOW(), 'legacy_role_cleanup', 'legacy_role_cleanup', 0, 0
+                    FROM sys_user_role legacy_assignment
+                    JOIN sys_role legacy_role ON legacy_role.id=legacy_assignment.role_id
+                        AND legacy_role.deleted=0
+                    JOIN sys_role canonical_role ON canonical_role.code=CASE legacy_role.code
+                        WHEN 'role.admin.all' THEN 'ADMIN'
+                        WHEN 'role.finance' THEN 'FINANCE'
+                        WHEN 'role.hr' THEN 'HR'
+                        WHEN 'role.manager' THEN 'MANAGER'
+                        WHEN 'role.employee' THEN 'EMPLOYEE'
+                    END AND canonical_role.deleted=0 AND canonical_role.status='enabled'
+                    WHERE legacy_assignment.deleted=0
+                      AND legacy_role.code IN ('role.admin.all','role.finance','role.hr','role.manager','role.employee')
+                      AND NOT EXISTS (
+                          SELECT 1 FROM sys_user_role existing
+                          WHERE existing.user_id=legacy_assignment.user_id
+                            AND existing.role_id=canonical_role.id
+                            AND existing.deleted=0
+                      )
+                    """);
+            executeSqlSafely("""
+                    UPDATE sys_user_role
+                    SET deleted=1, delete_by='legacy_role_cleanup', delete_time=NOW(),
+                        update_by='legacy_role_cleanup', update_time=NOW()
+                    WHERE deleted=0
+                      AND role_id IN (
+                          SELECT id FROM sys_role
+                          WHERE code IN ('role.admin.all','role.finance','role.hr','role.manager','role.employee')
+                      )
+                    """);
+            executeSqlSafely("""
+                    UPDATE sys_role_resource
+                    SET deleted=1, update_by='legacy_role_cleanup', update_time=NOW()
+                    WHERE deleted=0
+                      AND role_id IN (
+                          SELECT id FROM sys_role
+                          WHERE code IN ('role.admin.all','role.finance','role.hr','role.manager','role.employee')
+                      )
+                    """);
+            executeSqlSafely("""
+                    UPDATE sys_role_permission
+                    SET deleted=1, status='disabled', update_by='legacy_role_cleanup', update_time=NOW()
+                    WHERE deleted=0
+                      AND role_id IN (
+                          SELECT id FROM sys_role
+                          WHERE code IN ('role.admin.all','role.finance','role.hr','role.manager','role.employee')
+                      )
+                    """);
+            executeSqlSafely("""
+                    UPDATE sys_role
+                    SET status='disabled', deleted=1, update_by='legacy_role_cleanup', update_time=NOW()
+                    WHERE code IN ('role.admin.all','role.finance','role.hr','role.manager','role.employee')
+                      AND deleted=0
+                    """);
+            executeSqlSafely("""
+                    UPDATE sys_user
+                    SET permission_version=COALESCE(permission_version,0)+1,
+                        update_by='legacy_role_cleanup', update_time=NOW()
+                    WHERE status='active'
+                      AND id IN (
+                          SELECT user_id FROM sys_user_role
+                          WHERE create_by='legacy_role_cleanup' OR update_by='legacy_role_cleanup'
+                      )
+                    """);
+        } catch (Exception e) {
+            log.error("Legacy role cleanup failed; the next startup will retry", e);
+        }
+    }
+
     private void ensureRolePermissionIfMissing(Long roleId, Long resourceId, Long actionId) {
         Integer existing = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM sys_role_permission WHERE role_id=? AND resource_id=? AND action_id=?",
@@ -2040,7 +2153,8 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
                                            long resourceId, long actionId) {
         int restored = jdbcTemplate.update("UPDATE " + table + " SET effect='ALLOW', scope_json='{" +
                         "\"mode\":\"ALL\"}', status='enabled', deleted=0, update_by='rbac_migration', update_time=NOW() " +
-                        "WHERE " + subjectColumn + "=? AND resource_id=? AND action_id=?",
+                        "WHERE " + subjectColumn + "=? AND resource_id=? AND action_id=? " +
+                        "AND (effect IS NULL OR effect <> 'DENY')",
                 subjectId, resourceId, actionId);
         if (restored == 0) {
             jdbcTemplate.update("INSERT INTO " + table + " (" + subjectColumn + ",resource_id,action_id,effect,scope_json,status,create_time,update_time,create_by,update_by,deleted,version) " +

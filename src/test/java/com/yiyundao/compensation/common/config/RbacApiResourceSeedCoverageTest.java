@@ -289,6 +289,8 @@ class RbacApiResourceSeedCoverageTest {
                 new RouteSample("GET", "/api/payroll/payslips"),
                 new RouteSample("GET", "/api/payroll/payslips/11"),
                 new RouteSample("GET", "/api/payroll/payslips/11/download"),
+                new RouteSample("GET", "/api/payroll/compliance/tax/brackets"),
+                new RouteSample("GET", "/api/payroll/compliance/contribution-policies"),
                 new RouteSample("GET", "/api/payroll/reports/basic"),
                 new RouteSample("GET", "/api/payroll/reports/basic/export")
         );
@@ -298,6 +300,17 @@ class RbacApiResourceSeedCoverageTest {
                 .toList();
 
         assertThat(missing).isEmpty();
+    }
+
+    @Test
+    void complianceResourceMustMatchNestedRoutes() throws IOException {
+        String migrationSql = Files.readString(Path.of(
+                "src/main/resources/sql/migrations/2026-07-18__payroll_compliance_foundation.sql"));
+
+        assertThat(migrationSql)
+                .contains("api.payroll.compliance.tax")
+                .contains("/api/payroll/compliance/**")
+                .doesNotContain("/api/payroll/compliance/*',");
     }
 
     @Test

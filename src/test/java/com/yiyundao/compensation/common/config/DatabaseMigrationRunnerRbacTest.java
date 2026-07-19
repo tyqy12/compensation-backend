@@ -119,6 +119,8 @@ class DatabaseMigrationRunnerRbacTest {
 
         assertThat(resourceField("view.payroll.rules", "path")).isEqualTo("/payroll/rules");
         assertThat(resourceField("view.payroll.rules", "component")).isEqualTo("payroll/Rules");
+        assertThat(resourceField("api.payroll.compliance.tax", "path"))
+                .isEqualTo("/api/payroll/compliance/**");
         assertThat(resourceField("view.payroll.distributions", "status")).isEqualTo("enabled");
         assertThat(resourceField("view.payroll.reconciliations", "status")).isEqualTo("enabled");
         assertThat(enabledResourceCount("view.payroll.cycles")).isZero();

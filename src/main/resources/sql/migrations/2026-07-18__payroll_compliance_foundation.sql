@@ -408,7 +408,7 @@ WHERE NOT EXISTS (SELECT 1 FROM `sys_resource` WHERE `code`='view.payroll.compli
 
 INSERT INTO `sys_resource`
   (`type`,`code`,`name`,`path`,`parent_id`,`order_num`,`props_json`,`status`,`create_time`,`update_time`)
-SELECT 'API', 'api.payroll.compliance.tax', '薪酬合规计算', '/api/payroll/compliance/*',
+SELECT 'API', 'api.payroll.compliance.tax', '薪酬合规计算', '/api/payroll/compliance/**',
        (SELECT id FROM `sys_resource` WHERE `code`='menu.system.payroll' LIMIT 1), 320,
        '{"roles":["ADMIN","FINANCE"]}', 'enabled', NOW(), NOW()
 WHERE NOT EXISTS (SELECT 1 FROM `sys_resource` WHERE `code`='api.payroll.compliance.tax');
