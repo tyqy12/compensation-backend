@@ -4,8 +4,9 @@
  */
 
 import { useCallback, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import api from '@services/api';
+import { useMeResourcesQuery } from '@services/queries/rbac';
 import type {
   PermissionConfig,
   Resource,
@@ -14,7 +15,6 @@ import type {
   CheckPermissionRequest,
   CheckPermissionResult,
 } from '@types/auth';
-import type { MeResourcesData } from '@types/api';
 
 /**
  * 权限上下文值
@@ -48,20 +48,8 @@ export interface PermissionContextValue {
 export function usePermission(): PermissionContextValue {
   const queryClient = useQueryClient();
 
-  // 获取权限配置
-  const { data: permissionData, isLoading, error } = useQuery<MeResourcesData>({
-    queryKey: ['me', 'resources'],
-    queryFn: async () => {
-      const { data } = await api.get<{ code: number; message: string; data: MeResourcesData }>(
-        '/auth/me/resources'
-      );
-      if (data.code !== 0) {
-        throw new Error(data.message || '获取权限配置失败');
-      }
-      return data.data;
-    },
-    staleTime: 0,
-  });
+  // 所有权限消费者共享同一个按用户隔离的查询，避免菜单、路由和权限组件重复请求。
+  const { data: permissionData, isLoading, error } = useMeResourcesQuery();
 
   // 权限版本
   const version = permissionData?.permissionVersion ?? null;

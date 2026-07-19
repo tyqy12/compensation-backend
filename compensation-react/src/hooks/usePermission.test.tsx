@@ -1,14 +1,17 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderHook, waitFor } from '@testing-library/react';
+import { Provider } from 'react-redux';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePermission } from './usePermission';
 import api from '@services/api';
+import { login, store } from '@services/stores/authSlice';
 
 vi.mock('@services/api', () => ({
   default: {
     get: vi.fn(),
   },
+  unwrap: (response: { data: unknown }) => response.data,
 }));
 
 const mockApi = vi.mocked(api);
@@ -23,13 +26,16 @@ const createWrapper = () => {
   });
 
   return ({ children }: { children: React.ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <Provider store={store}>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </Provider>
   );
 };
 
 describe('usePermission', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    store.dispatch(login({ id: 'permission-test-user', username: 'permission-test', roles: [] }));
     mockApi.get.mockResolvedValue({
       data: {
         code: 0,

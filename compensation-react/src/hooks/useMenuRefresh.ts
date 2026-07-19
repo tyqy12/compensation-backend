@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useSelector } from 'react-redux';
 import type { RootState } from '@services/stores/authSlice';
 import { getMeResources } from '@services/rbac';
+import { meResourcesQueryKey } from '@services/queries/rbac';
 
 // localStorage cache key 生成函数（与 rbac.ts 保持一致）
 const cacheKey = (userId?: string | number | null) => (userId ? `rbac_cache_${userId}` : undefined);
@@ -21,7 +22,7 @@ export function useMenuRefresh() {
   const refreshingRef = useRef(false);
 
   const refreshMenus = useCallback(async () => {
-    if (refreshingRef.current) {
+    if (!userId || refreshingRef.current) {
       console.log('[MenuRefresh] 正在刷新中，跳过重复请求');
       return;
     }
@@ -34,8 +35,7 @@ export function useMenuRefresh() {
       const latest = await getMeResources();
       
       // 设置 React Query 缓存
-      qc.setQueryData(['me', 'resources', userId], latest);
-      qc.setQueryData(['me', 'actions', userId], latest.actions);
+      qc.setQueryData(meResourcesQueryKey(userId), latest);
       
       // 更新 localStorage 缓存
       const key = cacheKey(userId);
