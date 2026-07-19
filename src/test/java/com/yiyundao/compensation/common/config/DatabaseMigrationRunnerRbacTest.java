@@ -91,6 +91,32 @@ class DatabaseMigrationRunnerRbacTest {
                 """, Integer.class);
         assertThat(seededRoles).isEqualTo(5);
 
+        Integer authResourceReadGrants = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM sys_role_permission rp
+                JOIN sys_role role ON role.id = rp.role_id
+                JOIN sys_resource resource ON resource.id = rp.resource_id
+                JOIN sys_permission_action action ON action.id = rp.action_id
+                WHERE role.status = 'enabled' AND role.deleted = 0
+                  AND resource.code = 'rbac.user.auth.me'
+                  AND action.code = 'read'
+                  AND rp.effect = 'ALLOW'
+                  AND rp.status = 'enabled' AND rp.deleted = 0
+                """, Integer.class);
+        assertThat(authResourceReadGrants).isEqualTo(seededRoles);
+
+        new DatabaseMigrationRunner(jdbcTemplate).run(null);
+        Integer grantsAfterRerun = jdbcTemplate.queryForObject("""
+                SELECT COUNT(*)
+                FROM sys_role_permission rp
+                JOIN sys_resource resource ON resource.id = rp.resource_id
+                JOIN sys_permission_action action ON action.id = rp.action_id
+                WHERE resource.code = 'rbac.user.auth.me'
+                  AND action.code = 'read'
+                  AND rp.status = 'enabled' AND rp.deleted = 0
+                """, Integer.class);
+        assertThat(grantsAfterRerun).isEqualTo(authResourceReadGrants);
+
         assertThat(resourceField("view.payroll.rules", "path")).isEqualTo("/payroll/rules");
         assertThat(resourceField("view.payroll.rules", "component")).isEqualTo("payroll/Rules");
         assertThat(resourceField("view.payroll.distributions", "status")).isEqualTo("enabled");

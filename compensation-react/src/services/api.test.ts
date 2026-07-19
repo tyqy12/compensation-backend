@@ -12,6 +12,7 @@ vi.mock('./navigation', () => ({
 
 // 创建一个模拟的axios实例
 const mockAxiosInstance = {
+  request: vi.fn(),
   interceptors: {
     request: {
       use: vi.fn(),
@@ -49,6 +50,8 @@ describe('API服务', () => {
     window.history.replaceState({}, '', '/');
     mockAxiosInstance.interceptors.request.use.mockClear();
     mockAxiosInstance.interceptors.response.use.mockClear();
+    mockAxiosInstance.request.mockReset();
+    vi.mocked(axios.post).mockReset();
     (mockedAxios.create as any).mockReturnValue(mockAxiosInstance as any);
   });
 
@@ -140,5 +143,39 @@ describe('API服务', () => {
     expect(localStorage.getItem('auth')).toBe('{"user":{"username":"admin"}}');
     expect(sessionStorage.getItem('auth_redirect')).toBeNull();
     expect(redirectToLogin).not.toHaveBeenCalled();
+  });
+
+  it('访问令牌过期时使用 refreshToken 刷新并重试原请求', async () => {
+    localStorage.setItem('auth', JSON.stringify({
+      user: { id: '1', username: 'admin', roles: ['ADMIN'] },
+      accessToken: 'expired-token',
+      refreshToken: 'refresh-token',
+      roles: ['ADMIN'],
+    }));
+    vi.mocked(axios.post).mockResolvedValue({
+      data: {
+        code: 0,
+        data: { token: 'new-token', refreshToken: 'new-refresh-token' },
+      },
+    } as any);
+    mockAxiosInstance.request.mockResolvedValue({ data: { code: 0 } });
+
+    await import('./api');
+    const responseInterceptor = mockAxiosInstance.interceptors.response.use.mock.calls[0][1];
+    const requestConfig = { url: '/auth/me/resources', headers: {} };
+    const result = await responseInterceptor({
+      response: { status: 401 },
+      config: requestConfig,
+    });
+
+    expect(result).toEqual({ data: { code: 0 } });
+    expect(axios.post).toHaveBeenCalledWith('/api/auth/refresh',
+      { refreshToken: 'refresh-token' },
+      { timeout: 10000 });
+    expect(mockAxiosInstance.request).toHaveBeenCalledWith(expect.objectContaining({
+      _authRetry: true,
+      headers: expect.objectContaining({ Authorization: 'Bearer new-token' }),
+    }));
+    expect(localStorage.getItem('auth_token')).toBe('new-token');
   });
 });

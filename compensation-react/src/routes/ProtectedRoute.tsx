@@ -13,7 +13,7 @@ type Props = {
 export const ProtectedRoute: React.FC<Props> = ({ children }) => {
   const location = useLocation();
   const isAuthenticated = useSelector((s: RootState) => Boolean(s.auth.user));
-  const { data: meRes, isLoading, isFetching, isError } = useMeResourcesQuery({
+  const { data: meRes, isLoading, isFetching, isError, error } = useMeResourcesQuery({
     enabled: isAuthenticated,
   });
 
@@ -24,6 +24,13 @@ export const ProtectedRoute: React.FC<Props> = ({ children }) => {
     return <Loading />;
   }
   if (isError) {
+    const httpStatus = (error as { response?: { status?: number } } | null)?.response?.status;
+    if (httpStatus === 401) {
+      return <Navigate to="/login" replace state={{ from: location }} />;
+    }
+    if (httpStatus === 403) {
+      return <Navigate to="/403" replace state={{ from: location }} />;
+    }
     return <Navigate to="/500" replace />;
   }
   // Resource-based guard: if resources provided, ensure current path is allowed

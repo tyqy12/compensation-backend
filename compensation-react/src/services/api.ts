@@ -2,6 +2,7 @@ import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosError } f
 import { toMessage } from '@utils/error';
 import { notifyApiError } from '@services/errors';
 import { redirectToLogin } from '@services/navigation';
+import { setSession, store } from '@services/stores/authSlice';
 
 // Base URL: dev 环境默认走 Vite 代理 '/api'，生产从环境变量读取
 const ENV = (import.meta as any)?.env || {};
@@ -49,7 +50,47 @@ function isAuthEndpoint(config?: AxiosRequestConfig) {
     '/auth/login',
     '/auth/refresh',
     '/auth/oauth/callback',
+    '/auth/logout',
   ].some((path) => url.includes(path));
+}
+
+type RetriableRequestConfig = AxiosRequestConfig & { _authRetry?: boolean };
+
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = store.getState().auth.refreshToken;
+  if (!refreshToken) {
+    return null;
+  }
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+
+  const refreshUrl = `${BASE_URL.replace(/\/$/, '')}/auth/refresh`;
+  refreshPromise = axios.post(refreshUrl, { refreshToken }, { timeout: 10000 })
+    .then((response) => {
+      const body = response.data as ApiResponse<{
+        accessToken?: string;
+        token?: string;
+        refreshToken?: string;
+      }>;
+      const data = body?.data;
+      const accessToken = data?.accessToken ?? data?.token;
+      if (body?.code !== 0 || !accessToken) {
+        return null;
+      }
+      store.dispatch(setSession({
+        accessToken,
+        refreshToken: data.refreshToken ?? refreshToken,
+      }));
+      return accessToken;
+    })
+    .catch(() => null)
+    .finally(() => {
+      refreshPromise = null;
+    });
+  return refreshPromise;
 }
 
 // Attach Authorization header from store/localStorage
@@ -62,13 +103,23 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// On 401, clear token, notify, and redirect to login
+// On 401, refresh the access token once before clearing the session.
 api.interceptors.response.use(
   (res) => res,
   async (error: AxiosError) => {
     const status = error.response?.status;
     if (status === 401) {
-      if (isAuthEndpoint(error.config)) {
+      const requestConfig = error.config as RetriableRequestConfig | undefined;
+      if (!isAuthEndpoint(requestConfig) && !requestConfig?._authRetry) {
+        const accessToken = await refreshAccessToken();
+        if (accessToken && requestConfig) {
+          requestConfig._authRetry = true;
+          requestConfig.headers = requestConfig.headers ?? {};
+          (requestConfig.headers as any).Authorization = `Bearer ${accessToken}`;
+          return api.request(requestConfig);
+        }
+      }
+      if (isAuthEndpoint(requestConfig)) {
         return Promise.reject(error);
       }
       try {

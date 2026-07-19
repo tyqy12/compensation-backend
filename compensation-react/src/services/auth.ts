@@ -11,7 +11,12 @@ export async function loginApi(payload: LoginRequest): Promise<LoginResponse> {
 
 export async function refreshApi(refreshToken: string): Promise<RefreshResponse> {
   const { data } = await api.post('/auth/refresh', { refreshToken });
-  return unwrap<RefreshResponse>(data);
+  const response = unwrap<{ accessToken?: string; token?: string; refreshToken?: string }>(data);
+  const accessToken = response.accessToken ?? response.token;
+  if (!accessToken) {
+    throw new Error('刷新令牌响应缺少访问令牌');
+  }
+  return { accessToken, refreshToken: response.refreshToken };
 }
 
 export async function logoutApi(): Promise<void> {

@@ -268,6 +268,22 @@ describe('ProtectedRoute', () => {
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
   });
 
+  it('权限接口明确返回 403 时跳转到无权限页，而不是系统错误页', async () => {
+    mockGetMeResources.mockRejectedValue({ response: { status: 403 } });
+    store.dispatch(login({ id: '1', username: 'testuser', roles: ['USER'] }));
+
+    render(
+      <TestWrapper>
+        <ProtectedRoute>
+          <div>Protected Content</div>
+        </ProtectedRoute>
+      </TestWrapper>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('navigate')).toHaveAttribute('data-to', '/403'));
+    expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
+  });
+
   it('管理员在资源尚未初始化时也必须拒绝访问', async () => {
     mockGetMeResources.mockResolvedValue({
       permissionVersion: 1,

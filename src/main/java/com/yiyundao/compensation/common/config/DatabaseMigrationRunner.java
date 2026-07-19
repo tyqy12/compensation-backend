@@ -435,6 +435,7 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         retireLegacyPayrollContent();
         migrateFrontendRouteResources();
         migrateDatabaseDrivenPermissions();
+        migrateDatabaseDrivenPermissionsV2();
         // Approval workflow incremental columns
         migrateApprovalWorkflowColumns();
         migrateApprovalFlowConfigs();
@@ -1826,6 +1827,59 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
         }
     }
 
+    /**
+     * 修复首次权限迁移遗漏的系统自助接口授权。
+     *
+     * <p>旧版本只从 sys_role_resource 回填业务资源授权，而 /auth/me/** 是新建的系统 API，
+     * 因此在已有迁移标记的数据库中可能没有任何角色-资源-操作记录。该版本只补齐缺失的
+     * read 授权；已有显式 DENY 或管理员已经配置过的记录不被覆盖。</p>
+     */
+    private void migrateDatabaseDrivenPermissionsV2() {
+        if (databaseMigrationMarkerExists("rbac.database.permission.migrated.v2")) {
+            return;
+        }
+
+        try {
+            Long resourceId = policyResourceId("rbac.user.auth.me");
+            Long readActionId = jdbcTemplate.queryForObject(
+                    "SELECT id FROM sys_permission_action WHERE code='read' AND status='enabled' AND deleted=0",
+                    Long.class);
+            if (resourceId == null || readActionId == null) {
+                log.error("RBAC v2 migration cannot find auth resource or read action: resourceId={}, actionId={}",
+                        resourceId, readActionId);
+                return;
+            }
+
+            ensureResourceActions(resourceId, List.of(readActionId));
+            List<Long> roleIds = jdbcTemplate.query(
+                    "SELECT id FROM sys_role WHERE status='enabled' AND deleted=0",
+                    (rs, rowNum) -> rs.getLong(1));
+            for (Long roleId : roleIds) {
+                ensureRolePermissionIfMissing(roleId, resourceId, readActionId);
+            }
+            markDatabaseMigrationComplete("rbac.database.permission.migrated.v2",
+                    "数据库驱动权限 v2 修复已完成");
+            log.info("RBAC v2 migration completed: authResourceId={}, readActionId={}, roleCount={}",
+                    resourceId, readActionId, roleIds.size());
+        } catch (Exception e) {
+            log.error("RBAC v2 migration failed; the marker will remain unset for retry", e);
+        }
+    }
+
+    private void ensureRolePermissionIfMissing(Long roleId, Long resourceId, Long actionId) {
+        Integer existing = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM sys_role_permission WHERE role_id=? AND resource_id=? AND action_id=?",
+                Integer.class, roleId, resourceId, actionId);
+        if (existing != null && existing > 0) {
+            return;
+        }
+        jdbcTemplate.update("INSERT INTO sys_role_permission " +
+                        "(role_id,resource_id,action_id,effect,scope_json,status,create_time,update_time,create_by,update_by,deleted,version) " +
+                        "VALUES (?, ?, ?, 'ALLOW', '{\"mode\":\"ALL\"}', 'enabled', NOW(), NOW(), " +
+                        "'rbac_migration_v2', 'rbac_migration_v2', 0, 0)",
+                roleId, resourceId, actionId);
+    }
+
     private void seedPermissionAction(String code, String name, String description, String methods,
                                        String authority, int orderNum) {
         jdbcTemplate.update("INSERT INTO sys_permission_action " +
@@ -2017,10 +2071,14 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
     }
 
     private boolean permissionMigrationMarkerExists() {
+        return databaseMigrationMarkerExists("rbac.database.permission.migrated");
+    }
+
+    private boolean databaseMigrationMarkerExists(String key) {
         try {
             Integer count = jdbcTemplate.queryForObject(
-                    "SELECT COUNT(*) FROM sys_config WHERE config_key='rbac.database.permission.migrated' AND deleted=0",
-                    Integer.class);
+                    "SELECT COUNT(*) FROM sys_config WHERE config_key=? AND deleted=0",
+                    Integer.class, key);
             return count != null && count > 0;
         } catch (Exception e) {
             return false;
@@ -2049,11 +2107,16 @@ public class DatabaseMigrationRunner implements ApplicationRunner {
     }
 
     private void markPermissionMigrationComplete() {
+        markDatabaseMigrationComplete("rbac.database.permission.migrated",
+                "数据库驱动权限目录已完成迁移");
+    }
+
+    private void markDatabaseMigrationComplete(String key, String description) {
         int updated = executeSqlSafely("UPDATE sys_config SET config_value='true', config_type='boolean', " +
-                "update_by='rbac_migration', update_time=NOW() WHERE config_key='rbac.database.permission.migrated' AND deleted=0");
+                "update_by='rbac_migration', update_time=NOW() WHERE config_key=" + sqlLiteral(key) + " AND deleted=0");
         if (updated == 0) {
             executeSqlSafely("INSERT INTO sys_config (config_key,config_value,config_type,config_desc,create_time,update_time,create_by,update_by,deleted,version) " +
-                    "VALUES ('rbac.database.permission.migrated','true','boolean','数据库驱动权限目录已完成迁移',NOW(),NOW(),'rbac_migration','rbac_migration',0,0)");
+                    "VALUES (" + sqlLiteral(key) + ",'true','boolean'," + sqlLiteral(description) + ",NOW(),NOW(),'rbac_migration','rbac_migration',0,0)");
         }
     }
 
